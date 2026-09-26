@@ -28,6 +28,8 @@ def analyze(paths, *, source_override=None, window_minutes=60,
             max_incidents=10, backbone=None, intel_store=None,
             max_digest_lines=400, run_agents=True, use_llm=True):
     """Run the pipeline (and, by default, the agent swarm). Returns a result dict."""
+    import time
+    _t0 = time.perf_counter()
     events = ingest_paths(paths, source_override)
     ingested = len(events)
 
@@ -61,11 +63,17 @@ def analyze(paths, *, source_override=None, window_minutes=60,
             "events": [e.to_dict() for e in inc.events],
         })
 
+    _t_story = time.perf_counter()
+    story_ms = int((_t_story - _t0) * 1000)
+
     swarm = None
+    _t_swarm0 = time.perf_counter()
     if run_agents:
         swarm = run_swarm(events, incidents, iocs, digest,
                           intel_store=intel_store, backbone=backbone,
                           use_llm=use_llm)
+    swarm_ms = int((time.perf_counter() - _t_swarm0) * 1000)
+    total_ms = int((time.perf_counter() - _t0) * 1000)
 
     return {
         "meta": {
@@ -78,6 +86,12 @@ def analyze(paths, *, source_override=None, window_minutes=60,
             "window_minutes": window_minutes,
             "author": provenance.AUTHOR,
             "watermark": provenance.WATERMARK,
+            "timing_ms": {
+                "storyline": story_ms,
+                "swarm": swarm_ms,
+                "total": total_ms,
+            },
+            "agents_deployed": (swarm["agent_count"] if swarm else 0),
         },
         "incidents": incident_blocks,
         "iocs": iocs,

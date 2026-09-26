@@ -6,63 +6,87 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="author" content="Harikishore Karunanithi" />
-  <title>BlueCell — Blue-Team Dashboard</title>
+  <title>BlueCell — Threat Intelligence Command Deck</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <header class="topbar">
+  <canvas id="bg"></canvas>
+  <div class="scanlines"></div>
+
+  <header class="topbar glass">
     <div class="brand">
       <span class="logo">◆</span>
       <div>
-        <h1>BlueCell</h1>
-        <p class="tag">Blue-Team Log Intelligence</p>
+        <h1>BLUECELL</h1>
+        <p class="tag">THREAT INTELLIGENCE · COMMAND DECK</p>
       </div>
     </div>
     <div class="head-right">
       <span id="backbone" class="pill">backbone: …</span>
-      <button id="refresh" class="btn">↻ Re-analyze</button>
+      <span id="live" class="pill live">● LIVE</span>
+      <button id="refresh" class="btn">⟲ RE-ANALYZE</button>
     </div>
   </header>
 
-  <div id="author-bar" class="author-bar">
-    Built by <strong>Harikishore Karunanithi</strong> · © 2026 · MIT (attribution required)
+  <div class="author-bar">
+    ENGINEERED BY <strong>HARIKISHORE KARUNANITHI</strong> · © 2026 · MIT (ATTRIBUTION REQUIRED)
   </div>
 
   <main id="app">
-    <section class="cards" id="stat-cards"></section>
+    <!-- HERO METRICS -->
+    <section class="hero" id="hero"></section>
 
-    <section class="grid">
-      <div class="panel span-2">
-        <h2>Incidents</h2>
+    <!-- RCA PINPOINTER -->
+    <section class="panel glass pinpointer" id="pinpointer-panel">
+      <div class="panel-head"><h2>◎ RCA PINPOINTER</h2><span class="sub">root-cause target lock</span></div>
+      <div id="pinpointer" class="pin-body"></div>
+    </section>
+
+    <!-- 3D LAYERED STORYLINE -->
+    <section class="panel glass">
+      <div class="panel-head"><h2>⧉ ATTACK STORYLINE · 3D KILL-CHAIN</h2><span class="sub" id="story-sub"></span></div>
+      <div class="stage-wrap">
+        <div id="stage" class="stage"></div>
+      </div>
+    </section>
+
+    <div class="grid">
+      <!-- SWARM ORBIT -->
+      <section class="panel glass span-2">
+        <div class="panel-head"><h2>✦ AGENT SWARM · CONSTELLATION</h2><span class="sub" id="swarm-sub"></span></div>
+        <div class="swarm-wrap">
+          <div id="orbit" class="orbit"></div>
+          <div id="swarm-side" class="swarm-side"></div>
+        </div>
+      </section>
+      <!-- INCIDENTS -->
+      <section class="panel glass">
+        <div class="panel-head"><h2>▣ INCIDENTS</h2></div>
         <div id="incidents" class="incidents"></div>
-      </div>
-      <div class="panel">
-        <h2>Agent Swarm</h2>
-        <div id="swarm"></div>
-      </div>
-    </section>
+      </section>
+    </div>
 
-    <section class="grid">
-      <div class="panel">
-        <h2>Indicators of Compromise</h2>
+    <div class="grid">
+      <section class="panel glass">
+        <div class="panel-head"><h2>⬡ INDICATORS OF COMPROMISE</h2></div>
         <div id="iocs"></div>
-      </div>
-      <div class="panel span-2">
-        <h2>Threat-Hunt Checklist</h2>
+      </section>
+      <section class="panel glass span-2">
+        <div class="panel-head"><h2>◈ THREAT-HUNT CHECKLIST</h2></div>
         <div id="hunt"></div>
-      </div>
-    </section>
+      </section>
+    </div>
 
-    <section class="panel">
-      <h2>Threat Intel Referenced</h2>
+    <section class="panel glass">
+      <div class="panel-head"><h2>⌬ THREAT INTEL REFERENCED</h2></div>
       <div id="intel"></div>
     </section>
   </main>
 
   <footer class="foot">
     <!-- BLUECELL::AUTHOR::Harikishore-Karunanithi -->
-    BlueCell — built by <strong>Harikishore Karunanithi</strong>.
-    Licensed under MIT; attribution required. <span id="ver"></span>
+    BLUECELL — ENGINEERED BY <strong>HARIKISHORE KARUNANITHI</strong> ·
+    MIT; ATTRIBUTION REQUIRED · <span id="ver"></span>
   </footer>
 
   <div id="toast" class="toast hidden"></div>
