@@ -5,6 +5,7 @@
 
 Commands:
   analyze   Run the full pipeline + agent swarm and write a report.
+  serve     Launch the local web dashboard.
   intel     Manage the threat-intel knowledge base (add / import / stats / search).
   roster    Show the blue-team agent swarm roster.
   info      Show environment + backbone availability + authorship.
@@ -94,6 +95,18 @@ def cmd_intel(args) -> int:
     return 0
 
 
+def cmd_serve(args) -> int:
+    for p in args.paths:
+        if not os.path.exists(p):
+            print(f"[bluecell] path not found: {p}", file=sys.stderr)
+            return 2
+    from .web import serve
+    serve(args.paths, host=args.host, port=args.port, window=args.window,
+          llm_mode=args.llm, model=args.model, intel_db=args.intel_db,
+          open_browser=args.open)
+    return 0
+
+
 def cmd_roster(args) -> int:
     # Build a static roster preview from the role classes.
     from .agents.roles import SPECIALISTS
@@ -173,6 +186,18 @@ def build_parser() -> argparse.ArgumentParser:
     isr.add_argument("terms")
     isr.add_argument("--limit", type=int, default=10)
     it.set_defaults(func=cmd_intel)
+
+    sv = sub.add_parser("serve", help="Launch the local web dashboard")
+    sv.add_argument("paths", nargs="+", help="Log files or directories to analyze")
+    sv.add_argument("--host", default="127.0.0.1", help="Bind host (default 127.0.0.1)")
+    sv.add_argument("--port", type=int, default=8787, help="Port (default 8787)")
+    sv.add_argument("--window", type=int, default=60, help="Correlation window minutes")
+    sv.add_argument("--llm", choices=["auto", "cli", "api", "off"], default="off",
+                    help="LLM backbone for RCA/agents (default off for speed)")
+    sv.add_argument("--model", default="claude-sonnet-5")
+    sv.add_argument("--intel-db", dest="intel_db", help="Path to intel JSON store")
+    sv.add_argument("--open", action="store_true", help="Open the browser automatically")
+    sv.set_defaults(func=cmd_serve)
 
     ro = sub.add_parser("roster", help="Show the blue-team agent swarm roster")
     ro.set_defaults(func=cmd_roster)

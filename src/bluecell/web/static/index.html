@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<!-- BlueCell dashboard — WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+     Built by Harikishore Karunanithi. MIT — attribution required. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="author" content="Harikishore Karunanithi" />
+  <title>BlueCell — Blue-Team Dashboard</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">◆</span>
+      <div>
+        <h1>BlueCell</h1>
+        <p class="tag">Blue-Team Log Intelligence</p>
+      </div>
+    </div>
+    <div class="head-right">
+      <span id="backbone" class="pill">backbone: …</span>
+      <button id="refresh" class="btn">↻ Re-analyze</button>
+    </div>
+  </header>
+
+  <div id="author-bar" class="author-bar">
+    Built by <strong>Harikishore Karunanithi</strong> · © 2026 · MIT (attribution required)
+  </div>
+
+  <main id="app">
+    <section class="cards" id="stat-cards"></section>
+
+    <section class="grid">
+      <div class="panel span-2">
+        <h2>Incidents</h2>
+        <div id="incidents" class="incidents"></div>
+      </div>
+      <div class="panel">
+        <h2>Agent Swarm</h2>
+        <div id="swarm"></div>
+      </div>
+    </section>
+
+    <section class="grid">
+      <div class="panel">
+        <h2>Indicators of Compromise</h2>
+        <div id="iocs"></div>
+      </div>
+      <div class="panel span-2">
+        <h2>Threat-Hunt Checklist</h2>
+        <div id="hunt"></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Threat Intel Referenced</h2>
+      <div id="intel"></div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <!-- BLUECELL::AUTHOR::Harikishore-Karunanithi -->
+    BlueCell — built by <strong>Harikishore Karunanithi</strong>.
+    Licensed under MIT; attribution required. <span id="ver"></span>
+  </footer>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="app.js"></script>
+</body>
+</html>
