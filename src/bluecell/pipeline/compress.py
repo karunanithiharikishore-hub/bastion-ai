@@ -1,3 +1,6 @@
+# BlueCell - Blue-Team Log Intelligence
+# Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
+# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
 """Token-efficient compression for the LLM stage.
 
 Raw logs are never sent to the model. Instead we:

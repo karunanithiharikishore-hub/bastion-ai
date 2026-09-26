@@ -1,3 +1,6 @@
+# BlueCell - Blue-Team Log Intelligence
+# Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
+# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
 """Hybrid Claude backbone.
 
 Two execution paths, selected automatically (override with mode=):

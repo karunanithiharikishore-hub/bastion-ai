@@ -1,3 +1,6 @@
+# BlueCell - Blue-Team Log Intelligence
+# Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
+# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
 """Local threat-intel store — the "always-current" knowledge layer.
 
 This is the honest version of "self-learning": the *model* is never retrained,

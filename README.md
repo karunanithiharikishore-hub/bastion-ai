@@ -1,5 +1,8 @@
 # BlueCell — Blue-Team Log Intelligence
 
+> **Built by Harikishore Karunanithi** · Copyright (c) 2026 Harikishore Karunanithi · MIT (use and share freely, but keep the author attribution).
+> <!-- WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi -->
+
 BlueCell is a **read-only** multi-agent pipeline that turns raw security logs
 into an investigation. Point it at logs from any source — EDR/endpoint, syslog,
 DNS, firewall/router/switch, and cloud audit trails — and it will:
@@ -16,6 +19,32 @@ DNS, firewall/router/switch, and cloud audit trails — and it will:
 > BlueCell is an analysis aid. It never touches your environment, sends nothing
 > externally except optional NVD intel fetches and optional Claude API calls,
 > and treats every finding as a hypothesis to validate — not proof.
+
+## The agent swarm (true multi-agent model)
+
+BlueCell runs a swarm of specialist blue-team agents, not a single script. Each
+agent has a deterministic brain (always runs, offline) plus optional Claude
+enrichment:
+
+- **Tier 1 — Junior SOC Analysts:** one per log source, triage and raise candidates.
+- **Tier 2 — Senior SOC Analysts:** verify/confirm or dismiss Tier-1 candidates
+  (cross-source corroboration = confirmation).
+- **Tier 3 — Specialists:** Incident Responder, Digital Forensics Analyst,
+  Threat Hunter, Malware Analyst, Threat Intelligence Analyst,
+  Security Engineer/Architect, Vulnerability Analyst.
+
+An orchestrator fans work out across tiers and reconciles everything into a
+per-incident **consensus** (which agents agreed, confirmation status, confidence).
+See the roster any time: `bluecell roster`.
+
+## Authorship & integrity
+
+Built by **Harikishore Karunanithi**. Licensed MIT — you may use and share it,
+but you must keep the author attribution. Every source file carries a watermark
+header, and `provenance.py` runs an integrity check at startup: if the
+attribution is removed or altered, BlueCell **halts** (exit 3) and prints where
+the watermark lives so it can be restored. This detects casual rebranding; it is
+not unbreakable DRM — the enforceable protection is the MIT license + copyright.
 
 ## Why it's different
 

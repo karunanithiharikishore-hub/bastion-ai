@@ -1,3 +1,6 @@
+# BlueCell - Blue-Team Log Intelligence
+# Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
+# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
 """Unified event schema (OCSF-inspired, intentionally compact).
 
 Raw logs are heavy and token-expensive. Every source is mapped into a single

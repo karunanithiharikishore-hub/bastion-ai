@@ -1,8 +1,12 @@
-"""Orchestrator — runs the full Blue-Team pipeline end to end.
+# BlueCell - Blue-Team Log Intelligence
+# Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
+# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+"""Orchestrator — runs the full Blue-Team pipeline end to end, then hands the
+result to the agent swarm.
 
-This is the "coordinator agent" that sequences the specialist stages:
-ingest -> normalize -> ATT&CK map -> compress -> correlate -> intel RAG ->
-RCA storyline -> IOC + threat-hunt checklist.
+Stages: ingest -> normalize -> ATT&CK map -> compress -> correlate -> intel RAG
+-> RCA storyline -> IOC + threat-hunt checklist -> agent swarm (tiered SOC +
+specialists that verify and reconcile).
 """
 from __future__ import annotations
 
@@ -16,12 +20,14 @@ from .pipeline.compress import token_estimate
 from .pipeline.ioc import hunt_checklist
 from .report.rca import build_storyline
 from .intel import IntelStore
+from .agents import run_swarm
+from . import provenance
 
 
 def analyze(paths, *, source_override=None, window_minutes=60,
             max_incidents=10, backbone=None, intel_store=None,
-            max_digest_lines=400):
-    """Run the pipeline and return a structured result dict."""
+            max_digest_lines=400, run_agents=True, use_llm=True):
+    """Run the pipeline (and, by default, the agent swarm). Returns a result dict."""
     events = ingest_paths(paths, source_override)
     ingested = len(events)
 
@@ -55,6 +61,12 @@ def analyze(paths, *, source_override=None, window_minutes=60,
             "events": [e.to_dict() for e in inc.events],
         })
 
+    swarm = None
+    if run_agents:
+        swarm = run_swarm(events, incidents, iocs, digest,
+                          intel_store=intel_store, backbone=backbone,
+                          use_llm=use_llm)
+
     return {
         "meta": {
             "generated": datetime.now(timezone.utc).isoformat(),
@@ -64,9 +76,12 @@ def analyze(paths, *, source_override=None, window_minutes=60,
             "backbone": (backbone.resolved if backbone else "none (deterministic)"),
             "digest_tokens": token_estimate(digest),
             "window_minutes": window_minutes,
+            "author": provenance.AUTHOR,
+            "watermark": provenance.WATERMARK,
         },
         "incidents": incident_blocks,
         "iocs": iocs,
         "hunt_checklist": checklist,
         "intel_used": intel_used,
+        "swarm": swarm,
     }

@@ -1,0 +1,18 @@
+BlueCell — Blue-Team Log Intelligence
+WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+
+Copyright (c) 2026 Harikishore Karunanithi
+All original authorship of this project belongs to Harikishore Karunanithi.
+
+This software is licensed under the MIT License (see LICENSE). You are free to
+use, copy, modify, and redistribute it, INCLUDING in commercial and closed
+products, ON THE CONDITION that this copyright notice and author attribution
+are retained in all copies or substantial portions of the software.
+
+Removing or altering the author attribution violates the license terms and,
+in this project, also triggers the built-in integrity check
+(src/bluecell/provenance.py), which halts the program until attribution is
+restored.
+
+Author: Harikishore Karunanithi
+Project: BlueCell

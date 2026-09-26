@@ -1,7 +1,12 @@
+# BlueCell - Blue-Team Log Intelligence
+# Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
+# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
 """Render analysis results to Markdown or JSON."""
 from __future__ import annotations
 
 import json
+
+from .. import provenance
 
 
 def render_json(result: dict) -> str:
@@ -18,6 +23,9 @@ def render_markdown(result: dict) -> str:
     lines = [
         "# BlueCell — Incident Analysis Report",
         "",
+        f"> Built by **{meta.get('author', provenance.AUTHOR)}** · "
+        f"{provenance.COPYRIGHT}",
+        "",
         f"- Generated: {meta['generated']}",
         f"- Events ingested: **{meta['events_ingested']}** "
         f"(distinct after normalize: {meta['events_normalized']})",
@@ -27,8 +35,23 @@ def render_markdown(result: dict) -> str:
         "",
     ]
 
+    # Agent swarm summary (if the swarm ran).
+    swarm = result.get("swarm")
+    if swarm:
+        c = swarm["counts"]
+        lines += [
+            f"- Agent swarm: **{swarm['agent_count']} agents** "
+            f"(T1:{c['tier1_findings']} findings, T2:{c['tier2_findings']} verifications, "
+            f"T3:{c['tier3_findings']} specialist findings, "
+            f"{c['confirmed_incidents']} confirmed)",
+            "",
+        ]
+
     if not result["incidents"]:
         lines.append("_No correlated incidents crossed the reporting threshold._")
+        if swarm:
+            lines += ["", _render_swarm(swarm)]
+        lines += ["", "---", _footer()]
         return "\n".join(lines)
 
     lines.append("## Incidents (highest risk first)\n")
@@ -86,7 +109,45 @@ def render_markdown(result: dict) -> str:
             lines.append(f"- {e.get('id')}: {e.get('title')} (sev {e.get('severity','?')}, src {e.get('source','?')})")
         lines.append("")
 
+    # Agent swarm detail.
+    if swarm:
+        lines.append(_render_swarm(swarm))
+
     lines.append("---")
     lines.append("_BlueCell is a read-only analysis aid. Validate all findings "
                  "before acting. IOCs and RCA are hypotheses, not proof._")
+    lines.append(_footer())
     return "\n".join(lines)
+
+
+def _footer() -> str:
+    return (f"\n<!-- {provenance.WATERMARK} -->\n"
+            f"_BlueCell — built by {provenance.AUTHOR}. "
+            f"{provenance.COPYRIGHT}_")
+
+
+def _render_swarm(swarm: dict) -> str:
+    out = ["## Agent Swarm — findings & consensus\n"]
+    out.append(f"**Roster ({swarm['agent_count']} agents):**")
+    for a in swarm["roster"]:
+        out.append(f"- T{a['tier']} `{a['name']}` — {a['role']}")
+    out.append("")
+    out.append("**Per-incident consensus:**")
+    for con in swarm["consensus"]:
+        out.append(
+            f"- {con['incident_id']} — {con['severity'].upper()} "
+            f"(score {con['score']}/100) · "
+            f"{'✅ CONFIRMED by Tier-2' if con['confirmed_by_tier2'] else '⏳ not corroborated'} · "
+            f"{con['agents_involved']} agents, tiers {con['tiers_involved']}, "
+            f"consensus confidence {con['consensus_confidence']}")
+    out.append("")
+    # Tier-3 specialist recommendations are the actionable output.
+    t3 = [f for f in swarm["findings"] if f["tier"] == 3]
+    if t3:
+        out.append("**Specialist findings (Tier-3):**")
+        for f in t3:
+            out.append(f"- [{f['severity'].upper()}] _{f['role']}_: **{f['title']}**")
+            if f.get("recommended_action"):
+                out.append(f"    - action: {f['recommended_action']}")
+        out.append("")
+    return "\n".join(out)

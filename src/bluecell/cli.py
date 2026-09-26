@@ -1,9 +1,13 @@
+# BlueCell - Blue-Team Log Intelligence
+# Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
+# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
 """BlueCell command-line interface.
 
 Commands:
-  analyze   Run the full pipeline over log files/dirs and write a report.
+  analyze   Run the full pipeline + agent swarm and write a report.
   intel     Manage the threat-intel knowledge base (add / import / stats / search).
-  info      Show environment + backbone availability.
+  roster    Show the blue-team agent swarm roster.
+  info      Show environment + backbone availability + authorship.
 """
 from __future__ import annotations
 
@@ -12,7 +16,7 @@ import json
 import os
 import sys
 
-from . import __version__
+from . import __version__, provenance
 from .analyzer import analyze
 from .intel import IntelStore
 from .llm import LLMBackbone, BackboneUnavailable
@@ -44,6 +48,8 @@ def cmd_analyze(args) -> int:
         max_incidents=args.max_incidents,
         backbone=backbone,
         intel_store=intel,
+        run_agents=not args.no_agents,
+        use_llm=(args.llm != "off"),
     )
     output = render_json(result) if args.format == "json" else render_markdown(result)
     if args.output:
@@ -88,9 +94,28 @@ def cmd_intel(args) -> int:
     return 0
 
 
+def cmd_roster(args) -> int:
+    # Build a static roster preview from the role classes.
+    from .agents.roles import SPECIALISTS
+    rows = [
+        ("1", "soc1-<source>", "Tier-1 SOC Analyst (one per log source)"),
+        ("2", "soc2-lead", "Tier-2 SOC Analyst (verification/confirmation)"),
+    ]
+    for cls in SPECIALISTS:
+        rows.append(("3", cls().name, cls.role))
+    print(provenance.banner())
+    print("\nBlue-team agent swarm roster:")
+    for tier, name, role in rows:
+        print(f"  [T{tier}] {name:<28} {role}")
+    return 0
+
+
 def cmd_info(args) -> int:
     info = {
         "version": __version__,
+        "author": provenance.AUTHOR,
+        "watermark": provenance.WATERMARK,
+        "integrity": ("ok" if provenance.verify_integrity()[0] else "TAMPERED"),
         "python": sys.version.split()[0],
         "cli_backbone_available": LLMBackbone.available("cli"),
         "api_backbone_available": LLMBackbone.available("api"),
@@ -122,6 +147,8 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--window", type=int, default=60,
                    help="Correlation window in minutes (default 60)")
     a.add_argument("--max-incidents", type=int, default=10, dest="max_incidents")
+    a.add_argument("--no-agents", action="store_true", dest="no_agents",
+                   help="Skip the agent swarm (pipeline only)")
     a.add_argument("--llm", choices=["auto", "cli", "api", "off"], default="auto",
                    help="LLM backbone mode (default auto; 'off' = deterministic)")
     a.add_argument("--model", default="claude-sonnet-5", help="Claude model")
@@ -147,6 +174,9 @@ def build_parser() -> argparse.ArgumentParser:
     isr.add_argument("--limit", type=int, default=10)
     it.set_defaults(func=cmd_intel)
 
+    ro = sub.add_parser("roster", help="Show the blue-team agent swarm roster")
+    ro.set_defaults(func=cmd_roster)
+
     inf = sub.add_parser("info", help="Show environment + backbone status")
     inf.set_defaults(func=cmd_info)
 
@@ -154,6 +184,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> int:
+    # Authorship integrity gate: halts if attribution was removed/altered.
+    provenance.enforce(strict=True)
     parser = build_parser()
     args = parser.parse_args(argv)
     return args.func(args)

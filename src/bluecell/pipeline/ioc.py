@@ -1,3 +1,6 @@
+# BlueCell - Blue-Team Log Intelligence
+# Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
+# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
 """IOC extraction and threat-hunt checklist generation."""
 from __future__ import annotations
 

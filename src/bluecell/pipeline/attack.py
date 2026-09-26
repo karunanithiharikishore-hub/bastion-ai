@@ -1,3 +1,6 @@
+# BlueCell - Blue-Team Log Intelligence
+# Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
+# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
 """Rule-based MITRE ATT&CK technique tagging.
 
 This is a deterministic first pass — a curated set of high-signal rules that map

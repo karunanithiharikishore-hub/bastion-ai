@@ -1,17 +1,28 @@
+# BlueCell - Blue-Team Log Intelligence
+# Author & Copyright: Harikishore Karunanithi
+# SPDX-License-Identifier: MIT  (use and share freely, but keep this attribution)
+# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
 """BlueCell — Blue-Team Log Intelligence.
 
-A local, read-only multi-agent pipeline that ingests security logs from many
+A local, read-only, multi-agent system that ingests security logs from many
 sources, normalizes them to a compact unified schema, correlates events across
-sources, maps activity to MITRE ATT&CK, reconstructs an incident storyline
-(RCA), and emits IOCs plus a prioritized threat-hunt checklist.
+sources, maps activity to MITRE ATT&CK, then runs a swarm of tiered blue-team
+agents (Junior/Senior SOC, Incident Responder, Forensics, Threat Hunter,
+Malware Analyst, Threat Intel, Security Engineer, Vulnerability Analyst) that
+verify and reconcile findings into an incident report with RCA storyline, IOCs,
+and a prioritized threat-hunt checklist.
 
-Design goals:
-- Deterministic core (parse -> normalize -> compress -> correlate -> map ->
-  IOC) that runs with the Python standard library only, so it works and is
-  fully testable with no network and no API key.
-- Optional LLM enrichment (narrative RCA storyline) via a hybrid backbone:
-  the local `claude` CLI (keyless) or the Anthropic API (keyed). If neither is
-  available the pipeline still produces a deterministic storyline.
+Built by Harikishore Karunanithi. Licensed under MIT — attribution required.
 """
+from . import provenance as _prov
 
-__version__ = "0.1.0"
+__author__ = _prov.AUTHOR
+__copyright__ = _prov.COPYRIGHT
+__license__ = "MIT"
+__version__ = "0.2.0"
+
+# Lightweight constant-level integrity check on import (no filesystem scan here;
+# the CLI performs the full repo scan + halt via provenance.enforce()).
+_ok, _reason = _prov.verify_integrity()
+if not _ok:  # pragma: no cover - only triggers when attribution is tampered
+    _prov._halt(_reason)
