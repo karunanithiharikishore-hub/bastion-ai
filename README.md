@@ -76,9 +76,26 @@ bluecell intel import feeds/intel_feed.json
 # 2. Analyze a folder of logs -> Markdown report
 bluecell analyze samples --window 120 -o report.md
 
-# 3. See environment + which Claude backbone is available
+# 3. Launch the web dashboard (opens at http://127.0.0.1:8787)
+bluecell serve samples --window 120 --open
+
+# 4. See environment + which Claude backbone is available
 bluecell info
 ```
+
+## Web dashboard
+
+```bash
+bluecell serve samples --window 120 --port 8787 --open
+# add --llm auto  to enable Claude-enriched RCA/agent notes
+```
+
+A dependency-free local dashboard (binds to `127.0.0.1`, read-only, GET-only):
+stat cards, incidents with score bars + ATT&CK phase chips + RCA storyline, the
+agent-swarm roster and per-incident consensus, specialist findings, IOC tables,
+a prioritized threat-hunt checklist, and matched threat intel. Click
+**Re-analyze** to re-run the pipeline + swarm. JSON API: `/api/report`,
+`/api/refresh`, `/api/meta`.
 
 Output is a full incident report: risk-scored incidents, RCA storyline, ATT&CK
 phases, IOCs, and a prioritized hunt checklist. Use `--format json` for machine
