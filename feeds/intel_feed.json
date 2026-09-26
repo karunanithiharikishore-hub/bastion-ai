@@ -1,0 +1,32 @@
+[
+  {
+    "id": "CVE-2026-12345",
+    "title": "OpenSSH pre-auth brute-force amplification",
+    "description": "Weak default rate limiting allows rapid password guessing over ssh brute force.",
+    "cvss": "7.5",
+    "keywords": ["ssh", "brute", "force", "password", "openssh"],
+    "techniques": ["T1110"],
+    "published": "2026-09-01",
+    "source": "nvd"
+  },
+  {
+    "id": "TTP-RANSOM-LOCKED",
+    "title": "Generic ransomware: shadow copy deletion + .locked extension",
+    "description": "Ransomware families use vssadmin delete shadows and rename files to .locked before demanding payment. Impact T1486, T1490.",
+    "severity": "critical",
+    "keywords": ["ransom", "locked", "vssadmin", "shadow", "encrypt"],
+    "techniques": ["T1486", "T1490"],
+    "published": "2026-08-15",
+    "source": "internal-ti"
+  },
+  {
+    "id": "TTP-CERTUTIL-DL",
+    "title": "certutil abused for ingress tool transfer",
+    "description": "certutil -urlcache used to download second-stage payloads. Technique T1105.",
+    "severity": "high",
+    "keywords": ["certutil", "download", "urlcache", "powershell"],
+    "techniques": ["T1105", "T1059.001"],
+    "published": "2026-07-20",
+    "source": "internal-ti"
+  }
+]

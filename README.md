@@ -1,0 +1,132 @@
+# BlueCell — Blue-Team Log Intelligence
+
+BlueCell is a **read-only** multi-agent pipeline that turns raw security logs
+into an investigation. Point it at logs from any source — EDR/endpoint, syslog,
+DNS, firewall/router/switch, and cloud audit trails — and it will:
+
+1. **Ingest** heterogeneous logs (JSON / JSONL / CSV / syslog).
+2. **Normalize** everything to one compact, OCSF-inspired event schema.
+3. **Compress** events into a token-lean digest (raw logs never hit the LLM).
+4. **Map** activity to **MITRE ATT&CK** techniques (deterministic, explainable).
+5. **Correlate** across sources on a timeline into scored **incidents**.
+6. **Enrich** with always-current **threat intel** (RAG over a local CVE/TTP store).
+7. **Reconstruct** the **RCA / attack storyline** (deterministic, optional LLM narrative).
+8. **Emit IOCs** and a prioritized **threat-hunt checklist**.
+
+> BlueCell is an analysis aid. It never touches your environment, sends nothing
+> externally except optional NVD intel fetches and optional Claude API calls,
+> and treats every finding as a hypothesis to validate — not proof.
+
+## Why it's different
+
+- **Cross-source correlation into one storyline**, not per-tool alerts.
+- **Token-efficient by design** — bursts collapse (`x500`), only distinct
+  signatures reach the model, so log-scale analysis stays affordable.
+- **Runs with zero dependencies and zero API key** — the entire core
+  (parse → correlate → ATT&CK → IOC → deterministic RCA) is stdlib-only.
+- **Always-current intel** via a local, auditable knowledge base you refresh on
+  a schedule. The model isn't retrained; the *evidence* stays fresh (RAG).
+
+## Install
+
+```bash
+cd bluecell
+pip install -e .            # installs the `bluecell` command
+# or run without installing:
+export PYTHONPATH=src && python -m bluecell --help
+```
+
+Python 3.10+. No third-party packages required for the core.
+
+## Quick start
+
+```bash
+# 1. Load threat intel (bundled sample, or your own CVE/TTP JSON)
+bluecell intel import feeds/intel_feed.json
+
+# 2. Analyze a folder of logs -> Markdown report
+bluecell analyze samples --window 120 -o report.md
+
+# 3. See environment + which Claude backbone is available
+bluecell info
+```
+
+Output is a full incident report: risk-scored incidents, RCA storyline, ATT&CK
+phases, IOCs, and a prioritized hunt checklist. Use `--format json` for machine
+output.
+
+## The hybrid Claude backbone
+
+The deterministic pipeline always runs. The **RCA narrative** is optionally
+enriched by Claude, via one of two paths (auto-selected):
+
+| Mode  | How | Best for |
+|-------|-----|----------|
+| `cli` | Shells out to your local `claude` CLI — **keyless** | Interactive local runs |
+| `api` | Anthropic API via `ANTHROPIC_API_KEY` | Headless / scheduled runs |
+
+```bash
+bluecell analyze samples --llm auto      # prefer CLI, then API, then deterministic
+bluecell analyze samples --llm off       # fully deterministic (no model)
+bluecell analyze samples --llm api --model claude-sonnet-5
+```
+
+If no backbone is available, BlueCell prints a notice and produces a complete
+deterministic storyline instead. It never fails for lack of a model.
+
+## Keeping intel current (the "self-learning" layer)
+
+```bash
+# Pull recent CVEs from the public NVD API into the local intel store
+python scripts/update_intel.py --days 3
+python scripts/update_intel.py --days 7 --keyword ransomware
+```
+
+Schedule it (cron / launchd / your scheduler) so every analysis retrieves the
+latest vulnerability and TTP context. Network failures are non-fatal.
+
+## Supported inputs & sources
+
+- **Formats:** `.json` (array or `{Records:[...]}`), `.jsonl`/`.ndjson`, `.csv`, `.log`/`.txt`/`.syslog`
+- **Sources:** `edr`/`endpoint`, `dns`, `network`/`firewall`/`router`/`switch`, `cloud`/`cloudtrail`, `auth`, `syslog`
+- Source type is auto-detected from a `source`/`log_type` field or the filename;
+  override with `--source`.
+
+## Layout
+
+```
+src/bluecell/
+  models.py            Unified Event schema + timestamp parsing
+  ingest/              Loaders + per-source parsers
+  pipeline/            normalize, compress, attack (ATT&CK), correlate, ioc
+  intel/               Local threat-intel store + RAG retrieval
+  llm/                 Hybrid Claude backbone (cli | api)
+  report/              RCA storyline + Markdown/JSON renderers
+  analyzer.py          End-to-end orchestrator
+  cli.py               Command-line interface
+scripts/update_intel.py  Scheduled NVD CVE ingester
+samples/                 Example multi-source attack chain
+feeds/                   Example threat-intel feed
+tests/                   Test suite (pytest)
+```
+
+## Testing
+
+```bash
+pip install pytest
+pytest -q
+```
+
+## Scope & limitations (read this)
+
+- **MVP scope:** Blue-team, read-only. Red/Purple/GRC are future phases planned
+  on the same correlation core.
+- The ATT&CK mapper is a curated **high-signal rule set**, not a full detection
+  engine. Tune the rules in `pipeline/attack.py` to your environment.
+- Correlation links events by shared entities within a time window; very noisy
+  environments may need a tighter `--window` and custom entity handling.
+- Findings are **hypotheses**. A human analyst validates before any action.
+
+## License
+
+MIT — see `LICENSE`.

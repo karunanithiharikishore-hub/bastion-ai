@@ -1,0 +1,21 @@
+{
+  "Records": [
+    {
+      "eventTime": "2026-09-26T09:10:20Z",
+      "eventSource": "iam.amazonaws.com",
+      "eventName": "CreateAccessKey",
+      "userIdentity": {"userName": "admin"},
+      "sourceIPAddress": "203.0.113.66",
+      "message": "New access key created for admin"
+    },
+    {
+      "eventTime": "2026-09-26T09:11:05Z",
+      "eventSource": "iam.amazonaws.com",
+      "eventName": "AttachUserPolicy",
+      "userIdentity": {"userName": "admin"},
+      "sourceIPAddress": "203.0.113.66",
+      "errorCode": "",
+      "message": "AdministratorAccess attached to admin"
+    }
+  ]
+}

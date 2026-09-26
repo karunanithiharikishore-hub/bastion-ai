@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bluecell"
+version = "0.1.0"
+description = "Blue-Team Log Intelligence — read-only multi-agent log analysis, ATT&CK mapping, RCA storyline, and IOC/threat-hunt generation."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "BlueCell" }]
+keywords = ["security", "blue-team", "siem", "mitre-attack", "dfir", "threat-hunting"]
+dependencies = []  # stdlib-only core
+
+[project.optional-dependencies]
+api = ["anthropic>=0.40"]  # optional; API path also works via stdlib urllib
+dev = ["pytest>=7"]
+
+[project.scripts]
+bluecell = "bluecell.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

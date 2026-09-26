@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+data/intel.json
+data/intel.json.tmp
+.venv/
+venv/
