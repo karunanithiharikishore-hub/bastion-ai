@@ -201,7 +201,17 @@ I built this to learn, and I'd rather be straight about where it helps:
 | 40 MB across dozens of files, hundreds of thousands of rows | **BlueCell** — you can't paste that; it distills + grounds it. |
 | You need repeatable, automated, comparable output across many cases | **BlueCell** |
 | You need a grounded answer that can't invent IOCs | **BlueCell** (grounding check) |
+| **A startup/SMB with no SOC or blue team** | **BlueCell** — a local first-pass triage + IR report to know *fast* whether to escalate to a DFIR firm. |
 | Maximum depth on a single incident | A skilled analyst reading raw logs (or Claude on the raw files) |
+
+### For teams with no security function
+
+Most early-stage companies can't tell whether a strange Microsoft 365 sign-in was
+an attack, and can't afford a SOC. BlueCell lets one engineer or an MSP export
+Entra / M365 logs, run it locally, and get a grounded verdict plus a shareable IR
+report. It is **triage and escalation support, not a replacement for professional
+incident response** — when it flags "likely malicious," you hand the report to a
+DFIR firm and find out in minutes, not weeks.
 
 The value here is the **engineering around the model** — ingestion, normalization,
 correlation, distillation, grounding, and repeatable reporting — not the

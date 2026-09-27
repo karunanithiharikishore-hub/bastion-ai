@@ -9,6 +9,25 @@
 > incident analysis — verdict, ATT&CK storyline, IOCs, and an IR report. The LLM
 > reasons; BlueCell ingests at scale and fact-checks the output so it can't invent IOCs.
 
+## Screenshots (paste into README)
+
+Capture the views below into `docs/screenshots/` (see that folder's README for
+names + how-to), then embed:
+
+```markdown
+## Screenshots
+
+| Drop logs & triage | Analyst verdict |
+|---|---|
+| ![Log intake](docs/screenshots/01-intake.png) | ![Verdict](docs/screenshots/02-verdict.png) |
+
+| Attack summary | 3D kill-chain storyline |
+|---|---|
+| ![Attack summary](docs/screenshots/03-summary.png) | ![Storyline](docs/screenshots/04-storyline.png) |
+
+![Agent swarm](docs/screenshots/05-swarm.png)
+```
+
 ## Website field
 (leave blank, or link your LinkedIn writeup / blog)
 
@@ -22,6 +41,21 @@ security-tools  python  log-analysis  bec  ir-report
 
 ## One-line tagline (for social preview / pinned)
 > Point an LLM at 40 MB of raw logs and get a grounded, repeatable incident report.
+
+## Who it's for (positioning)
+
+**For lean teams and startups with no SOC.** Most startups and SMBs have no blue
+team, no SIEM, and no way to tell whether that strange Microsoft 365 sign-in was
+an attack. BlueCell lets **one engineer, a founder, or an MSP** export their
+Entra / M365 logs, run it **locally**, and get a **grounded verdict + an IR
+report** — without standing up a SOC or pasting sensitive logs into a chatbot.
+
+Honest boundary (state it plainly): it is **triage and escalation support, not a
+replacement for professional incident response.** When it says *"likely
+malicious,"* you get a shareable report to hand to an external DFIR firm — you
+find out *fast* and *cheaply* that something needs a human, instead of finding
+out weeks later. For teams that already have a SOC, it's an automation/triage
+layer, not a new source of truth.
 
 ## Pinned "why this exists" blurb (optional, for profile README or post)
 > BlueCell started as a test: how close can an AI system get to a human analyst's
