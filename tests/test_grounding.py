@@ -1,0 +1,54 @@
+# BlueCell - Blue-Team Log Intelligence
+# Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
+# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+from bluecell.models import Event
+from bluecell.agents.grounding import evidence_index, check_text, annotate
+
+
+def _events():
+    e = Event(ts="2026-09-26T09:00:00Z", source="dns", category="dns",
+              action="dns_query", message="DNS query evil.top", domain="evil.top",
+              src_ip="203.0.113.9", host="web01",
+              file_hash="a" * 64)
+    e.attack.append("T1071.004")
+    return [e]
+
+
+def test_grounded_text_passes():
+    idx = evidence_index(_events(), ["T1071.004"])
+    txt = "Host web01 queried evil.top from 203.0.113.9 (T1071.004)."
+    assert check_text(txt, idx)["ok"] is True
+    assert annotate(txt, idx) == txt   # unchanged
+
+
+def test_hallucinated_ip_flagged():
+    idx = evidence_index(_events(), ["T1071.004"])
+    txt = "The attacker exfiltrated to 8.8.8.8 and 203.0.113.9."
+    res = check_text(txt, idx)
+    assert res["ok"] is False
+    assert "8.8.8.8" in res["unverified"]["ips"]
+    assert "203.0.113.9" not in res["unverified"].get("ips", [])  # real one not flagged
+    assert "GROUNDING CHECK" in annotate(txt, idx)
+
+
+def test_hallucinated_hash_flagged():
+    idx = evidence_index(_events(), ["T1071.004"])
+    fake = "b" * 64
+    txt = f"Malware hash {fake} seen fleet-wide."
+    res = check_text(txt, idx)
+    assert fake in res["unverified"]["hashes"]
+
+
+def test_hallucinated_technique_flagged():
+    idx = evidence_index(_events(), ["T1071.004"])
+    txt = "This shows ransomware T1486."
+    res = check_text(txt, idx)
+    assert "T1486" in res["unverified"]["techniques"]
+
+
+def test_domain_subdomain_is_grounded():
+    idx = evidence_index(_events(), ["T1071.004"])
+    # a subdomain of an evidence domain should count as grounded
+    txt = "Beacon to sub.evil.top observed."
+    res = check_text(txt, idx)
+    assert "domains" not in res["unverified"]

@@ -251,10 +251,14 @@ def _llm_narrative(inc, story: dict, digest: str, intel: list, backbone) -> str 
         for p in story["phases"]
     ) or "  (no ATT&CK phases)"
     system = (
-        "You are a senior blue-team incident analyst. Write a factual, concise "
-        "root-cause analysis from the provided normalized evidence only. Do not "
-        "invent hosts, IPs, times, or techniques not present in the evidence. "
-        "If evidence is insufficient for a claim, say so explicitly."
+        "You are a senior blue-team incident analyst. Every analysis and "
+        "deduction you make MUST be evidence-based and precise; no hallucinations "
+        "should be introduced into the analysis. Write the root-cause analysis "
+        "from the provided normalized evidence ONLY. Never invent or infer hosts, "
+        "IPs, domains, file hashes, users, timestamps, or ATT&CK techniques that "
+        "are not literally present in the evidence. Where the evidence does not "
+        "establish something, write 'not proven by the available logs' rather "
+        "than guessing."
     )
     prompt = f"""Reconstruct the attack storyline and root cause for this incident.
 
@@ -281,9 +285,19 @@ Write:
 4. Confidence and any evidence gaps.
 Keep it under 350 words. Reference technique IDs where relevant."""
     try:
-        return backbone.complete(prompt, system=system, max_tokens=1200)
+        text = backbone.complete(prompt, system=system, max_tokens=1200)
     except Exception:
         return None
+    if not text:
+        return None
+    # ENFORCE grounding: flag any indicator not present in the real evidence.
+    try:
+        from ..agents.grounding import evidence_index, annotate
+        idx = evidence_index(inc.events, inc.techniques)
+        text = annotate(text.strip(), idx)
+    except Exception:
+        pass
+    return text
 
 
 def build_storyline(inc, digest: str = "", intel: list | None = None,

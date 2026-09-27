@@ -79,9 +79,16 @@ class Agent:
         raise NotImplementedError
 
     def system(self) -> str:
-        return (f"You are a {self.role} on a blue team. Be precise and factual. "
-                f"Use only the provided evidence; never invent hosts, IPs, hashes, "
-                f"times, or techniques. If evidence is insufficient, say so.")
+        return (
+            f"You are a {self.role} on a blue team. "
+            "Every analysis and deduction you make MUST be evidence-based and "
+            "precise; no hallucinations should be introduced into the analysis. "
+            "Use ONLY the provided evidence. Never invent or infer hosts, IPs, "
+            "domains, file hashes, users, timestamps, or ATT&CK techniques that "
+            "are not literally present in the evidence. If the evidence is "
+            "insufficient to support a claim, say exactly that and stop. Prefer "
+            "'not proven by the available logs' over a guess. Cite the concrete "
+            "event detail behind each statement.")
 
     # ---- optional LLM enrichment -------------------------------------------
     def enrich(self, ctx: AgentContext, findings: list) -> list:
@@ -102,8 +109,12 @@ class Agent:
             )
             note = ctx.backbone.complete(prompt, system=self.system(), max_tokens=400)
             if note:
-                # Attach the assessment to the top finding as agent commentary.
-                findings[0].rationale += f"\n\n[{self.name} LLM note] {note.strip()}"
+                # ENFORCE grounding: flag any indicator the model cited that is
+                # not actually in the evidence (hallucination guard).
+                from .grounding import evidence_index, annotate
+                idx = evidence_index(ctx.events, _all_techniques(ctx.events))
+                note = annotate(note.strip(), idx)
+                findings[0].rationale += f"\n\n[{self.name} LLM note] {note}"
         except Exception:
             pass  # LLM failure never breaks the swarm
         return findings
@@ -119,3 +130,11 @@ class Agent:
 def _sev_from_score(score: int) -> str:
     return ("critical" if score >= 75 else "high" if score >= 50
             else "medium" if score >= 25 else "low")
+
+
+def _all_techniques(events) -> set:
+    out = set()
+    for e in events:
+        for t in getattr(e, "attack", []) or []:
+            out.add(t)
+    return out
