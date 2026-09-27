@@ -97,6 +97,27 @@ main { padding: 8px 18px 48px; max-width: 1340px; margin: 0 auto; }
 .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(38,230,255,.3);
   border-top-color: var(--cyan); border-radius: 50%; animation: spin .8s linear infinite; vertical-align: middle; }
 
+/* ---- analyst verdict banner ---- */
+.verdict { border-radius: 16px; padding: 18px 22px; margin: 12px 0 18px;
+  border: 1px solid var(--glass-brd); backdrop-filter: blur(14px);
+  background: var(--glass); position: relative; overflow: hidden; }
+.verdict::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 6px; }
+.verdict.malicious::before { background: var(--crit); box-shadow: 0 0 24px var(--crit); }
+.verdict.benign::before { background: var(--low); box-shadow: 0 0 24px var(--low); }
+.verdict.review::before { background: var(--med); box-shadow: 0 0 24px var(--med); }
+.verdict .vtop { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.verdict .vlabel { font-size: 12px; font-weight: 800; letter-spacing: 2px; padding: 4px 12px; border-radius: 999px; }
+.verdict.malicious .vlabel { background: var(--crit); color: #120209; }
+.verdict.benign .vlabel { background: var(--low); color: #04120b; }
+.verdict.review .vlabel { background: var(--med); color: #120f02; }
+.verdict .vhead { font-size: 18px; font-weight: 700; }
+.verdict .vconf { color: var(--muted); font-size: 11px; letter-spacing: 1px; margin-left: auto; }
+.verdict .vwhy { margin: 10px 0 6px; font-size: 13.5px; line-height: 1.7; color: var(--ink); }
+.verdict .vchecks { margin: 6px 0 0; padding-left: 0; list-style: none; }
+.verdict .vchecks li { font-size: 13px; padding: 5px 0 5px 24px; position: relative; }
+.verdict .vchecks li::before { content: "✓"; position: absolute; left: 0; color: var(--cyan); font-weight: 800; }
+.verdict .vchecks-h { font-size: 11px; letter-spacing: 2px; color: var(--muted); margin-top: 10px; }
+
 /* ---- hero metrics ---- */
 .hero { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 12px 0 18px; }
 .metric { position: relative; padding: 18px 18px 16px; border-radius: 16px; overflow: hidden;

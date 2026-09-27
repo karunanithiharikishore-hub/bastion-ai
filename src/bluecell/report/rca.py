@@ -15,6 +15,96 @@ from __future__ import annotations
 
 from ..pipeline.attack import ATTACK_TECHNIQUES
 
+
+def assess_incident(inc) -> dict:
+    """Produce a plain-English analyst VERDICT: is this real, noise, or unclear —
+    and what to do next. This is the judgment a Tier-2 analyst gives, surfaced so
+    users don't have to interpret raw findings themselves.
+    """
+    tactics = set(inc.tactics)
+    sources = set(inc.sources)
+    events = inc.events
+
+    def _is_success(e):
+        a = (e.action or "").lower(); m = (e.message or "").lower()
+        return "success" in a or a == "login_success" or "accepted" in m
+    def _is_fail(e):
+        return "fail" in (e.action or "").lower() or "login_failed" == (e.action or "").lower()
+
+    has_success = any(_is_success(e) for e in events)
+    fail_ct = sum(1 for e in events if _is_fail(e))
+    single_source = len(sources) <= 1
+    only_cred = bool(tactics) and tactics.issubset({"credential-access", "authentication"})
+    serious = bool(tactics & {"impact", "exfiltration", "command-and-control", "lateral-movement"})
+
+    # Distinct external IPs seen (rough breadth signal).
+    ips = set()
+    for e in events:
+        for ip in (e.src_ip, e.dst_ip):
+            if ip:
+                ips.add(ip)
+
+    if serious and inc.score() >= 50:
+        return {
+            "level": "likely-malicious",
+            "confidence": 0.8,
+            "headline": "Likely a real attack — investigate now.",
+            "why": (f"Multiple kill-chain stages ({', '.join(sorted(tactics))}) "
+                    f"across {len(sources)} log source(s) at high severity "
+                    f"({inc.score()}/100). That progression is not normal noise."),
+            "recommended_checks": [
+                "Isolate/scope the affected hosts and accounts immediately.",
+                "Confirm the successful/impact events are not the legitimate user.",
+                "Pull EDR + network for the same hosts around the window.",
+                "Preserve logs; begin incident response.",
+            ],
+        }
+    if only_cred and not has_success:
+        return {
+            "level": "likely-benign",
+            "confidence": 0.7,
+            "headline": "Likely benign failed-login noise — not a confirmed breach.",
+            "why": (f"{fail_ct} failed sign-in(s) with NO successful compromise, "
+                    f"single source ({', '.join(sorted(sources)) or 'n/a'}), and no "
+                    f"follow-on activity (no lateral movement, C2, or impact). "
+                    f"Most common cause: an expired password or a stale cached "
+                    f"credential on a device (e.g. a mail client) retrying and "
+                    f"racking up failures."),
+            "recommended_checks": [
+                "Confirm NONE of the failed attempts later SUCCEEDED from the same IP.",
+                "Check whether the IPs are the user's known home/office/mobile network.",
+                "Reset the password / re-auth the mail client to stop the retry spam.",
+                "Confirm MFA is enforced on the account(s).",
+            ],
+        }
+    if only_cred and has_success:
+        return {
+            "level": "needs-review",
+            "confidence": 0.55,
+            "headline": "Failed sign-ins followed by a success — verify it was the real user.",
+            "why": (f"{fail_ct} failed sign-in(s) and at least one SUCCESS. This is "
+                    f"either the user finally entering the right password, or an "
+                    f"account takeover. It needs a human check."),
+            "recommended_checks": [
+                "Was the successful sign-in from a known device / IP / location?",
+                "Any impossible-travel or new-device sign-in around that time?",
+                "Check for new mailbox rules, MFA changes, or app consents right after the success.",
+            ],
+        }
+    return {
+        "level": "needs-review",
+        "confidence": 0.5,
+        "headline": "Needs analyst review — not enough to call automatically.",
+        "why": (f"Observed tactics {', '.join(sorted(tactics)) or 'none'} across "
+                f"{len(sources)} source(s), but not enough corroboration for a firm "
+                f"verdict."),
+        "recommended_checks": [
+            "Correlate with EDR / network logs for the same hosts and users.",
+            "Confirm whether any action actually succeeded or had impact.",
+            "Widen the correlation window if the activity looks spread out.",
+        ],
+    }
+
 # Rough kill-chain ordering so phases read in attack order, not just clock order.
 _TACTIC_ORDER = [
     "reconnaissance", "initial-access", "execution", "persistence",

@@ -155,6 +155,31 @@ function renderPinpointer(r) {
   host.appendChild(info);
 }
 
+/* ================= analyst verdict ================= */
+function renderVerdict(r) {
+  const host = $("verdict");
+  const inc = (r.incidents || [])[0];
+  if (!inc || !inc.verdict) { host.style.display = "none"; return; }
+  host.style.display = "block";
+  const v = inc.verdict;
+  const cls = v.level === "likely-malicious" ? "malicious"
+    : v.level === "likely-benign" ? "benign" : "review";
+  const label = v.level === "likely-malicious" ? "⚠ LIKELY REAL ATTACK"
+    : v.level === "likely-benign" ? "✓ LIKELY BENIGN / NOISE" : "◑ NEEDS REVIEW";
+  host.className = "verdict " + cls;
+  host.innerHTML = "";
+  const top = el("div", "vtop");
+  top.appendChild(el("span", "vlabel", label));
+  top.appendChild(el("span", "vhead", esc(v.headline)));
+  top.appendChild(el("span", "vconf", "VERDICT CONFIDENCE " + Math.round((v.confidence || 0) * 100) + "%"));
+  host.appendChild(top);
+  host.appendChild(el("div", "vwhy", esc(v.why)));
+  host.appendChild(el("div", "vchecks-h", "WHAT TO DO NEXT"));
+  const ul = el("ul", "vchecks");
+  (v.recommended_checks || []).forEach((c) => ul.appendChild(el("li", null, esc(c))));
+  host.appendChild(ul);
+}
+
 /* ================= attack summary ================= */
 function renderSummary(r) {
   const host = $("summary"); host.innerHTML = "";
@@ -344,7 +369,7 @@ function renderIntel(r) {
 function renderAll(r) {
   if (r.error) { toast("⚠ " + esc(r.error)); return; }
   $("results").classList.add("show");
-  renderHero(r); renderPinpointer(r); renderSummary(r); renderStage(r); renderSwarm(r);
+  renderVerdict(r); renderHero(r); renderPinpointer(r); renderSummary(r); renderStage(r); renderSwarm(r);
   renderIncidents(r); renderIocs(r); renderHunt(r); renderIntel(r);
 }
 async function mergeMetaAndRender(data) {

@@ -18,7 +18,7 @@ from .pipeline import (
 )
 from .pipeline.compress import token_estimate
 from .pipeline.ioc import hunt_checklist
-from .report.rca import build_storyline
+from .report.rca import build_storyline, assess_incident
 from .intel import IntelStore
 from .agents import run_swarm
 from . import provenance
@@ -59,6 +59,7 @@ def analyze(paths, *, source_override=None, window_minutes=60,
         incident_blocks.append({
             "id": inc.id,
             "score": inc.score(),
+            "verdict": assess_incident(inc),
             "storyline": story,
             "events": [e.to_dict() for e in inc.events],
         })
