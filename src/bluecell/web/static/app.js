@@ -155,18 +155,39 @@ function renderPinpointer(r) {
   host.appendChild(info);
 }
 
-/* ================= 3D storyline + drag-to-rotate ================= */
+/* ================= attack summary ================= */
+function renderSummary(r) {
+  const host = $("summary"); host.innerHTML = "";
+  const inc = (r.incidents || [])[0];
+  if (!inc) { host.appendChild(el("p", "empty", "No attack to summarize.")); return; }
+  const a = inc.storyline.structured.attack_summary || {};
+  const left = el("div", "sum-block");
+  left.appendChild(el("h3", null, "HOW THEY GOT IN"));
+  left.appendChild(el("div", "sum-in", esc(a.how_they_got_in || "Unknown.")));
+  left.appendChild(el("div", "sum-obj", "OBJECTIVE: <b>" + esc(a.objective || "unknown") + "</b>"));
+  const right = el("div", "sum-block");
+  right.appendChild(el("h3", null, "WHAT THEY DID"));
+  const ol = el("ul", "sum-steps");
+  (a.what_they_did || []).forEach((step) => ol.appendChild(el("li", null, esc(step))));
+  if (!(a.what_they_did || []).length) ol.appendChild(el("li", null, "No discrete actions reconstructed."));
+  right.appendChild(ol);
+  host.appendChild(left); host.appendChild(right);
+}
+
+/* ================= 3D storyline + drag-to-rotate + clickable ================= */
+let _phases = [];
 function renderStage(r) {
   const stage = $("stage"); stage.innerHTML = "";
+  $("stage-detail").innerHTML = '<div class="detail-hint">👆 Click any phase above to see its techniques and the exact events.</div>';
   const inc = (r.incidents || [])[0], sub = $("story-sub");
   if (!inc) { stage.innerHTML = '<p class="empty">No storyline.</p>'; sub.textContent = ""; return; }
-  const s = inc.storyline.structured;
-  sub.textContent = `${s.incident_id} · ${(s.phases || []).length} phases · ${inc.storyline.narrative_source}`;
-  (s.phases || []).forEach((p, i) => {
+  const s = inc.storyline.structured; _phases = s.phases || [];
+  sub.textContent = `${s.incident_id} · ${_phases.length} phases · ${inc.storyline.narrative_source}`;
+  _phases.forEach((p, i) => {
     if (i) stage.appendChild(el("div", "beam"));
     const isImpact = /impact/.test(p.tactic), isCC = /command-and-control/.test(p.tactic);
     const layer = el("div", "layer" + (isImpact ? " sev-impact" : isCC ? " sev-cc" : ""));
-    layer.style.animationDelay = (i * 90) + "ms";
+    layer.dataset.i = i; layer.style.animationDelay = (i * 90) + "ms";
     layer.appendChild(el("div", "tnum", i + 1));
     layer.appendChild(el("div", "tac", esc(p.tactic)));
     layer.appendChild(el("div", "tt", "first seen " + esc((p.first_seen || "").replace("T", " ").slice(0, 19)) + ` · ${p.count} ev`));
@@ -175,21 +196,49 @@ function renderStage(r) {
     layer.appendChild(techs); stage.appendChild(layer);
   });
 }
+
+function showPhaseDetail(i) {
+  const p = _phases[i]; if (!p) return;
+  document.querySelectorAll(".layer").forEach((l) => l.classList.toggle("active", l.dataset.i == i));
+  const card = el("div", "detail-card");
+  card.appendChild(el("h3", null, `PHASE ${i + 1} · ${esc(p.tactic.toUpperCase())}`));
+  card.appendChild(el("div", "meta-line",
+    `${p.count} event(s) · ${esc((p.first_seen || "").replace("T", " ").slice(0, 19))} → ${esc((p.last_seen || "").replace("T", " ").slice(11, 19))}`
+    + (p.hosts && p.hosts.length ? ` · hosts: ${esc(p.hosts.join(", "))}` : "")
+    + (p.users && p.users.length ? ` · users: ${esc(p.users.join(", "))}` : "")));
+  const tw = el("div", null);
+  (p.techniques || []).forEach((t) => tw.appendChild(el("span", "dt-tech", `${esc(t.id)} — ${esc(t.name)}`)));
+  card.appendChild(tw);
+  card.appendChild(el("div", "meta-line", "EVENTS"));
+  (p.events || []).forEach((line) => card.appendChild(el("div", "evline", esc(line))));
+  const host = $("stage-detail"); host.innerHTML = ""; host.appendChild(card);
+  host.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
 (function stageControls() {
   const wrap = $("stage-wrap"), stage = $("stage");
-  let rx = 34, rz = -24, drag = false, px = 0, py = 0;
+  const DEF_RX = 26, DEF_RZ = 0;
+  let rx = DEF_RX, rz = DEF_RZ, drag = false, px = 0, py = 0, moved = 0;
   const apply = () => { stage.style.setProperty("--rx", rx + "deg"); stage.style.setProperty("--rz", rz + "deg"); };
-  const down = (e) => { drag = true; wrap.classList.add("grabbing");
+  apply();
+  const down = (e) => { drag = true; moved = 0; wrap.classList.add("grabbing");
     const pt = e.touches ? e.touches[0] : e; px = pt.clientX; py = pt.clientY; };
   const move = (e) => { if (!drag) return; const pt = e.touches ? e.touches[0] : e;
-    rz += (pt.clientX - px) * 0.4; rx -= (pt.clientY - py) * 0.4;
-    rx = Math.max(-10, Math.min(80, rx)); px = pt.clientX; py = pt.clientY; apply(); if (e.cancelable) e.preventDefault(); };
+    const dx = pt.clientX - px, dy = pt.clientY - py; moved += Math.abs(dx) + Math.abs(dy);
+    rz += dx * 0.3; rx -= dy * 0.3; rx = Math.max(-5, Math.min(75, rx));
+    px = pt.clientX; py = pt.clientY; apply(); };
   const up = () => { drag = false; wrap.classList.remove("grabbing"); };
   wrap.addEventListener("mousedown", down); addEventListener("mousemove", move); addEventListener("mouseup", up);
   wrap.addEventListener("touchstart", down, { passive: true });
-  wrap.addEventListener("touchmove", move, { passive: false });
+  wrap.addEventListener("touchmove", move, { passive: true });
   wrap.addEventListener("touchend", up);
-  $("resetview").addEventListener("click", () => { rx = 34; rz = -24; apply(); });
+  // Click a layer (only if it wasn't a drag) -> open its details.
+  stage.addEventListener("click", (e) => {
+    if (moved > 6) return;                       // was a rotate, not a click
+    const layer = e.target.closest(".layer");
+    if (layer) showPhaseDetail(parseInt(layer.dataset.i, 10));
+  });
+  $("resetview").addEventListener("click", () => { rx = DEF_RX; rz = DEF_RZ; apply(); });
 })();
 
 /* ================= swarm constellation ================= */
@@ -271,7 +320,7 @@ function renderIntel(r) {
 function renderAll(r) {
   if (r.error) { toast("⚠ " + esc(r.error)); return; }
   $("results").classList.add("show");
-  renderHero(r); renderPinpointer(r); renderStage(r); renderSwarm(r);
+  renderHero(r); renderPinpointer(r); renderSummary(r); renderStage(r); renderSwarm(r);
   renderIncidents(r); renderIocs(r); renderHunt(r); renderIntel(r);
 }
 async function mergeMetaAndRender(data) {

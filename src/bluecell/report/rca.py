@@ -48,12 +48,24 @@ def deterministic_storyline(inc) -> dict:
     for tactic in sorted(phases, key=_tactic_rank):
         evs = phases[tactic]
         tids = sorted({tid for _e, tid in evs})
+        # De-duplicated example event lines for the clickable phase drawer.
+        seen, samples = set(), []
+        for e, _t in evs:
+            line = e.compact()
+            if line not in seen:
+                seen.add(line); samples.append(line)
+            if len(samples) >= 8:
+                break
         ordered_phases.append({
             "tactic": tactic,
             "techniques": [{"id": t, "name": ATTACK_TECHNIQUES.get(t, ("?",))[0]} for t in tids],
             "first_seen": min(e.ts for e, _t in evs).isoformat(),
+            "last_seen": max(e.ts for e, _t in evs).isoformat(),
             "count": len(evs),
             "example": evs[0][0].compact(),
+            "events": samples,
+            "hosts": sorted({e.host for e, _t in evs if e.host}),
+            "users": sorted({e.user for e, _t in evs if e.user}),
         })
 
     objective = "unknown"
@@ -81,6 +93,59 @@ def deterministic_storyline(inc) -> dict:
         "phases": ordered_phases,
         "likely_objective": objective,
         "event_count": len(events),
+        "attack_summary": _attack_summary(inc, patient_zero, ordered_phases, objective),
+    }
+
+
+# Human-readable label per ATT&CK tactic for the plain-English summary.
+_TACTIC_VERB = {
+    "reconnaissance": "scouted the environment",
+    "initial-access": "gained an initial foothold",
+    "execution": "ran malicious code",
+    "persistence": "established persistence to survive reboots/log-offs",
+    "privilege-escalation": "escalated privileges",
+    "defense-evasion": "disabled or evaded defenses",
+    "credential-access": "harvested credentials",
+    "discovery": "mapped internal systems",
+    "lateral-movement": "moved to other machines",
+    "collection": "collected data of interest",
+    "command-and-control": "set up remote command-and-control",
+    "exfiltration": "exfiltrated data out of the network",
+    "impact": "caused impact (encryption/destruction)",
+}
+
+
+def _attack_summary(inc, patient_zero, ordered_phases, objective) -> dict:
+    """Plain-English 'how they got in and what they did' for non-experts."""
+    # Entry vector: earliest phase in kill-chain order, plus patient zero.
+    entry_phase = ordered_phases[0] if ordered_phases else None
+    entry_bits = []
+    if patient_zero is not None:
+        pz = patient_zero.compact() if hasattr(patient_zero, "compact") else str(patient_zero)
+        entry_bits.append(f"Earliest suspicious activity: {pz}.")
+    if entry_phase:
+        techs = ", ".join(f"{t['id']} ({t['name']})" for t in entry_phase["techniques"])
+        entry_bits.append(
+            f"First observed tactic was {entry_phase['tactic']} via {techs}"
+            f" at {entry_phase['first_seen'][:19].replace('T', ' ')}.")
+    if inc.users:
+        entry_bits.append(f"Accounts involved: {', '.join(sorted(inc.users))}.")
+
+    steps = []
+    for i, p in enumerate(ordered_phases, 1):
+        verb = _TACTIC_VERB.get(p["tactic"], p["tactic"])
+        techs = ", ".join(t["id"] for t in p["techniques"])
+        where = (" on " + ", ".join(p["hosts"])) if p["hosts"] else ""
+        steps.append(f"{i}. The attacker {verb}{where} "
+                     f"[{techs}] — first seen {p['first_seen'][11:19]}, {p['count']} event(s).")
+
+    return {
+        "how_they_got_in": " ".join(entry_bits) or "Entry vector could not be determined from the evidence.",
+        "what_they_did": steps,
+        "objective": objective,
+        "span": {"start": inc.start.isoformat(), "end": inc.end.isoformat()},
+        "affected_hosts": sorted(inc.hosts),
+        "affected_users": sorted(inc.users),
     }
 
 

@@ -75,16 +75,22 @@
         <div id="pinpointer" class="pin-body"></div>
       </section>
 
+      <section class="panel glass summary" id="summary-panel">
+        <div class="panel-head"><h2>📖 ATTACK SUMMARY</h2><span class="sub">how they got in · what they did</span></div>
+        <div id="summary" class="summary-body"></div>
+      </section>
+
       <section class="panel glass">
         <div class="panel-head">
           <h2>⧉ ATTACK STORYLINE · 3D KILL-CHAIN</h2>
           <span class="sub" id="story-sub"></span>
-          <span class="stage-hint">🖱 drag to rotate</span>
+          <span class="stage-hint">🖱 click a phase for details · drag empty space to rotate · scroll ↔</span>
           <button id="resetview" class="btn ghost tiny">⟲ reset view</button>
         </div>
         <div class="stage-wrap" id="stage-wrap">
           <div id="stage" class="stage"></div>
         </div>
+        <div id="stage-detail" class="stage-detail"></div>
       </section>
 
       <div class="grid">

@@ -25,16 +25,35 @@ from typing import Iterable, Iterator, Optional
 from ..models import Event
 from .parsers import STRUCTURED_PARSERS, parse_edr, parse_syslog_line
 
+# Order matters: more specific / multi-word tokens first so e.g. a filename
+# "MTSummary_Message trace report" matches "mtsummary" before "message trace".
 _SOURCE_HINTS = (
-    "dns", "cloudtrail", "cloud", "firewall", "router", "switch",
+    "messagetraceresult", "messagetrace", "mtsummary", "message trace",
+    "noninteractivesignins", "interactivesignins", "msisignins",
+    "applicationsignins", "signins", "signin", "entra", "aad", "azure",
+    "o365", "m365",
+    "cloudtrail", "dns", "cloud", "firewall", "router", "switch",
     "network", "edr", "endpoint", "auth", "syslog",
 )
 
+# Some filename tokens are aliases for a canonical parser key in STRUCTURED_PARSERS.
+_HINT_ALIASES = {
+    "messagetraceresult": "messagetrace", "message trace": "messagetrace",
+    "mtsummary": "messagetrace",
+    "noninteractivesignins": "signins", "interactivesignins": "signins",
+    "msisignins": "signins", "applicationsignins": "signins", "signin": "signins",
+    "entra": "azure", "aad": "azure",
+}
+
+
+def _canon(hint: str) -> str:
+    return _HINT_ALIASES.get(hint, hint)
+
 
 def detect_source(filename: str, record: Optional[dict] = None,
-                   override: Optional[str] = None) -> str:
+                  override: Optional[str] = None) -> str:
     if override:
-        return override.lower()
+        return _canon(override.lower())
     if record:
         # Stringify keys: CSV rows with extra columns yield a None key.
         low = {str(k).lower(): x for k, x in record.items() if k is not None}
@@ -43,11 +62,18 @@ def detect_source(filename: str, record: Optional[dict] = None,
             if isinstance(v, str):
                 for hint in _SOURCE_HINTS:
                     if hint in v.lower():
-                        return hint
+                        return _canon(hint)
+        # Column-shape detection for Microsoft exports without a source field.
+        if "ip address" in low and ("status" in low or "sign-in error code" in low
+                                    or "user" in low or "username" in low):
+            return "signins"
+        if ("sender_address" in low or "sender address" in low) or \
+           ("recipient_address" in low or "recipient address" in low):
+            return "messagetrace"
     name = os.path.basename(filename).lower()
     for hint in _SOURCE_HINTS:
         if hint in name:
-            return hint
+            return _canon(hint)
     return "edr"
 
 

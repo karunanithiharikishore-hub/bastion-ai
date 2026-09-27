@@ -196,6 +196,100 @@ def parse_syslog_line(line: str) -> Optional[Event]:
     )
 
 
+# ---- Azure AD / Entra ID sign-in logs --------------------------------------
+
+def _azure_is_failure(status, errcode, reason) -> bool:
+    s = str(status or "").lower()
+    if any(w in s for w in ("fail", "interrupt", "denied", "block")):
+        return True
+    code = str(errcode or "").strip()
+    if code and code not in ("0", "0.0"):
+        return True
+    if reason and str(reason).strip() and "success" not in str(reason).lower():
+        # A populated failure-reason field implies a non-success sign-in.
+        return code not in ("", "0")
+    return False
+
+
+def parse_azure_signin(r: dict) -> Optional[Event]:
+    """Azure AD / Entra ID sign-in export (Interactive / NonInteractive / MSI /
+    Application sign-ins CSV or JSON)."""
+    user = _get(r, "User", "Username", "User principal name", "userPrincipalName",
+                "userDisplayName", "Identity")
+    ip = _get(r, "IP address", "IP Address", "ipAddress", "IP address (seen by resource)")
+    status = _get(r, "Status", "Sign-in status", "status", "conditionalAccessStatus")
+    errcode = _get(r, "Sign-in error code", "Sign in error code", "errorCode", "Error code")
+    reason = _get(r, "Failure reason", "failureReason", "Status reason")
+    location = _get(r, "Location", "location")
+    app = _get(r, "Application", "App", "appDisplayName", "Resource")
+    risk_level = _get(r, "Risk level during sign-in", "Risk level aggregated",
+                      "riskLevelDuringSignIn", "Risk level")
+    risk_state = _get(r, "Risk state", "riskState", "Risk detail")
+    mfa = _get(r, "Multifactor authentication result", "authenticationRequirement",
+               "MFA result")
+
+    if user is None and ip is None and status is None:
+        return None  # not an azure sign-in row
+
+    failed = _azure_is_failure(status, errcode, reason)
+    action = "login_failed" if failed else "login_success"
+    sev = 3 if failed else 1
+    risky = str(risk_level or "").lower() in ("high", "medium") or \
+        str(risk_state or "").lower() in ("atrisk", "at risk", "confirmedcompromised")
+    if risky:
+        sev = 4
+
+    ev = Event(
+        ts=_get(r, "Date (UTC)", "Date", "date", "createdDateTime", "Timestamp",
+                "Date (local)"),
+        source="azure_ad",
+        category="authentication",
+        action=action,
+        message=(f"Azure AD sign-in {status or ('failure' if failed else 'success')} "
+                 f"for {user or '?'} from {ip or '?'} "
+                 f"({location or '?'}) app={app or '?'}"
+                 + (f" reason={reason}" if reason else "")
+                 + (f" risk={risk_level or risk_state}" if risky else "")
+                 + (f" mfa={mfa}" if mfa else "")),
+        severity=sev,
+        user=str(user) if user else None,
+        src_ip=str(ip) if ip else None,
+        process=str(app) if app else None,
+        raw=r,
+    )
+    if risky:
+        # Risky/valid-account abuse -> Valid Accounts.
+        ev.attack.append("T1078")
+        ev.tags.append("azure:risky-signin")
+    return ev
+
+
+# ---- Microsoft 365 message trace --------------------------------------------
+
+def parse_o365_message(r: dict) -> Optional[Event]:
+    """O365 message-trace / MTSummary export row (email flow)."""
+    sender = _get(r, "sender_address", "Sender Address", "Sender", "From")
+    recipient = _get(r, "recipient_address", "Recipient Address", "Recipient", "To")
+    subject = _get(r, "subject", "Subject", "Message Subject")
+    status = _get(r, "status", "Status", "Delivery Status")
+    if sender is None and recipient is None and subject is None:
+        return None
+    s = str(status or "").lower()
+    sev = 2 if any(w in s for w in ("fail", "quarantine", "spam", "block", "defer")) else 1
+    return Event(
+        ts=_get(r, "origin_timestamp_utc", "Origin Timestamp", "Date (UTC)", "Date",
+                "received", "Received"),
+        source="o365",
+        category="other",
+        action="email_" + (s.replace(" ", "_") or "event"),
+        message=(f"O365 email {status or ''}: {sender or '?'} -> {recipient or '?'} "
+                 f"subj='{str(subject or '')[:80]}'"),
+        severity=sev,
+        user=str(sender) if sender else None,
+        raw=r,
+    )
+
+
 # Map a detected source label -> structured parser.
 STRUCTURED_PARSERS = {
     "edr": parse_edr,
@@ -208,4 +302,16 @@ STRUCTURED_PARSERS = {
     "cloud": parse_cloud,
     "cloudtrail": parse_cloud,
     "auth": parse_auth,
+    # Azure AD / Entra ID sign-ins
+    "azure": parse_azure_signin,
+    "aad": parse_azure_signin,
+    "entra": parse_azure_signin,
+    "signin": parse_azure_signin,
+    "signins": parse_azure_signin,
+    # Microsoft 365 message trace
+    "o365": parse_o365_message,
+    "m365": parse_o365_message,
+    "messagetrace": parse_o365_message,
+    "mtsummary": parse_o365_message,
+    "messagetraceresult": parse_o365_message,
 }
