@@ -172,6 +172,19 @@ function renderSummary(r) {
   if (!(a.what_they_did || []).length) ol.appendChild(el("li", null, "No discrete actions reconstructed."));
   right.appendChild(ol);
   host.appendChild(left); host.appendChild(right);
+
+  // Analyst narrative — richer when an LLM backbone produced it.
+  const src = inc.storyline.narrative_source, txt = inc.storyline.narrative;
+  if (txt) {
+    const nb = el("div", "narrative");
+    const isAI = src === "llm";
+    nb.appendChild(el("h3", null,
+      "ANALYST NARRATIVE" + (isAI
+        ? '<span class="badge ai">🤖 AI-GENERATED</span>'
+        : '<span class="badge rule">RULE-BASED · run with --llm auto for AI</span>')));
+    nb.appendChild(el("div", "ntext", esc(txt)));
+    host.appendChild(nb);
+  }
 }
 
 /* ================= 3D storyline + drag-to-rotate + clickable ================= */
@@ -239,6 +252,17 @@ function showPhaseDetail(i) {
     if (layer) showPhaseDetail(parseInt(layer.dataset.i, 10));
   });
   $("resetview").addEventListener("click", () => { rx = DEF_RX; rz = DEF_RZ; apply(); });
+
+  // Explicit left/right navigation + mouse-wheel -> horizontal scroll.
+  const step = () => Math.max(260, wrap.clientWidth * 0.6);
+  $("stage-left").addEventListener("click", () => wrap.scrollBy({ left: -step(), behavior: "smooth" }));
+  $("stage-right").addEventListener("click", () => wrap.scrollBy({ left: step(), behavior: "smooth" }));
+  wrap.addEventListener("wheel", (e) => {
+    // Vertical wheel scrolls the chain horizontally when there is overflow.
+    if (wrap.scrollWidth > wrap.clientWidth && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+      wrap.scrollLeft += e.deltaY; e.preventDefault();
+    }
+  }, { passive: false });
 })();
 
 /* ================= swarm constellation ================= */

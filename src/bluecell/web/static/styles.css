@@ -90,6 +90,10 @@ main { padding: 8px 18px 48px; max-width: 1340px; margin: 0 auto; }
 #results.show { display: block; animation: fadein .5s; }
 @keyframes fadein { from { opacity: 0; transform: translateY(10px); } }
 .stage-hint { color: var(--muted); font-size: 10px; letter-spacing: 1px; margin-left: auto; }
+.stage-btns { display: flex; gap: 6px; }
+/* Reserve room on the right so the last phase is never clipped; smooth scroll. */
+.stage-wrap { scroll-behavior: smooth; }
+.stage { padding-right: 120px; }
 .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(38,230,255,.3);
   border-top-color: var(--cyan); border-radius: 50%; animation: spin .8s linear infinite; vertical-align: middle; }
 
@@ -175,6 +179,15 @@ main { padding: 8px 18px 48px; max-width: 1340px; margin: 0 auto; }
   background: rgba(6,14,40,.5); border-left: 3px solid var(--violet); border-radius: 0 10px 10px 0; }
 .sum-obj { margin-top: 10px; font-size: 13px; }
 .sum-obj b { color: var(--crit); }
+.narrative { grid-column: 1 / -1; margin-top: 4px; }
+.narrative h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: 2px; color: var(--cyan); }
+.narrative .badge { font-size: 10px; letter-spacing: 1px; padding: 2px 8px; border-radius: 999px;
+  margin-left: 8px; vertical-align: middle; }
+.narrative .badge.ai { background: linear-gradient(135deg, var(--cyan), var(--violet)); color: #04122b; font-weight: 700; }
+.narrative .badge.rule { background: rgba(142,163,201,.2); color: var(--muted); border: 1px solid var(--glass-brd); }
+.narrative .ntext { white-space: pre-wrap; font-size: 13px; line-height: 1.7; color: #dbe6ff;
+  background: rgba(6,14,40,.5); border: 1px solid var(--glass-brd); border-left: 3px solid var(--cyan);
+  border-radius: 0 10px 10px 0; padding: 12px 14px; }
 @media (max-width: 1000px) { .summary-body { grid-template-columns: 1fr; } }
 .layer { position: relative; width: 210px; min-height: 120px; border-radius: 14px;
   transform-style: preserve-3d; padding: 14px; color: var(--ink);

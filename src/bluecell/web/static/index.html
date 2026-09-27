@@ -84,8 +84,12 @@
         <div class="panel-head">
           <h2>⧉ ATTACK STORYLINE · 3D KILL-CHAIN</h2>
           <span class="sub" id="story-sub"></span>
-          <span class="stage-hint">🖱 click a phase for details · drag empty space to rotate · scroll ↔</span>
-          <button id="resetview" class="btn ghost tiny">⟲ reset view</button>
+          <span class="stage-hint">🖱 click a phase for details · drag to rotate</span>
+          <div class="stage-btns">
+            <button id="stage-left" class="btn ghost tiny" title="scroll left">◀</button>
+            <button id="stage-right" class="btn ghost tiny" title="scroll right">▶</button>
+            <button id="resetview" class="btn ghost tiny">⟲ reset</button>
+          </div>
         </div>
         <div class="stage-wrap" id="stage-wrap">
           <div id="stage" class="stage"></div>
