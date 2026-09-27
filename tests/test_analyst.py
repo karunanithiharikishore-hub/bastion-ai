@@ -9,15 +9,15 @@ from bluecell.pipeline import extract_iocs
 
 def _events():
     e1 = Event(ts="2026-08-27T00:20:00Z", source="azure_ad", category="authentication",
-               action="login_success", message="Azure AD sign-in Success for a@corp.com from 85.209.87.73 transfer=deviceCodeFlow device=d95",
-               user="a@corp.com", src_ip="85.209.87.73")
+               action="login_success", message="Azure AD sign-in Success for analyst@example.com from 203.0.113.10 transfer=deviceCodeFlow device=d95",
+               user="analyst@example.com", src_ip="203.0.113.10")
     e1.tags.append("azure:devicecode-success"); e1.attack.append("T1078")
     e2 = Event(ts="2026-08-28T00:00:00Z", source="m365_ual", category="other",
-               action="mailbox_access", message="UAL MailItemsAccessed by a@corp.com from 85.209.87.73",
-               user="a@corp.com", src_ip="85.209.87.73"); e2.attack.append("T1114")
+               action="mailbox_access", message="UAL MailItemsAccessed by analyst@example.com from 203.0.113.10",
+               user="analyst@example.com", src_ip="203.0.113.10"); e2.attack.append("T1114")
     e3 = Event(ts="2026-08-28T00:05:00Z", source="m365_ual", category="other",
-               action="inbox_rule_created", message="UAL New-InboxRule by a@corp.com from 85.209.87.73",
-               user="a@corp.com", src_ip="85.209.87.73"); e3.attack.append("T1564.008")
+               action="inbox_rule_created", message="UAL New-InboxRule by analyst@example.com from 203.0.113.10",
+               user="analyst@example.com", src_ip="203.0.113.10"); e3.attack.append("T1564.008")
     return [e1, e2, e3]
 
 
@@ -27,7 +27,7 @@ def test_brief_surfaces_key_signals():
     assert "DEVICE-CODE-FLOW SUCCESSES" in brief
     assert "MAILBOX ACCESS" in brief
     assert "INBOX RULE" in brief
-    assert "85.209.87.73" in brief
+    assert "203.0.113.10" in brief
 
 
 def test_extract_json_from_noisy_text():
@@ -39,7 +39,7 @@ def test_grounding_allows_user_email_domain():
     ev = _events()
     idx = evidence_index(ev, ["T1114"])
     # The account's own domain must NOT be flagged as hallucinated.
-    res = check_text("Compromise of a@corp.com via corp.com tenant.", idx)
+    res = check_text("Compromise of analyst@example.com via example.com tenant.", idx)
     assert "domains" not in res["unverified"]
 
 

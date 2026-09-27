@@ -19,10 +19,7 @@ from . import provenance as _prov
 __author__ = _prov.AUTHOR
 __copyright__ = _prov.COPYRIGHT
 __license__ = "MIT"
-__version__ = "0.12.0"
+__version__ = "0.13.0"
 
-# Lightweight constant-level integrity check on import (no filesystem scan here;
-# the CLI performs the full repo scan + halt via provenance.enforce()).
-_ok, _reason = _prov.verify_integrity()
-if not _ok:  # pragma: no cover - only triggers when attribution is tampered
-    _prov._halt(_reason)
+# Attribution is asserted via the LICENSE / AUTHORS / source headers, not a
+# runtime kill-switch. No integrity gate runs on import.

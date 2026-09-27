@@ -101,23 +101,20 @@ def banner() -> str:
 
 
 def enforce(strict: bool = True) -> None:
-    """Verify attribution at startup. On tamper: point to the watermark and HALT.
+    """Soft attribution check at startup.
 
-    Set env BLUECELL_SKIP_INTEGRITY=1 only for trusted local dev; it still
-    prints a warning and never suppresses a constant-level tamper.
+    Earlier versions hard-halted the program if the author attribution was
+    removed. That was attribution-as-kill-switch, which is both trivially
+    bypassed and inappropriate for MIT-licensed software — the enforceable
+    protection is the LICENSE, not a runtime gate. This now only prints a
+    non-fatal warning if the attribution looks altered, and never exits.
     """
+    import sys
     ok, reason = verify_integrity()
     if not ok:
-        _halt(reason)
-
-    missing = scan_repo()
-    if missing:
-        if os.environ.get("BLUECELL_SKIP_INTEGRITY") == "1":
-            import sys
-            print(f"[bluecell] WARNING: attribution missing from {missing} "
-                  f"(integrity check bypassed).", file=sys.stderr)
-        elif strict:
-            _halt(f"Attribution missing from: {', '.join(missing)}")
+        print(f"[bluecell] note: authorship attribution appears altered "
+              f"({reason}). Please keep the author credit per the MIT license.",
+              file=sys.stderr)
 
 
 def _halt(reason: str) -> None:

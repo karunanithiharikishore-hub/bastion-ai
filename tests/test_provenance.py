@@ -29,15 +29,18 @@ def test_tamper_author_detected(monkeypatch):
     assert "AUTHOR" in reason or "signature" in reason.lower()
 
 
-def test_enforce_halts_on_tamper(monkeypatch, capsys):
+def test_enforce_is_non_fatal_and_warns_on_tamper(monkeypatch, capsys):
+    # Attribution is enforced by the LICENSE, not a runtime kill-switch:
+    # enforce() must NOT exit; it only warns.
     monkeypatch.setattr(provenance, "AUTHOR", "Someone Else")
-    with pytest.raises(SystemExit) as exc:
-        provenance.enforce(strict=False)
-    assert exc.value.code == 3
+    provenance.enforce(strict=True)   # must not raise
     err = capsys.readouterr().err
-    assert "HALTED" in err
-    # It must point the owner to where the watermark lives.
-    assert "provenance.py" in err
+    assert "attribution" in err.lower()
+
+
+def test_enforce_silent_when_intact(capsys):
+    provenance.enforce(strict=True)
+    assert capsys.readouterr().err == ""
 
 
 def test_scan_repo_finds_author_in_source():

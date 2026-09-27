@@ -1,11 +1,26 @@
 # BlueCell — Blue-Team Log Intelligence
 
-> **Built by Harikishore Karunanithi** · Copyright (c) 2026 Harikishore Karunanithi · MIT (use and share freely, but keep the author attribution).
-> <!-- WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi -->
+> Built by **Harikishore Karunanithi** · Copyright (c) 2026 · MIT.
 
-BlueCell is a **read-only** multi-agent pipeline that turns raw security logs
-into an investigation. Point it at logs from any source — EDR/endpoint, syslog,
-DNS, firewall/router/switch, and cloud audit trails — and it will:
+**What it is:** a local, read-only pipeline that lets you point an LLM (Claude)
+at **gigabytes of messy, multi-source security logs** and get back a **grounded,
+repeatable** incident analysis — verdict, attack storyline, IOCs, and an IR
+report. The model does the reasoning; BlueCell does the part a chat window can't:
+ingest at scale, normalize, correlate, **distill to what matters, and
+fact-check the model's output against the logs so it can't invent indicators.**
+
+**What it is *not*:** it is not "smarter than Claude" — it *is* Claude under the
+hood. For a handful of logs that fit in a chat, pasting them into Claude directly
+is simpler and often just as good. BlueCell earns its place when the logs are
+**too big or too many to paste**, or when you need **repeatable, automated,
+locally-run** analysis with grounding guarantees. See
+[Honest positioning](#honest-positioning-when-to-use-this) below.
+
+## Pipeline
+
+Point it at logs from any source — EDR/endpoint, syslog, DNS,
+firewall/router/switch, cloud audit trails, and **Microsoft 365 / Entra**
+(sign-in logs + Unified Audit Log) — and it will:
 
 1. **Ingest** heterogeneous logs (JSON / JSONL / CSV / syslog).
 2. **Normalize** everything to one compact, OCSF-inspired event schema.
@@ -176,16 +191,49 @@ pip install pytest
 pytest -q
 ```
 
+## Honest positioning (when to use this)
+
+I built this to learn, and I'd rather be straight about where it helps:
+
+| Situation | Better choice |
+|---|---|
+| A few logs that fit in a chat, one-off, human-led | **Just paste them into Claude.** BlueCell is overhead. |
+| 40 MB across dozens of files, hundreds of thousands of rows | **BlueCell** — you can't paste that; it distills + grounds it. |
+| You need repeatable, automated, comparable output across many cases | **BlueCell** |
+| You need a grounded answer that can't invent IOCs | **BlueCell** (grounding check) |
+| Maximum depth on a single incident | A skilled analyst reading raw logs (or Claude on the raw files) |
+
+The value here is the **engineering around the model** — ingestion, normalization,
+correlation, distillation, grounding, and repeatable reporting — not the
+reasoning itself. Its main current weakness is that the evidence brief is
+**lossy** (it summarizes), so a person on the raw logs can still see more.
+
 ## Scope & limitations (read this)
 
-- **MVP scope:** Blue-team, read-only. Red/Purple/GRC are future phases planned
-  on the same correlation core.
+- **Deterministic mode vs AI mode.** With `--llm off` (default), the verdict/RCA
+  come from **rule-based Python** — fast and offline, but shallow: it will miss
+  attack patterns it has no rule for. With `--llm auto`, model-driven agents
+  (Lead DFIR + Tier-2 reviewer) reason over the evidence and are far stronger,
+  but slower (real model calls) and require the `claude` CLI or an API key.
+- **Grounding, not magic.** LLM output is fact-checked against the ingested
+  events; any indicator not in the logs is flagged UNVERIFIED. This reduces —
+  does not eliminate — error. Findings are **hypotheses**; a human validates.
 - The ATT&CK mapper is a curated **high-signal rule set**, not a full detection
-  engine. Tune the rules in `pipeline/attack.py` to your environment.
-- Correlation links events by shared entities within a time window; very noisy
-  environments may need a tighter `--window` and custom entity handling.
-- Findings are **hypotheses**. A human analyst validates before any action.
+  engine. Coverage is best for identity / Microsoft 365 attacks and common
+  endpoint/network patterns.
+- Red / Purple / GRC are **not built** — this is Blue-team, read-only.
+- It sends the distilled brief to the model, so it is **not air-gapped**.
+
+## Project evolution (the honest version)
+
+v1 was fully deterministic and, on a real Microsoft 365 compromise, **called it
+"benign noise" — a false negative on a genuine breach.** Fixing that is what
+taught the real lessons in this repo: (1) the agents had to actually *reason*
+over evidence with a model instead of running fixed rules; (2) the parser had to
+surface the signal that mattered (device-code flow, Unified Audit Log
+operations, inbox rules, mailbox access); and (3) the model's output had to be
+**grounded** so it couldn't hallucinate IOCs. The commit history shows that arc.
 
 ## License
 
-MIT — see `LICENSE`.
+MIT — see `LICENSE`. Please keep the author attribution.
