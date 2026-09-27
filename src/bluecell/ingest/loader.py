@@ -64,6 +64,9 @@ def detect_source(filename: str, record: Optional[dict] = None,
                     if hint in v.lower():
                         return _canon(hint)
         # Column-shape detection for Microsoft exports without a source field.
+        # Unified Audit Log: RecordType/Operation/AuditData columns.
+        if "auditdata" in low and ("operation" in low or "recordtype" in low):
+            return "ual"
         if "ip address" in low and ("status" in low or "sign-in error code" in low
                                     or "user" in low or "username" in low):
             return "signins"

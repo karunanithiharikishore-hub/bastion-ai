@@ -29,6 +29,18 @@ _DOMAIN_STOPWORDS = {"microsoft.com", "office.com", "windows.com"}
 def evidence_index(events, valid_techniques) -> dict:
     """Build the set of indicators that ACTUALLY appear in the evidence."""
     ips, domains, hashes, hosts, users = set(), set(), set(), set(), set()
+
+    def _note_user_domain(val):
+        # A user like "a@corp.com" grounds both the local-part and corp.com so
+        # the grounding check never flags the account's own domain/name.
+        v = str(val or "").lower()
+        if "@" in v:
+            local, _, dom = v.partition("@")
+            if dom:
+                domains.add(dom)
+            if local:
+                domains.add(local)   # email local-part looks domain-ish to the regex
+
     for e in events:
         for ip in (getattr(e, "src_ip", None), getattr(e, "dst_ip", None)):
             if ip:
@@ -41,6 +53,7 @@ def evidence_index(events, valid_techniques) -> dict:
             hosts.add(str(e.host).lower())
         if getattr(e, "user", None):
             users.add(str(e.user).lower())
+            _note_user_domain(e.user)
         # Mine the message text too, so IOCs embedded in messages count as evidence.
         msg = getattr(e, "message", "") or ""
         for ip in _IP_RE.findall(msg):

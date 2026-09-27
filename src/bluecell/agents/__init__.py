@@ -5,5 +5,7 @@
 and reconcile findings — the true multi-agent model."""
 from .base import Agent, Finding, AgentContext
 from .orchestrator import SwarmOrchestrator, run_swarm
+from .analyst import ai_analyze, build_evidence_brief
 
-__all__ = ["Agent", "Finding", "AgentContext", "SwarmOrchestrator", "run_swarm"]
+__all__ = ["Agent", "Finding", "AgentContext", "SwarmOrchestrator", "run_swarm",
+           "ai_analyze", "build_evidence_brief"]

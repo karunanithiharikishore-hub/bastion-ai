@@ -20,7 +20,7 @@ from .pipeline.compress import token_estimate
 from .pipeline.ioc import hunt_checklist
 from .report.rca import build_storyline, assess_incident
 from .intel import IntelStore
-from .agents import run_swarm
+from .agents import run_swarm, ai_analyze
 from . import provenance
 
 
@@ -74,6 +74,16 @@ def analyze(paths, *, source_override=None, window_minutes=60,
                           intel_store=intel_store, backbone=backbone,
                           use_llm=use_llm)
     swarm_ms = int((time.perf_counter() - _t_swarm0) * 1000)
+
+    # Model-driven AI analyst — genuine LLM reasoning over the evidence, grounded.
+    # Opt-in: only runs when an LLM backbone is available (use_llm and backbone).
+    ai_analysis = None
+    if run_agents and use_llm and backbone is not None:
+        try:
+            ai_analysis = ai_analyze(events, iocs, backbone, want_review=True)
+        except Exception as exc:  # never break the deterministic result
+            ai_analysis = {"available": False, "reason": f"{type(exc).__name__}: {exc}"}
+
     total_ms = int((time.perf_counter() - _t0) * 1000)
 
     return {
@@ -99,4 +109,5 @@ def analyze(paths, *, source_override=None, window_minutes=60,
         "hunt_checklist": checklist,
         "intel_used": intel_used,
         "swarm": swarm,
+        "ai_analysis": ai_analysis,
     }

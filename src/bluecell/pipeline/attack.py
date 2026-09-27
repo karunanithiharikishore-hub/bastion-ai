@@ -32,6 +32,14 @@ ATTACK_TECHNIQUES = {
     "T1562": ("Impair Defenses", "defense-evasion"),
     "T1567": ("Exfiltration Over Web Service", "exfiltration"),
     "T1490": ("Inhibit System Recovery", "impact"),
+    # Identity / M365 cloud techniques
+    "T1098.005": ("Device Registration", "persistence"),
+    "T1098.003": ("Additional Cloud Roles / App Consent", "persistence"),
+    "T1114": ("Email Collection", "collection"),
+    "T1564.008": ("Email Hiding Rules (Inbox Rule)", "defense-evasion"),
+    "T1566": ("Phishing", "initial-access"),
+    "T1534": ("Internal Spearphishing", "lateral-movement"),
+    "T1621": ("MFA Request Generation", "credential-access"),
 }
 
 # Suspicious TLDs / patterns often seen in C2 and phishing infrastructure.

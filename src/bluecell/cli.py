@@ -61,6 +61,7 @@ def cmd_analyze(args) -> int:
               f"{result['meta']['events_ingested']} events, "
               f"backbone={result['meta']['backbone']}")
         _print_verdicts(result)
+        _print_ai(result)
     else:
         print(output)
     return 0
@@ -142,6 +143,20 @@ def cmd_roster(args) -> int:
     for tier, name, role in rows:
         print(f"  [T{tier}] {name:<28} {role}")
     return 0
+
+
+def _print_ai(result) -> None:
+    """Print the model-driven AI analyst conclusion, if it ran."""
+    ai = result.get("ai_analysis")
+    if not ai:
+        return
+    if not ai.get("available"):
+        print(f"[bluecell] AI analyst: unavailable ({ai.get('reason', 'n/a')}); "
+              f"deterministic verdict shown above.")
+        return
+    lead = ai.get("lead", {})
+    print(f"[bluecell] AI analyst (model-driven): {ai.get('final_verdict')} "
+          f"(conf {lead.get('confidence')}) — {lead.get('headline', '')}")
 
 
 def cmd_info(args) -> int:

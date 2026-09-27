@@ -9,6 +9,7 @@ deliberately defensive: malformed records are skipped, never fatal.
 """
 from __future__ import annotations
 
+import json
 import re
 from typing import Optional
 
@@ -231,6 +232,12 @@ def parse_azure_signin(r: dict) -> Optional[Event]:
     if user is None and ip is None and status is None:
         return None  # not an azure sign-in row
 
+    transfer = _get(r, "Original transfer method", "originalTransferMethod")
+    device_id = _get(r, "Device ID", "deviceId", "Device Id")
+    join_type = _get(r, "Join Type", "joinType")
+    client_app = _get(r, "Client app", "clientApp", "clientAppUsed")
+    token_type = _get(r, "Incoming token type", "incomingTokenType")
+
     failed = _azure_is_failure(status, errcode, reason)
     action = "login_failed" if failed else "login_success"
     sev = 3 if failed else 1
@@ -238,6 +245,8 @@ def parse_azure_signin(r: dict) -> Optional[Event]:
         str(risk_state or "").lower() in ("atrisk", "at risk", "confirmedcompromised")
     if risky:
         sev = 4
+
+    is_devicecode = "devicecode" in str(transfer or "").lower().replace(" ", "")
 
     ev = Event(
         ts=_get(r, "Date (UTC)", "Date", "date", "createdDateTime", "Timestamp",
@@ -248,6 +257,11 @@ def parse_azure_signin(r: dict) -> Optional[Event]:
         message=(f"Azure AD sign-in {status or ('failure' if failed else 'success')} "
                  f"for {user or '?'} from {ip or '?'} "
                  f"({location or '?'}) app={app or '?'}"
+                 + (f" transfer={transfer}" if transfer else "")
+                 + (f" device={device_id}" if device_id else "")
+                 + (f" join={join_type}" if join_type else "")
+                 + (f" client={client_app}" if client_app else "")
+                 + (f" token={token_type}" if token_type else "")
                  + (f" reason={reason}" if reason else "")
                  + (f" risk={risk_level or risk_state}" if risky else "")
                  + (f" mfa={mfa}" if mfa else "")),
@@ -261,6 +275,117 @@ def parse_azure_signin(r: dict) -> Optional[Event]:
         # Risky/valid-account abuse -> Valid Accounts.
         ev.attack.append("T1078")
         ev.tags.append("azure:risky-signin")
+    if is_devicecode and not failed:
+        # Successful device-code-flow sign-in — a known AiTM/phishing access vector.
+        ev.attack.append("T1078")
+        ev.tags.append("azure:devicecode-success")
+        ev.severity = max(ev.severity, 3)
+    return ev
+
+
+# ---- Microsoft 365 Unified Audit Log (UAL) ---------------------------------
+# Operation -> (action, category, severity, [attack ids]). These are the events
+# that actually reveal an M365 account compromise.
+_UAL_OPS = {
+    # Device registration / persistence
+    "add device": ("device_registered", "process", 3, ["T1098.005"]),
+    "add registered owner to device": ("device_owner_added", "process", 3, ["T1098.005"]),
+    "add registered users to device": ("device_users_added", "process", 3, ["T1098.005"]),
+    "register device": ("device_registered", "process", 3, ["T1098.005"]),
+    # Mailbox access / collection
+    "mailitemsaccessed": ("mailbox_access", "other", 3, ["T1114"]),
+    "mailboxlogin": ("mailbox_login", "authentication", 2, []),
+    # Inbox rules / defense evasion
+    "new-inboxrule": ("inbox_rule_created", "other", 4, ["T1564.008"]),
+    "set-inboxrule": ("inbox_rule_modified", "other", 4, ["T1564.008"]),
+    "updateinboxrules": ("inbox_rule_modified", "other", 4, ["T1564.008"]),
+    "enable-inboxrule": ("inbox_rule_enabled", "other", 3, ["T1564.008"]),
+    # Sending mail / potential phishing from mailbox
+    "send": ("mail_sent", "other", 3, ["T1566"]),
+    "sendas": ("mail_sent_as", "other", 4, ["T1566", "T1534"]),
+    "sendonbehalf": ("mail_sent_onbehalf", "other", 3, ["T1566"]),
+    # Auth
+    "userloggedin": ("login_success", "authentication", 1, []),
+    "userloginfailed": ("login_failed", "authentication", 2, ["T1110"]),
+    # Consent / persistence
+    "consent to application": ("app_consent", "other", 3, ["T1098.003"]),
+    "add service principal": ("service_principal_added", "other", 3, ["T1098.003"]),
+    "add app role assignment grant to user": ("app_role_grant", "other", 3, ["T1098.003"]),
+    "add member to role": ("role_member_added", "other", 3, ["T1098"]),
+    "reset user password": ("password_reset", "authentication", 2, []),
+    "change user password": ("password_change", "authentication", 2, []),
+}
+
+
+def parse_ual(r: dict) -> Optional[Event]:
+    """Microsoft 365 / Entra Unified Audit Log row (RecordType/Operation/AuditData)."""
+    op = _get(r, "Operation", "operation")
+    if not op:
+        return None
+    op_l = str(op).lower()
+    action, category, sev, attack = _UAL_OPS.get(
+        op_l, (str(op), "other", 1, []))
+
+    # AuditData is a JSON blob with the useful detail.
+    audit = _get(r, "AuditData", "auditdata")
+    ad = {}
+    if isinstance(audit, str) and audit.strip().startswith("{"):
+        try:
+            ad = json.loads(audit)
+        except (ValueError, TypeError):
+            ad = {}
+    elif isinstance(audit, dict):
+        ad = audit
+
+    def a(*keys, default=None):
+        for k in keys:
+            if k in ad and ad[k] not in (None, "", []):
+                return ad[k]
+        return default
+
+    ip = a("ClientIP", "ClientIPAddress", "ActorIpAddress", "IPAddress")
+    if ip:
+        ip = str(ip).split(":")[0].strip("[]")  # strip port / brackets
+    user = _get(r, "UserId", "userid") or a("UserId", "UserKey")
+    workload = a("Workload")
+    result = a("ResultStatus")
+
+    # Extra context for high-signal ops.
+    extra = ""
+    dev = a("DeviceName", "DeviceId")
+    if dev:
+        extra += f" device={dev}"
+    params = a("Parameters")
+    if params and "rule" in op_l:
+        try:
+            names = [p.get("Value") for p in params if isinstance(p, dict)]
+            extra += " rule_params=" + ",".join(str(n)[:40] for n in names if n)[:120]
+        except Exception:
+            pass
+    if op_l == "mailitemsaccessed":
+        folders = a("Folders")
+        cnt = a("OperationCount")
+        if cnt:
+            extra += f" items={cnt}"
+        if isinstance(folders, list):
+            extra += f" folders={len(folders)}"
+
+    ev = Event(
+        ts=_get(r, "CreationDate", "creationdate") or a("CreationTime"),
+        source="m365_ual",
+        category=category,
+        action=action,
+        message=(f"UAL {op} by {user or '?'} from {ip or '?'} "
+                 f"[{workload or '?'}] {result or ''}{extra}").strip(),
+        severity=sev,
+        user=str(user) if user else None,
+        src_ip=str(ip) if ip else None,
+        raw=r,
+    )
+    for tid in attack:
+        if tid not in ev.attack:
+            ev.attack.append(tid)
+    ev.tags.append(f"ual:{op_l}")
     return ev
 
 
@@ -314,4 +439,8 @@ STRUCTURED_PARSERS = {
     "messagetrace": parse_o365_message,
     "mtsummary": parse_o365_message,
     "messagetraceresult": parse_o365_message,
+    # Microsoft 365 / Entra Unified Audit Log
+    "ual": parse_ual,
+    "unifiedaudit": parse_ual,
+    "auditlog": parse_ual,
 }
