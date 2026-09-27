@@ -19,7 +19,7 @@ from . import provenance as _prov
 __author__ = _prov.AUTHOR
 __copyright__ = _prov.COPYRIGHT
 __license__ = "MIT"
-__version__ = "0.9.1"
+__version__ = "0.10.0"
 
 # Lightweight constant-level integrity check on import (no filesystem scan here;
 # the CLI performs the full repo scan + halt via provenance.enforce()).

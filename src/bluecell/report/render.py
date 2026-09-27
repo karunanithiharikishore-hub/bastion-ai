@@ -62,6 +62,35 @@ def render_markdown(result: dict) -> str:
         lines += ["", "---", _footer()]
         return "\n".join(lines)
 
+    # ---- Executive summary (IR-report style) --------------------------------
+    top = result["incidents"][0]
+    tv = top.get("verdict") or {}
+    ts = top["storyline"]["structured"]
+    asum = ts.get("attack_summary") or {}
+    lines += [
+        "## Executive Summary",
+        "",
+        f"**Overall verdict:** {_verdict_badge(tv.get('level'))} "
+        f"(confidence {round(tv.get('confidence', 0) * 100)}%) — {tv.get('headline', '')}",
+        "",
+        f"**How they got in:** {asum.get('how_they_got_in', 'n/a')}",
+        "",
+        f"**Objective:** {asum.get('objective', ts.get('likely_objective', 'unknown'))}",
+        "",
+        "**What they did:**",
+    ]
+    for step in asum.get("what_they_did", []):
+        lines.append(f"- {step}")
+    if not asum.get("what_they_did"):
+        lines.append("- No discrete actions reconstructed.")
+    lines += [
+        "",
+        f"**Scope:** hosts: {', '.join(ts.get('affected_hosts') or []) or 'n/a'} · "
+        f"users: {', '.join(ts.get('affected_users') or []) or 'n/a'} · "
+        f"window: {ts['window']['start']} → {ts['window']['end']}",
+        "",
+    ]
+
     lines.append("## Incidents (highest risk first)\n")
     for i, inc in enumerate(result["incidents"], 1):
         s = inc["storyline"]["structured"]

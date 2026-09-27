@@ -412,6 +412,27 @@ async function load(url) {
   } catch (e) { toast("Load failed: " + e); }
 }
 
+/* ================= download IR report ================= */
+async function downloadIR() {
+  const btn = $("download-ir"); if (!btn) return;
+  btn.disabled = true; toast("Building IR report…");
+  try {
+    const res = await fetch("/api/report.md");
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const blob = await res.blob();
+    let fname = "bluecell_IR_report.md";
+    const m = (res.headers.get("Content-Disposition") || "").match(/filename="([^"]+)"/);
+    if (m) fname = m[1];
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = fname; document.body.appendChild(a); a.click();
+    a.remove(); URL.revokeObjectURL(url);
+    toast("✓ IR report downloaded");
+  } catch (e) { toast("⚠ report failed: " + (e.message || e)); }
+  finally { btn.disabled = false; }
+}
+(function () { const b = $("download-ir"); if (b) b.addEventListener("click", downloadIR); })();
+
 // On first open, show whatever the server was launched with (samples), so the
 // deck isn't empty — but the drop zone is the primary call to action.
 load("/api/report");

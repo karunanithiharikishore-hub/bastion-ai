@@ -23,6 +23,7 @@ from .. import __version__, provenance
 from ..analyzer import analyze
 from ..intel import IntelStore
 from ..llm import LLMBackbone, BackboneUnavailable
+from ..report import render_markdown
 
 _STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 _CTYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
@@ -199,6 +200,23 @@ def _make_handler(state: _State):
             elif path == "/api/refresh":
                 res = state.run_analysis()
                 self._json(res if res else {"error": state.error}, 200 if res else 500)
+            elif path == "/api/report.md":
+                res = state.result or state.run_analysis()
+                if res is None:
+                    self._send(500, (state.error or "analysis failed").encode(), "text/plain")
+                    return
+                import datetime
+                md = render_markdown(res)
+                fname = "bluecell_IR_report_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + ".md"
+                body = md.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/markdown; charset=utf-8")
+                self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("X-BlueCell-Author", provenance.AUTHOR)
+                self.end_headers()
+                if self.command != "HEAD":
+                    self.wfile.write(body)
             elif path == "/api/meta":
                 self._json({
                     "version": __version__, "author": provenance.AUTHOR,

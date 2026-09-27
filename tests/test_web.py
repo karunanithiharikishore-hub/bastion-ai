@@ -48,6 +48,21 @@ def test_api_report_shape(server):
     assert headers.get("X-BlueCell-Author") == "Harikishore Karunanithi"
 
 
+def test_ir_report_markdown_download(server):
+    import urllib.request
+    with urllib.request.urlopen(server + "/api/report.md", timeout=10) as r:
+        assert r.status == 200
+        headers = dict(r.headers)
+        body = r.read().decode("utf-8")
+    assert "text/markdown" in headers.get("Content-Type", "")
+    assert "attachment" in headers.get("Content-Disposition", "")
+    assert ".md" in headers.get("Content-Disposition", "")
+    assert "Incident Analysis Report" in body
+    assert "Executive Summary" in body
+    assert "VERDICT:" in body
+    assert "Harikishore Karunanithi" in body   # watermark carried into report
+
+
 def test_api_meta(server):
     status, body, _ = _get(server + "/api/meta")
     data = json.loads(body)
