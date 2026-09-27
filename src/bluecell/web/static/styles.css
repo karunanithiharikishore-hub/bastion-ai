@@ -268,6 +268,13 @@ main { padding: 8px 18px 48px; max-width: 1340px; margin: 0 auto; }
   margin-bottom: 12px; background: rgba(8,14,34,.45); }
 .incident .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .incident .id { font-weight: 700; letter-spacing: 1px; }
+.vbadge { display: inline-flex; align-items: center; gap: 6px; margin: 8px 0 2px;
+  font-size: 10.5px; font-weight: 800; letter-spacing: 1px; padding: 4px 10px;
+  border-radius: 8px; border: 1px solid var(--glass-brd); }
+.vbadge .vbc { font-weight: 700; opacity: .8; }
+.vbadge.malicious { background: rgba(255,77,109,.14); color: var(--crit); border-color: rgba(255,77,109,.5); }
+.vbadge.benign { background: rgba(53,224,161,.14); color: var(--low); border-color: rgba(53,224,161,.5); }
+.vbadge.review { background: rgba(255,211,78,.14); color: var(--med); border-color: rgba(255,211,78,.5); }
 .sev { padding: 3px 10px; border-radius: 999px; font-size: 10px; font-weight: 800; color: #06101f; letter-spacing: 1px; }
 .sev.critical { background: var(--crit); box-shadow: 0 0 16px rgba(255,77,109,.6); }
 .sev.high { background: var(--high); } .sev.medium { background: var(--med); } .sev.low { background: var(--low); }

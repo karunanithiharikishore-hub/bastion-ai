@@ -329,6 +329,18 @@ function renderIncidents(r) {
     const s = inc.storyline.structured, box = el("div", "incident");
     const row = el("div", "row"); row.appendChild(el("span", "id", esc(s.incident_id)));
     row.appendChild(el("span", "sev " + s.severity, `${s.severity.toUpperCase()} · ${s.score}`)); box.appendChild(row);
+    // Verdict badge — is it real, noise, or unclear?
+    const v = inc.verdict;
+    if (v) {
+      const vcls = v.level === "likely-malicious" ? "malicious"
+        : v.level === "likely-benign" ? "benign" : "review";
+      const vtxt = v.level === "likely-malicious" ? "⚠ LIKELY REAL ATTACK"
+        : v.level === "likely-benign" ? "✓ LIKELY BENIGN / NOISE" : "◑ NEEDS REVIEW";
+      const vb = el("div", "vbadge " + vcls,
+        `${vtxt} <span class="vbc">${Math.round((v.confidence || 0) * 100)}%</span>`);
+      vb.title = v.headline || "";
+      box.appendChild(vb);
+    }
     const bar = el("div", "scorebar"), fill = el("i"); bar.appendChild(fill); box.appendChild(bar);
     requestAnimationFrame(() => { fill.style.width = Math.max(4, s.score) + "%"; });
     box.appendChild(el("div", "meta-line", `hosts: ${esc((s.affected_hosts || []).join(", ") || "n/a")}`));
