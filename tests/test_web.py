@@ -66,3 +66,34 @@ def test_path_traversal_blocked(server):
     with pytest.raises(urllib.error.HTTPError) as exc:
         _get(server + "/../../../../etc/passwd")
     assert exc.value.code == 404
+
+
+def _post(url, obj):
+    data = json.dumps(obj).encode("utf-8")
+    req = urllib.request.Request(url, data=data, method="POST",
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return r.status, json.loads(r.read().decode("utf-8"))
+
+
+def test_upload_analyzes_dropped_logs(server):
+    syslog = ("Sep 26 09:01:12 web01 sshd[1]: Failed password for admin from 203.0.113.66 port 41022 ssh2\n"
+              "Sep 26 09:01:14 web01 sshd[2]: Failed password for admin from 203.0.113.66 port 41024 ssh2\n"
+              "Sep 26 09:03:47 web01 sshd[3]: Accepted password for admin from 203.0.113.66 port 41120 ssh2\n")
+    dns = '{"timestamp":"2026-09-26T09:06:12Z","source":"dns","host":"web01","src_ip":"10.0.0.11","query":"kj3h5g9x2zqwmnbvc7.top","answer":"198.51.100.7"}\n'
+    status, data = _post(server + "/api/upload", {
+        "files": [{"name": "auth.log", "content": syslog},
+                  {"name": "dns.jsonl", "content": dns}],
+        "window": 120,
+    })
+    assert status == 200
+    assert data["meta"]["events_ingested"] >= 3
+    assert data["meta"]["author"] == "Harikishore Karunanithi"
+    assert "swarm" in data
+
+
+def test_upload_rejects_empty(server):
+    # No usable files -> server responds 500 with an error (urlopen raises on 5xx).
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _post(server + "/api/upload", {"files": []})
+    assert exc.value.code == 500

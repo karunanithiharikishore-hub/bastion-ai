@@ -90,12 +90,25 @@ bluecell serve samples --window 120 --port 8787 --open
 # add --llm auto  to enable Claude-enriched RCA/agent notes
 ```
 
-A dependency-free local dashboard (binds to `127.0.0.1`, read-only, GET-only):
-stat cards, incidents with score bars + ATT&CK phase chips + RCA storyline, the
-agent-swarm roster and per-incident consensus, specialist findings, IOC tables,
-a prioritized threat-hunt checklist, and matched threat intel. Click
-**Re-analyze** to re-run the pipeline + swarm. JSON API: `/api/report`,
-`/api/refresh`, `/api/meta`.
+A dependency-free local dashboard (binds to `127.0.0.1`, read-only): a futuristic
+"command deck" with a glassmorphism + neon theme and an animated particle
+background.
+
+**Drop your own logs right in the browser** — the top of the deck is a
+drag-and-drop **log intake zone**. Drag log files (or click **Browse**), pick a
+correlation window, and hit **Analyze**; the files are analyzed locally in a
+throwaway temp dir and the deck updates. **Load Sample Attack** shows the bundled
+demo. Nothing is sent to the internet.
+
+The deck shows: animated hero metrics (**agents deployed**, **time to deduce**,
+events, incidents), an **RCA Pinpointer** (radar crosshair locking onto
+patient-zero / root cause / objective / blast radius), a **3D layered kill-chain
+storyline you can drag to rotate**, the **agent-swarm constellation** (SOC core
+with tier-ringed orbiting agents), incidents, IOC tables, a prioritized
+threat-hunt checklist, and matched threat intel.
+
+JSON/HTTP API: `GET /api/report`, `GET /api/refresh`, `GET /api/meta`,
+`POST /api/upload` (`{files:[{name,content}], window}`, 40 MB cap).
 
 Output is a full incident report: risk-scored incidents, RCA storyline, ATT&CK
 phases, IOCs, and a prioritized hunt checklist. Use `--format json` for machine

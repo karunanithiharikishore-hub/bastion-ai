@@ -50,19 +50,54 @@ class _State:
         except BackboneUnavailable:
             return None
 
+    def _analyze_paths(self, paths, window):
+        intel = IntelStore(self.intel_db) if self.intel_db else IntelStore()
+        return analyze(
+            paths, window_minutes=window,
+            backbone=self._backbone(), intel_store=intel,
+            run_agents=True, use_llm=(self.llm_mode != "off"),
+        )
+
     def run_analysis(self) -> dict:
         with self.lock:
             try:
-                intel = IntelStore(self.intel_db) if self.intel_db else IntelStore()
-                self.result = analyze(
-                    self.paths, window_minutes=self.window,
-                    backbone=self._backbone(), intel_store=intel,
-                    run_agents=True, use_llm=(self.llm_mode != "off"),
-                )
+                self.result = self._analyze_paths(self.paths, self.window)
                 self.error = None
             except Exception as exc:  # never crash the server
                 self.error = f"{type(exc).__name__}: {exc}"
                 self.result = None
+            return self.result
+
+    def run_on_uploads(self, files, window=None) -> dict:
+        """Analyze user-dropped files. `files` = [{name, content}]. Read-only:
+        content is written to a throwaway temp dir, analyzed, then deleted."""
+        import tempfile, shutil
+        window = window or self.window
+        with self.lock:
+            tmp = tempfile.mkdtemp(prefix="bluecell_upload_")
+            try:
+                safe_count = 0
+                for f in files:
+                    name = os.path.basename(str(f.get("name", "log.txt"))) or "log.txt"
+                    # Only allow known log extensions; default to .log.
+                    if os.path.splitext(name)[1].lower() not in (
+                        ".json", ".jsonl", ".ndjson", ".csv", ".log", ".txt", ".syslog"):
+                        name += ".log"
+                    with open(os.path.join(tmp, name), "w", encoding="utf-8",
+                              errors="replace") as out:
+                        out.write(str(f.get("content", "")))
+                    safe_count += 1
+                if not safe_count:
+                    self.error = "no usable files uploaded"
+                    self.result = None
+                    return None
+                self.result = self._analyze_paths([tmp], window)
+                self.error = None
+            except Exception as exc:
+                self.error = f"{type(exc).__name__}: {exc}"
+                self.result = None
+            finally:
+                shutil.rmtree(tmp, ignore_errors=True)
             return self.result
 
 
@@ -124,6 +159,28 @@ def _make_handler(state: _State):
                 self._static("index.html")
             else:
                 self._static(path)
+
+        def do_POST(self):
+            route = urlparse(self.path)
+            if route.path != "/api/upload":
+                self._send(404, b"not found", "text/plain")
+                return
+            length = int(self.headers.get("Content-Length", 0) or 0)
+            MAX = 40 * 1024 * 1024  # 40 MB cap
+            if length <= 0 or length > MAX:
+                self._json({"error": f"payload must be 1..{MAX} bytes"}, 413)
+                return
+            try:
+                body = self.rfile.read(length)
+                payload = json.loads(body.decode("utf-8", "replace"))
+                files = payload.get("files") or []
+                window = int(payload.get("window") or state.window)
+            except (ValueError, TypeError) as exc:
+                self._json({"error": f"bad request: {exc}"}, 400)
+                return
+            res = state.run_on_uploads(files, window)
+            self._json(res if res else {"error": state.error or "analysis failed"},
+                       200 if res else 500)
 
     return Handler
 

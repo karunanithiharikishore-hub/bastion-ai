@@ -8,13 +8,12 @@ const el = (tag, cls, html) => { const n = document.createElement(tag);
   if (cls) n.className = cls; if (html !== undefined) n.innerHTML = html; return n; };
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g,
   (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const toast = (m) => { const t = $("toast"); t.textContent = m; t.classList.remove("hidden");
-  setTimeout(() => t.classList.add("hidden"), 2500); };
+const toast = (m) => { const t = $("toast"); t.innerHTML = m; t.classList.remove("hidden");
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.add("hidden"), 3000); };
 
-/* ---------- animated particle-network background ---------- */
+/* ================= animated particle-network background ================= */
 (function bg() {
-  const c = $("bg"), x = c.getContext("2d");
-  let w, h, pts;
+  const c = $("bg"), x = c.getContext("2d"); let w, h, pts;
   const resize = () => { w = c.width = innerWidth; h = c.height = innerHeight;
     pts = Array.from({ length: Math.min(90, Math.floor(w * h / 18000)) }, () => ({
       x: Math.random() * w, y: Math.random() * h,
@@ -22,58 +21,114 @@ const toast = (m) => { const t = $("toast"); t.textContent = m; t.classList.remo
   resize(); addEventListener("resize", resize);
   (function draw() {
     x.clearRect(0, 0, w, h);
-    for (const p of pts) {
-      p.x = (p.x + p.vx + w) % w; p.y = (p.y + p.vy + h) % h;
-      x.beginPath(); x.arc(p.x, p.y, 1.4, 0, 7); x.fillStyle = "rgba(38,230,255,.7)"; x.fill();
-    }
+    for (const p of pts) { p.x = (p.x + p.vx + w) % w; p.y = (p.y + p.vy + h) % h;
+      x.beginPath(); x.arc(p.x, p.y, 1.4, 0, 7); x.fillStyle = "rgba(38,230,255,.7)"; x.fill(); }
     for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) {
       const a = pts[i], b = pts[j], d = Math.hypot(a.x - b.x, a.y - b.y);
       if (d < 130) { x.strokeStyle = `rgba(120,170,255,${(1 - d / 130) * .18})`;
-        x.beginPath(); x.moveTo(a.x, a.y); x.lineTo(b.x, b.y); x.stroke(); }
-    }
+        x.beginPath(); x.moveTo(a.x, a.y); x.lineTo(b.x, b.y); x.stroke(); } }
     requestAnimationFrame(draw);
   })();
 })();
 
-/* ---------- count-up ---------- */
+/* ================= file intake (drag & drop) ================= */
+const pending = new Map();   // name -> {name, content, size}
+const MAX_TOTAL = 38 * 1024 * 1024;
+
+function humanSize(n) { return n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB"; }
+
+function renderFileList() {
+  const host = $("filelist"); host.innerHTML = "";
+  pending.forEach((f) => {
+    const chip = el("div", "fchip",
+      `<span>📄 ${esc(f.name)}</span><span class="sz">${humanSize(f.size)}</span><span class="x" data-n="${esc(f.name)}">✕</span>`);
+    host.appendChild(chip);
+  });
+  host.querySelectorAll(".x").forEach((b) => b.addEventListener("click", () => {
+    pending.delete(b.dataset.n); renderFileList(); updateAnalyzeBtn(); }));
+  updateAnalyzeBtn();
+}
+function updateAnalyzeBtn() {
+  $("analyze").disabled = pending.size === 0;
+  $("status").textContent = pending.size ? `${pending.size} file(s) staged` : "";
+}
+
+function addFiles(fileList) {
+  let total = 0; pending.forEach((f) => total += f.size);
+  const arr = Array.from(fileList);
+  let done = 0;
+  if (!arr.length) return;
+  arr.forEach((file) => {
+    if (total + file.size > MAX_TOTAL) { toast("⚠ 38 MB total limit reached"); done++; return; }
+    total += file.size;
+    const reader = new FileReader();
+    reader.onload = () => {
+      pending.set(file.name, { name: file.name, content: reader.result, size: file.size });
+      done++; if (done === arr.length) renderFileList();
+    };
+    reader.onerror = () => { done++; toast("Could not read " + esc(file.name)); };
+    reader.readAsText(file);
+  });
+}
+
+(function intake() {
+  const dz = $("dropzone"), pick = $("filepick");
+  $("browse").addEventListener("click", (e) => { e.stopPropagation(); pick.click(); });
+  dz.addEventListener("click", () => pick.click());
+  pick.addEventListener("change", () => addFiles(pick.files));
+  ["dragenter", "dragover"].forEach((ev) => dz.addEventListener(ev, (e) => {
+    e.preventDefault(); dz.classList.add("drag"); }));
+  ["dragleave", "drop"].forEach((ev) => dz.addEventListener(ev, (e) => {
+    e.preventDefault(); if (ev !== "dragover") dz.classList.remove("drag"); }));
+  dz.addEventListener("drop", (e) => {
+    const items = e.dataTransfer;
+    if (items && items.files && items.files.length) addFiles(items.files);
+  });
+  $("analyze").addEventListener("click", analyzeUploads);
+  $("loadsample").addEventListener("click", () => { pending.clear(); renderFileList();
+    $("status").innerHTML = '<span class="spinner"></span> loading sample…'; load("/api/refresh"); });
+})();
+
+async function analyzeUploads() {
+  if (!pending.size) return;
+  $("analyze").disabled = true;
+  $("status").innerHTML = '<span class="spinner"></span> analyzing ' + pending.size + ' file(s)…';
+  const files = Array.from(pending.values()).map((f) => ({ name: f.name, content: f.content }));
+  const window = parseInt($("window").value, 10) || 120;
+  try {
+    const res = await fetch("/api/upload", { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ files, window }) });
+    const data = await res.json();
+    if (data.error) { toast("⚠ " + esc(data.error)); $("status").textContent = "error"; }
+    else { await mergeMetaAndRender(data); $("status").textContent = "✓ analysis complete"; toast("✓ Analysis complete"); }
+  } catch (e) { toast("Upload failed: " + e); $("status").textContent = "failed"; }
+  finally { $("analyze").disabled = false; }
+}
+
+/* ================= count-up ================= */
 function countUp(node, to, unit) {
   const dur = 900, t0 = performance.now();
-  (function step(t) {
-    const k = Math.min(1, (t - t0) / dur), v = Math.round(to * (1 - Math.pow(1 - k, 3)));
+  (function step(t) { const k = Math.min(1, (t - t0) / dur), v = Math.round(to * (1 - Math.pow(1 - k, 3)));
     node.innerHTML = v.toLocaleString() + (unit ? `<span class="munit">${unit}</span>` : "");
-    if (k < 1) requestAnimationFrame(step);
-  })(t0);
+    if (k < 1) requestAnimationFrame(step); })(t0);
 }
-
 function metric(val, lbl, cls, unit) {
-  const m = el("div", "metric " + (cls || ""));
-  const v = el("div", "mval", "0"); m.appendChild(v);
-  m.appendChild(el("div", "mlbl", esc(lbl)));
-  countUp(v, val, unit || "");
-  return m;
+  const m = el("div", "metric " + (cls || "")); const v = el("div", "mval", "0"); m.appendChild(v);
+  m.appendChild(el("div", "mlbl", esc(lbl))); countUp(v, val, unit || ""); return m;
 }
+function fmtTime(ms) { if (ms == null) return { v: 0, u: "ms" };
+  return ms < 1000 ? { v: ms, u: "ms" } : { v: +(ms / 1000).toFixed(ms < 10000 ? 2 : 1), u: "s" }; }
 
-function fmtTime(ms) {
-  if (ms == null) return { v: 0, u: "ms" };
-  if (ms < 1000) return { v: ms, u: "ms" };
-  return { v: +(ms / 1000).toFixed(ms < 10000 ? 2 : 1), u: "s" };
-}
-
-/* ---------- hero ---------- */
 function renderHero(r) {
   const host = $("hero"); host.innerHTML = "";
   const m = r.meta || {}, sw = r.swarm || { agent_count: 0 };
   const t = fmtTime((m.timing_ms || {}).total);
-  // time-to-deduce needs float support; render manually.
   host.appendChild(metric(m.agents_deployed ?? sw.agent_count ?? 0, "Agents Deployed", "v"));
-  const tm = el("div", "metric p");
-  const tv = el("div", "mval", "0"); tm.appendChild(tv);
-  tm.appendChild(el("div", "mlbl", "Time to Deduce"));
-  host.appendChild(tm);
-  // animate float time
+  const tm = el("div", "metric p"); const tv = el("div", "mval", "0"); tm.appendChild(tv);
+  tm.appendChild(el("div", "mlbl", "Time to Deduce")); host.appendChild(tm);
   (function () { const dur = 900, t0 = performance.now();
-    (function s(now) { const k = Math.min(1, (now - t0) / dur);
-      const val = (t.v * (1 - Math.pow(1 - k, 3)));
+    (function s(now) { const k = Math.min(1, (now - t0) / dur), val = t.v * (1 - Math.pow(1 - k, 3));
       tv.innerHTML = (t.u === "ms" ? Math.round(val) : val.toFixed(2)) + `<span class="munit">${t.u}</span>`;
       if (k < 1) requestAnimationFrame(s); })(t0); })();
   host.appendChild(metric(m.events_ingested ?? 0, "Events Ingested", ""));
@@ -82,36 +137,31 @@ function renderHero(r) {
   $("ver").textContent = "v" + (m.version || "");
 }
 
-/* ---------- RCA pinpointer ---------- */
+/* ================= RCA pinpointer ================= */
 function renderPinpointer(r) {
   const host = $("pinpointer"); host.innerHTML = "";
   const inc = (r.incidents || [])[0];
   if (!inc) { host.appendChild(el("p", "empty", "No incident to pinpoint.")); return; }
   const s = inc.storyline.structured;
-  const cross = el("div", "crosshair", `
+  host.appendChild(el("div", "crosshair", `
     <div class="sweep"></div><div class="ring"></div><div class="ring r2"></div>
-    <div class="ring r3"></div><div class="cross cx"></div><div class="cross cy"></div>
-    <div class="dot"></div>`);
+    <div class="ring r3"></div><div class="cross cx"></div><div class="cross cy"></div><div class="dot"></div>`));
   const info = el("div", "pin-info");
   info.appendChild(el("div", "pin-title", `${esc(s.incident_id)} · ${s.severity.toUpperCase()} (${s.score}/100)`));
-  info.appendChild(el("div", "pin-row",
-    `<span class="k">ROOT CAUSE / PATIENT-ZERO</span><br><span class="pin-target">${esc(s.patient_zero || "n/a")}</span>`));
+  info.appendChild(el("div", "pin-row", `<span class="k">ROOT CAUSE / PATIENT-ZERO</span><br><span class="pin-target">${esc(s.patient_zero || "n/a")}</span>`));
   info.appendChild(el("div", "pin-row", `<span class="k">OBJECTIVE</span><span class="pin-obj">${esc(s.likely_objective)}</span>`));
-  info.appendChild(el("div", "pin-row",
-    `<span class="k">BLAST RADIUS</span>${esc((s.affected_hosts || []).join(", ") || "n/a")} · ${(s.affected_users || []).length} users`));
-  info.appendChild(el("div", "pin-row",
-    `<span class="k">WINDOW</span>${esc(s.window.start)} → ${esc(s.window.end)}`));
-  host.appendChild(cross); host.appendChild(info);
+  info.appendChild(el("div", "pin-row", `<span class="k">BLAST RADIUS</span>${esc((s.affected_hosts || []).join(", ") || "n/a")} · ${(s.affected_users || []).length} users`));
+  info.appendChild(el("div", "pin-row", `<span class="k">WINDOW</span>${esc(s.window.start)} → ${esc(s.window.end)}`));
+  host.appendChild(info);
 }
 
-/* ---------- 3D layered storyline ---------- */
+/* ================= 3D storyline + drag-to-rotate ================= */
 function renderStage(r) {
   const stage = $("stage"); stage.innerHTML = "";
-  const inc = (r.incidents || [])[0];
-  const sub = $("story-sub");
+  const inc = (r.incidents || [])[0], sub = $("story-sub");
   if (!inc) { stage.innerHTML = '<p class="empty">No storyline.</p>'; sub.textContent = ""; return; }
   const s = inc.storyline.structured;
-  sub.textContent = `${s.incident_id} · ${(s.phases || []).length} phases · source: ${inc.storyline.narrative_source}`;
+  sub.textContent = `${s.incident_id} · ${(s.phases || []).length} phases · ${inc.storyline.narrative_source}`;
   (s.phases || []).forEach((p, i) => {
     if (i) stage.appendChild(el("div", "beam"));
     const isImpact = /impact/.test(p.tactic), isCC = /command-and-control/.test(p.tactic);
@@ -122,15 +172,29 @@ function renderStage(r) {
     layer.appendChild(el("div", "tt", "first seen " + esc((p.first_seen || "").replace("T", " ").slice(0, 19)) + ` · ${p.count} ev`));
     const techs = el("div", "techs");
     (p.techniques || []).forEach((t) => techs.appendChild(el("span", "tech", esc(t.id))));
-    layer.appendChild(techs);
-    stage.appendChild(layer);
+    layer.appendChild(techs); stage.appendChild(layer);
   });
 }
+(function stageControls() {
+  const wrap = $("stage-wrap"), stage = $("stage");
+  let rx = 34, rz = -24, drag = false, px = 0, py = 0;
+  const apply = () => { stage.style.setProperty("--rx", rx + "deg"); stage.style.setProperty("--rz", rz + "deg"); };
+  const down = (e) => { drag = true; wrap.classList.add("grabbing");
+    const pt = e.touches ? e.touches[0] : e; px = pt.clientX; py = pt.clientY; };
+  const move = (e) => { if (!drag) return; const pt = e.touches ? e.touches[0] : e;
+    rz += (pt.clientX - px) * 0.4; rx -= (pt.clientY - py) * 0.4;
+    rx = Math.max(-10, Math.min(80, rx)); px = pt.clientX; py = pt.clientY; apply(); if (e.cancelable) e.preventDefault(); };
+  const up = () => { drag = false; wrap.classList.remove("grabbing"); };
+  wrap.addEventListener("mousedown", down); addEventListener("mousemove", move); addEventListener("mouseup", up);
+  wrap.addEventListener("touchstart", down, { passive: true });
+  wrap.addEventListener("touchmove", move, { passive: false });
+  wrap.addEventListener("touchend", up);
+  $("resetview").addEventListener("click", () => { rx = 34; rz = -24; apply(); });
+})();
 
-/* ---------- swarm orbit ---------- */
+/* ================= swarm constellation ================= */
 function renderSwarm(r) {
-  const orbit = $("orbit"), side = $("swarm-side");
-  orbit.innerHTML = ""; side.innerHTML = "";
+  const orbit = $("orbit"), side = $("swarm-side"); orbit.innerHTML = ""; side.innerHTML = "";
   const sw = r.swarm;
   $("swarm-sub").textContent = sw ? `${sw.agent_count} agents · ${sw.counts.confirmed_incidents} confirmed` : "";
   if (!sw) { orbit.appendChild(el("p", "empty", "Swarm did not run.")); return; }
@@ -138,51 +202,41 @@ function renderSwarm(r) {
   const rings = { 1: 44, 2: 104, 3: 156 }, bucket = { 1: [], 2: [], 3: [] };
   (sw.roster || []).forEach((a) => (bucket[a.tier] || bucket[3]).push(a));
   [1, 2, 3].forEach((tier) => {
-    const ring = el("div", "ringpath t" + tier); orbit.appendChild(ring);
+    orbit.appendChild(el("div", "ringpath t" + tier));
     const spinner = el("div", null); spinner.style.cssText = "position:absolute;inset:0;";
     spinner.classList.add(tier === 2 ? "spin2" : "spin1");
     const arr = bucket[tier], R = rings[tier], cx = 170, cy = 170;
     arr.forEach((a, i) => {
       const ang = (i / Math.max(1, arr.length)) * Math.PI * 2;
       const node = el("div", "node t" + tier,
-        `${esc(a.name.replace("soc1-", "").replace("soc2-", "").slice(0, 4).toUpperCase())}
-         <span class="tip">${esc(a.role)} · ${esc(a.name)}</span>`);
-      node.style.left = (cx + R * Math.cos(ang)) + "px";
-      node.style.top = (cy + R * Math.sin(ang)) + "px";
+        `${esc(a.name.replace("soc1-", "").replace("soc2-", "").slice(0, 4).toUpperCase())}<span class="tip">${esc(a.role)} · ${esc(a.name)}</span>`);
+      node.style.left = (cx + R * Math.cos(ang)) + "px"; node.style.top = (cy + R * Math.sin(ang)) + "px";
       spinner.appendChild(node);
     });
     orbit.appendChild(spinner);
   });
   (sw.consensus || []).forEach((c) => side.appendChild(el("div", "cons",
-    `${esc(c.incident_id)} — <span class="${c.confirmed_by_tier2 ? "ok" : "no"}">${c.confirmed_by_tier2 ? "✅ CONFIRMED" : "⏳ uncorroborated"}</span><br>
-     <span class="meta-line">${c.agents_involved} agents · tiers ${JSON.stringify(c.tiers_involved)} · conf ${c.consensus_confidence}</span>`)));
+    `${esc(c.incident_id)} — <span class="${c.confirmed_by_tier2 ? "ok" : "no"}">${c.confirmed_by_tier2 ? "✅ CONFIRMED" : "⏳ uncorroborated"}</span><br><span class="meta-line">${c.agents_involved} agents · tiers ${JSON.stringify(c.tiers_involved)} · conf ${c.consensus_confidence}</span>`)));
   const t3 = (sw.findings || []).filter((f) => f.tier === 3);
   if (t3.length) { side.appendChild(el("div", "meta-line", "SPECIALIST FINDINGS"));
-    t3.forEach((f) => { const d = el("div", "spec",
-      `<b>[${esc(f.severity.toUpperCase())}]</b> <span class="who">${esc(f.role)}</span>: ${esc(f.title)}`);
-      if (f.recommended_action) d.appendChild(el("div", "meta-line", esc(f.recommended_action)));
-      side.appendChild(d); }); }
+    t3.forEach((f) => { const d = el("div", "spec", `<b>[${esc(f.severity.toUpperCase())}]</b> <span class="who">${esc(f.role)}</span>: ${esc(f.title)}`);
+      if (f.recommended_action) d.appendChild(el("div", "meta-line", esc(f.recommended_action))); side.appendChild(d); }); }
 }
 
-/* ---------- incidents / iocs / hunt / intel ---------- */
+/* ================= incidents / iocs / hunt / intel ================= */
 function renderIncidents(r) {
-  const host = $("incidents"); host.innerHTML = "";
-  const incs = r.incidents || [];
+  const host = $("incidents"); host.innerHTML = ""; const incs = r.incidents || [];
   if (!incs.length) { host.appendChild(el("p", "empty", "No incidents.")); return; }
   incs.forEach((inc) => {
     const s = inc.storyline.structured, box = el("div", "incident");
-    const row = el("div", "row");
-    row.appendChild(el("span", "id", esc(s.incident_id)));
-    row.appendChild(el("span", "sev " + s.severity, `${s.severity.toUpperCase()} · ${s.score}`));
-    box.appendChild(row);
+    const row = el("div", "row"); row.appendChild(el("span", "id", esc(s.incident_id)));
+    row.appendChild(el("span", "sev " + s.severity, `${s.severity.toUpperCase()} · ${s.score}`)); box.appendChild(row);
     const bar = el("div", "scorebar"), fill = el("i"); bar.appendChild(fill); box.appendChild(bar);
     requestAnimationFrame(() => { fill.style.width = Math.max(4, s.score) + "%"; });
     box.appendChild(el("div", "meta-line", `hosts: ${esc((s.affected_hosts || []).join(", ") || "n/a")}`));
-    box.appendChild(el("div", "meta-line", "obj: " + esc(s.likely_objective)));
-    host.appendChild(box);
+    box.appendChild(el("div", "meta-line", "obj: " + esc(s.likely_objective))); host.appendChild(box);
   });
 }
-
 function renderIocs(r) {
   const host = $("iocs"); host.innerHTML = ""; const iocs = r.iocs || {}; let any = false;
   ["hash", "domain", "ip", "process", "user"].forEach((kind) => {
@@ -197,17 +251,14 @@ function renderIocs(r) {
   });
   if (!any) host.appendChild(el("p", "empty", "No IOCs."));
 }
-
 function renderHunt(r) {
   const host = $("hunt"); host.innerHTML = ""; const checks = r.hunt_checklist || [];
   if (!checks.length) { host.appendChild(el("p", "empty", "No hunt actions.")); return; }
   checks.forEach((c) => { const d = el("div", "hunt-item " + c.priority);
-    d.appendChild(el("div", "p", c.priority));
-    d.appendChild(el("div", null, "<b>" + esc(c.action) + "</b>"));
+    d.appendChild(el("div", "p", c.priority)); d.appendChild(el("div", null, "<b>" + esc(c.action) + "</b>"));
     if ((c.targets || []).length) d.appendChild(el("div", "meta-line", "targets: " + esc(c.targets.slice(0, 20).join(", "))));
     d.appendChild(el("div", "meta-line", esc(c.why))); host.appendChild(d); });
 }
-
 function renderIntel(r) {
   const host = $("intel"); host.innerHTML = ""; const intel = r.intel_used || [];
   if (!intel.length) { host.appendChild(el("p", "empty", "No threat intel matched.")); return; }
@@ -218,21 +269,22 @@ function renderIntel(r) {
 }
 
 function renderAll(r) {
-  if (r.error) { toast("Analysis error: " + r.error); return; }
+  if (r.error) { toast("⚠ " + esc(r.error)); return; }
+  $("results").classList.add("show");
   renderHero(r); renderPinpointer(r); renderStage(r); renderSwarm(r);
   renderIncidents(r); renderIocs(r); renderHunt(r); renderIntel(r);
 }
-
-async function load(url) {
-  const data = await (await fetch(url)).json();
+async function mergeMetaAndRender(data) {
   try { const m = await (await fetch("/api/meta")).json(); data.meta = Object.assign({}, m, data.meta); } catch (e) {}
   renderAll(data); return data;
 }
+async function load(url) {
+  try { const data = await (await fetch(url)).json(); await mergeMetaAndRender(data);
+    if ($("status").textContent.includes("loading")) $("status").textContent = "✓ sample loaded";
+    return data;
+  } catch (e) { toast("Load failed: " + e); }
+}
 
-$("refresh").addEventListener("click", async () => {
-  $("refresh").disabled = true; toast("Re-analyzing…");
-  try { await load("/api/refresh"); toast("Updated."); }
-  catch (e) { toast("Failed: " + e); } finally { $("refresh").disabled = false; }
-});
-
-load("/api/report").catch((e) => toast("Load failed: " + e));
+// On first open, show whatever the server was launched with (samples), so the
+// deck isn't empty — but the drop zone is the primary call to action.
+load("/api/report");

@@ -24,7 +24,6 @@
     <div class="head-right">
       <span id="backbone" class="pill">backbone: …</span>
       <span id="live" class="pill live">● LIVE</span>
-      <button id="refresh" class="btn">⟲ RE-ANALYZE</button>
     </div>
   </header>
 
@@ -33,54 +32,91 @@
   </div>
 
   <main id="app">
-    <!-- HERO METRICS -->
-    <section class="hero" id="hero"></section>
-
-    <!-- RCA PINPOINTER -->
-    <section class="panel glass pinpointer" id="pinpointer-panel">
-      <div class="panel-head"><h2>◎ RCA PINPOINTER</h2><span class="sub">root-cause target lock</span></div>
-      <div id="pinpointer" class="pin-body"></div>
-    </section>
-
-    <!-- 3D LAYERED STORYLINE -->
-    <section class="panel glass">
-      <div class="panel-head"><h2>⧉ ATTACK STORYLINE · 3D KILL-CHAIN</h2><span class="sub" id="story-sub"></span></div>
-      <div class="stage-wrap">
-        <div id="stage" class="stage"></div>
+    <!-- ===== STEP 1: LOG INTAKE (drop zone) ===== -->
+    <section class="panel glass intake">
+      <div class="panel-head">
+        <h2>① DROP YOUR LOGS HERE</h2>
+        <span class="sub">EDR · syslog · DNS · firewall/router/switch · cloud · CSV/JSON/JSONL</span>
+      </div>
+      <div id="dropzone" class="dropzone">
+        <div class="dz-icon">⇪</div>
+        <div class="dz-title">Drag &amp; drop log files or a folder here</div>
+        <div class="dz-or">— or —</div>
+        <div class="dz-actions">
+          <button id="browse" class="btn">📂 BROWSE FILES</button>
+          <button id="loadsample" class="btn ghost">✦ LOAD SAMPLE ATTACK</button>
+        </div>
+        <input id="filepick" type="file" multiple hidden
+               accept=".json,.jsonl,.ndjson,.csv,.log,.txt,.syslog" />
+        <div class="dz-hint">Everything stays on your machine. Nothing is uploaded to the internet.</div>
+      </div>
+      <div id="filelist" class="filelist"></div>
+      <div class="intake-controls">
+        <label class="ctl">Correlation window
+          <select id="window">
+            <option value="30">30 min</option>
+            <option value="60">60 min</option>
+            <option value="120" selected>120 min</option>
+            <option value="360">6 hours</option>
+            <option value="1440">24 hours</option>
+          </select>
+        </label>
+        <button id="analyze" class="btn big" disabled>▶ ANALYZE</button>
+        <span id="status" class="status"></span>
       </div>
     </section>
 
-    <div class="grid">
-      <!-- SWARM ORBIT -->
-      <section class="panel glass span-2">
-        <div class="panel-head"><h2>✦ AGENT SWARM · CONSTELLATION</h2><span class="sub" id="swarm-sub"></span></div>
-        <div class="swarm-wrap">
-          <div id="orbit" class="orbit"></div>
-          <div id="swarm-side" class="swarm-side"></div>
+    <!-- results wrapper (hidden until first analysis) -->
+    <div id="results">
+      <section class="hero" id="hero"></section>
+
+      <section class="panel glass pinpointer" id="pinpointer-panel">
+        <div class="panel-head"><h2>◎ RCA PINPOINTER</h2><span class="sub">root-cause target lock</span></div>
+        <div id="pinpointer" class="pin-body"></div>
+      </section>
+
+      <section class="panel glass">
+        <div class="panel-head">
+          <h2>⧉ ATTACK STORYLINE · 3D KILL-CHAIN</h2>
+          <span class="sub" id="story-sub"></span>
+          <span class="stage-hint">🖱 drag to rotate</span>
+          <button id="resetview" class="btn ghost tiny">⟲ reset view</button>
+        </div>
+        <div class="stage-wrap" id="stage-wrap">
+          <div id="stage" class="stage"></div>
         </div>
       </section>
-      <!-- INCIDENTS -->
+
+      <div class="grid">
+        <section class="panel glass span-2">
+          <div class="panel-head"><h2>✦ AGENT SWARM · CONSTELLATION</h2><span class="sub" id="swarm-sub"></span></div>
+          <div class="swarm-wrap">
+            <div id="orbit" class="orbit"></div>
+            <div id="swarm-side" class="swarm-side"></div>
+          </div>
+        </section>
+        <section class="panel glass">
+          <div class="panel-head"><h2>▣ INCIDENTS</h2></div>
+          <div id="incidents" class="incidents"></div>
+        </section>
+      </div>
+
+      <div class="grid">
+        <section class="panel glass">
+          <div class="panel-head"><h2>⬡ INDICATORS OF COMPROMISE</h2></div>
+          <div id="iocs"></div>
+        </section>
+        <section class="panel glass span-2">
+          <div class="panel-head"><h2>◈ THREAT-HUNT CHECKLIST</h2></div>
+          <div id="hunt"></div>
+        </section>
+      </div>
+
       <section class="panel glass">
-        <div class="panel-head"><h2>▣ INCIDENTS</h2></div>
-        <div id="incidents" class="incidents"></div>
+        <div class="panel-head"><h2>⌬ THREAT INTEL REFERENCED</h2></div>
+        <div id="intel"></div>
       </section>
     </div>
-
-    <div class="grid">
-      <section class="panel glass">
-        <div class="panel-head"><h2>⬡ INDICATORS OF COMPROMISE</h2></div>
-        <div id="iocs"></div>
-      </section>
-      <section class="panel glass span-2">
-        <div class="panel-head"><h2>◈ THREAT-HUNT CHECKLIST</h2></div>
-        <div id="hunt"></div>
-      </section>
-    </div>
-
-    <section class="panel glass">
-      <div class="panel-head"><h2>⌬ THREAT INTEL REFERENCED</h2></div>
-      <div id="intel"></div>
-    </section>
   </main>
 
   <footer class="foot">

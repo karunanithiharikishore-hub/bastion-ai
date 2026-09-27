@@ -59,6 +59,40 @@ h1, h2 { margin: 0; }
 
 main { padding: 8px 18px 48px; max-width: 1340px; margin: 0 auto; }
 
+/* ---- log intake / drop zone ---- */
+.intake { border-color: rgba(38,230,255,.35); }
+.dropzone { position: relative; border: 2px dashed rgba(38,230,255,.45); border-radius: 18px;
+  padding: 34px 20px; text-align: center; transition: .2s;
+  background: radial-gradient(600px 200px at 50% 0%, rgba(38,230,255,.08), transparent); cursor: pointer; }
+.dropzone.drag { border-color: var(--cyan); background: rgba(38,230,255,.12);
+  box-shadow: inset 0 0 40px rgba(38,230,255,.2), var(--glow); transform: scale(1.005); }
+.dz-icon { font-size: 52px; color: var(--cyan); text-shadow: var(--glow); animation: bob 2.4s ease-in-out infinite; }
+@keyframes bob { 50% { transform: translateY(-8px); } }
+.dz-title { font-size: 18px; font-weight: 700; letter-spacing: 1px; margin-top: 6px; }
+.dz-or { color: var(--muted); font-size: 11px; letter-spacing: 3px; margin: 10px 0; }
+.dz-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+.dz-hint { color: var(--muted); font-size: 11px; margin-top: 14px; letter-spacing: .5px; }
+.btn.ghost { background: transparent; color: var(--cyan); border: 1px solid var(--cyan); box-shadow: none; }
+.btn.ghost:hover { background: rgba(38,230,255,.12); }
+.btn.big { font-size: 15px; padding: 12px 26px; }
+.btn.tiny { font-size: 10px; padding: 4px 10px; }
+.filelist { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.fchip { display: flex; align-items: center; gap: 8px; font-size: 11.5px;
+  background: rgba(8,14,34,.6); border: 1px solid var(--glass-brd); border-radius: 999px; padding: 5px 12px; }
+.fchip .x { cursor: pointer; color: var(--crit); font-weight: 800; }
+.fchip .sz { color: var(--muted); }
+.intake-controls { display: flex; align-items: center; gap: 16px; margin-top: 16px; flex-wrap: wrap; }
+.ctl { color: var(--muted); font-size: 11px; letter-spacing: 1px; display: flex; align-items: center; gap: 8px; }
+.ctl select { background: rgba(8,14,34,.8); color: var(--ink); border: 1px solid var(--glass-brd);
+  border-radius: 8px; padding: 7px 10px; font: inherit; }
+.status { color: var(--cyan); font-size: 12px; }
+#results { display: none; }
+#results.show { display: block; animation: fadein .5s; }
+@keyframes fadein { from { opacity: 0; transform: translateY(10px); } }
+.stage-hint { color: var(--muted); font-size: 10px; letter-spacing: 1px; margin-left: auto; }
+.spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(38,230,255,.3);
+  border-top-color: var(--cyan); border-radius: 50%; animation: spin .8s linear infinite; vertical-align: middle; }
+
 /* ---- hero metrics ---- */
 .hero { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 12px 0 18px; }
 .metric { position: relative; padding: 18px 18px 16px; border-radius: 16px; overflow: hidden;
@@ -108,11 +142,13 @@ main { padding: 8px 18px 48px; max-width: 1340px; margin: 0 auto; }
 .pin-obj { color: var(--crit); font-weight: 700; }
 
 /* ---- 3D storyline stage ---- */
-.stage-wrap { perspective: 1400px; perspective-origin: 50% 20%; padding: 20px 0 34px; overflow-x: auto; }
-.stage { transform-style: preserve-3d; transform: rotateX(46deg) rotateZ(-32deg);
-  display: flex; gap: 26px; padding: 30px 40px; min-width: max-content;
-  transition: transform .6s ease; }
-.stage:hover { transform: rotateX(40deg) rotateZ(-26deg); }
+.stage-wrap { perspective: 1500px; perspective-origin: 50% 30%; padding: 30px 0 40px;
+  overflow: hidden; cursor: grab; }
+.stage-wrap.grabbing { cursor: grabbing; }
+.stage { transform-style: preserve-3d;
+  transform: rotateX(var(--rx, 34deg)) rotateZ(var(--rz, -24deg));
+  display: flex; gap: 30px; padding: 30px 50px; min-width: max-content;
+  justify-content: center; will-change: transform; }
 .layer { position: relative; width: 210px; min-height: 120px; border-radius: 14px;
   transform-style: preserve-3d; padding: 14px; color: var(--ink);
   background: linear-gradient(135deg, rgba(38,230,255,.10), rgba(160,107,255,.10));
