@@ -57,6 +57,11 @@ def test_end_to_end_deterministic(tmp_path):
     assert "Incident Analysis Report" in md
     assert "Threat-Hunt Checklist" in md
     assert "Indicators of Compromise" in md
+    # Verdict is carried into the Markdown report.
+    assert "VERDICT:" in md
+    assert "What to do next:" in md
+    assert result["incidents"][0]["verdict"]["level"] in (
+        "likely-malicious", "likely-benign", "needs-review")
     # JSON render is valid JSON.
     json.loads(render_json(result))
 

@@ -18,6 +18,14 @@ def _sev_badge(label: str) -> str:
             "medium": "🟡 MEDIUM", "low": "🟢 LOW"}.get(label, label.upper())
 
 
+def _verdict_badge(level: str) -> str:
+    return {
+        "likely-malicious": "🔴 LIKELY REAL ATTACK",
+        "likely-benign": "🟢 LIKELY BENIGN / NOISE",
+        "needs-review": "🟡 NEEDS REVIEW",
+    }.get(level, (level or "unknown").upper())
+
+
 def render_markdown(result: dict) -> str:
     meta = result["meta"]
     lines = [
@@ -61,6 +69,22 @@ def render_markdown(result: dict) -> str:
             f"### {i}. {s['incident_id']} — {_sev_badge(s['severity'])} "
             f"(score {s['score']}/100)",
             "",
+        ]
+        # Analyst verdict — the real-vs-noise call, up top where it matters.
+        v = inc.get("verdict")
+        if v:
+            lines += [
+                f"> **VERDICT: {_verdict_badge(v['level'])}** "
+                f"(confidence {round(v.get('confidence', 0) * 100)}%)  ",
+                f"> {v['headline']}  ",
+                f"> {v['why']}",
+                "",
+                "**What to do next:**",
+            ]
+            for chk in v.get("recommended_checks", []):
+                lines.append(f"- [ ] {chk}")
+            lines.append("")
+        lines += [
             f"- Window: {s['window']['start']} → {s['window']['end']}",
             f"- Hosts: {', '.join(s['affected_hosts']) or 'n/a'}",
             f"- Users: {', '.join(s['affected_users']) or 'n/a'}",

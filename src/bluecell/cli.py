@@ -60,9 +60,30 @@ def cmd_analyze(args) -> int:
         print(f"[bluecell] {len(result['incidents'])} incident(s), "
               f"{result['meta']['events_ingested']} events, "
               f"backbone={result['meta']['backbone']}")
+        _print_verdicts(result)
     else:
         print(output)
     return 0
+
+
+_VERDICT_ICON = {"likely-malicious": "🔴 LIKELY REAL ATTACK",
+                 "likely-benign": "🟢 LIKELY BENIGN / NOISE",
+                 "needs-review": "🟡 NEEDS REVIEW"}
+
+
+def _print_verdicts(result) -> None:
+    """Print the per-incident verdict to the terminal so the real-vs-noise call
+    is visible without opening the report file."""
+    incs = result.get("incidents") or []
+    if not incs:
+        print("[bluecell] verdict: no incidents crossed the threshold.")
+        return
+    for inc in incs[:5]:
+        v = inc.get("verdict") or {}
+        s = inc["storyline"]["structured"]
+        icon = _VERDICT_ICON.get(v.get("level"), (v.get("level") or "?").upper())
+        print(f"[bluecell] {s['incident_id']}: {icon} "
+              f"({round(v.get('confidence', 0) * 100)}%) — {v.get('headline', '')}")
 
 
 def cmd_intel(args) -> int:
