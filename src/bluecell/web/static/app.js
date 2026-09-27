@@ -33,7 +33,7 @@ const toast = (m) => { const t = $("toast"); t.innerHTML = m; t.classList.remove
 
 /* ================= file intake (drag & drop) ================= */
 const pending = new Map();   // name -> {name, content, size}
-const MAX_TOTAL = 38 * 1024 * 1024;
+const MAX_FILE = 256 * 1024 * 1024;   // per-file cap (matches server default)
 
 function humanSize(n) { return n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB"; }
 
@@ -54,19 +54,21 @@ function updateAnalyzeBtn() {
 }
 
 function addFiles(fileList) {
-  let total = 0; pending.forEach((f) => total += f.size);
   const arr = Array.from(fileList);
   let done = 0;
   if (!arr.length) return;
   arr.forEach((file) => {
-    if (total + file.size > MAX_TOTAL) { toast("⚠ 38 MB total limit reached"); done++; return; }
-    total += file.size;
+    if (file.size > MAX_FILE) {
+      toast(`⚠ ${esc(file.name)} is ${humanSize(file.size)} — over the ${MAX_FILE / (1024*1024)} MB per-file limit`);
+      done++; if (done === arr.length) renderFileList(); return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       pending.set(file.name, { name: file.name, content: reader.result, size: file.size });
       done++; if (done === arr.length) renderFileList();
     };
-    reader.onerror = () => { done++; toast("Could not read " + esc(file.name)); };
+    reader.onerror = () => { done++; toast("Could not read " + esc(file.name));
+      if (done === arr.length) renderFileList(); };
     reader.readAsText(file);
   });
 }
@@ -89,21 +91,36 @@ function addFiles(fileList) {
     $("status").innerHTML = '<span class="spinner"></span> loading sample…'; load("/api/refresh"); });
 })();
 
+async function postJSON(url, obj) {
+  const res = await fetch(url, { method: "POST",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify(obj) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+  return data;
+}
+
 async function analyzeUploads() {
   if (!pending.size) return;
   $("analyze").disabled = true;
-  $("status").innerHTML = '<span class="spinner"></span> analyzing ' + pending.size + ' file(s)…';
-  const files = Array.from(pending.values()).map((f) => ({ name: f.name, content: f.content }));
-  const window = parseInt($("window").value, 10) || 120;
+  const win = parseInt($("window").value, 10) || 120;
+  const files = Array.from(pending.values());
   try {
-    const res = await fetch("/api/upload", { method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ files, window }) });
-    const data = await res.json();
-    if (data.error) { toast("⚠ " + esc(data.error)); $("status").textContent = "error"; }
-    else { await mergeMetaAndRender(data); $("status").textContent = "✓ analysis complete"; toast("✓ Analysis complete"); }
-  } catch (e) { toast("Upload failed: " + e); $("status").textContent = "failed"; }
-  finally { $("analyze").disabled = false; }
+    // Staged upload: one file per request, so total batch size never matters.
+    await postJSON("/api/stage/reset", {});
+    let i = 0;
+    for (const f of files) {
+      i++;
+      $("status").innerHTML = `<span class="spinner"></span> uploading ${i}/${files.length} — ${esc(f.name)}`;
+      await postJSON("/api/stage/add", { name: f.name, content: f.content });
+    }
+    $("status").innerHTML = '<span class="spinner"></span> analyzing ' + files.length + ' file(s)…';
+    const data = await postJSON("/api/stage/run", { window: win });
+    await mergeMetaAndRender(data);
+    $("status").textContent = "✓ analysis complete";
+    toast("✓ Analyzed " + files.length + " file(s)");
+  } catch (e) {
+    toast("⚠ " + (e.message || e)); $("status").textContent = "error: " + (e.message || e);
+  } finally { $("analyze").disabled = false; }
 }
 
 /* ================= count-up ================= */

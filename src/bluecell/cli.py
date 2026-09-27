@@ -103,7 +103,7 @@ def cmd_serve(args) -> int:
     from .web import serve
     serve(args.paths, host=args.host, port=args.port, window=args.window,
           llm_mode=args.llm, model=args.model, intel_db=args.intel_db,
-          open_browser=args.open)
+          open_browser=args.open, max_upload_mb=args.max_upload_mb)
     return 0
 
 
@@ -197,6 +197,9 @@ def build_parser() -> argparse.ArgumentParser:
     sv.add_argument("--model", default="claude-sonnet-5")
     sv.add_argument("--intel-db", dest="intel_db", help="Path to intel JSON store")
     sv.add_argument("--open", action="store_true", help="Open the browser automatically")
+    sv.add_argument("--max-upload-mb", dest="max_upload_mb", type=int, default=256,
+                    help="Per-file upload cap in MB (default 256). Files are uploaded "
+                         "one at a time, so total batch size is limited only by disk.")
     sv.set_defaults(func=cmd_serve)
 
     ro = sub.add_parser("roster", help="Show the blue-team agent swarm roster")

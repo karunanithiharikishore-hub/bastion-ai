@@ -97,3 +97,28 @@ def test_upload_rejects_empty(server):
     with pytest.raises(urllib.error.HTTPError) as exc:
         _post(server + "/api/upload", {"files": []})
     assert exc.value.code == 500
+
+
+def test_staged_upload_flow(server):
+    # Reset -> add files one at a time -> run. This is how the dashboard uploads,
+    # so large multi-file batches never hit a single-request size cap.
+    s1, _ = _post(server + "/api/stage/reset", {})
+    assert s1 == 200
+    syslog = ("Sep 26 09:01:12 web01 sshd[1]: Failed password for admin from 203.0.113.66 port 41022 ssh2\n"
+              "Sep 26 09:01:14 web01 sshd[2]: Failed password for admin from 203.0.113.66 port 41024 ssh2\n")
+    dns = '{"timestamp":"2026-09-26T09:06:12Z","source":"dns","host":"web01","src_ip":"10.0.0.11","query":"kj3h5g9x2zqwmnbvc7.top"}\n'
+    s2, d2 = _post(server + "/api/stage/add", {"name": "auth.log", "content": syslog})
+    assert s2 == 200 and d2["staged"] == 1
+    s3, d3 = _post(server + "/api/stage/add", {"name": "dns.jsonl", "content": dns})
+    assert d3["staged"] == 2
+    s4, d4 = _post(server + "/api/stage/run", {"window": 120})
+    assert s4 == 200
+    assert d4["meta"]["events_ingested"] >= 2
+    assert d4["meta"]["author"] == "Harikishore Karunanithi"
+
+
+def test_stage_run_without_files_errors(server):
+    _post(server + "/api/stage/reset", {})
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _post(server + "/api/stage/run", {"window": 60})
+    assert exc.value.code == 500
