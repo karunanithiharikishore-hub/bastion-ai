@@ -18,10 +18,15 @@ from ..models import Event
 # ---- helpers ---------------------------------------------------------------
 
 def _get(d: dict, *keys, default=None):
-    """Return the first present, non-empty value among keys (case-insensitive)."""
-    lower = {k.lower(): v for k, v in d.items()}
+    """Return the first present, non-empty value among keys (case-insensitive).
+
+    Robust to messy inputs: CSV rows with more columns than headers produce a
+    ``None`` key (csv.DictReader restkey), so keys are stringified before
+    lowercasing to avoid AttributeError on non-string keys.
+    """
+    lower = {str(k).lower(): v for k, v in d.items() if k is not None}
     for k in keys:
-        v = lower.get(k.lower())
+        v = lower.get(str(k).lower())
         if v not in (None, "", []):
             return v
     return default

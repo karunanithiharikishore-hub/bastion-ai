@@ -60,6 +60,27 @@ def test_ingest_all_samples():
     assert any("iam" in s or s == "cloud" for s in sources)
 
 
+def test_ragged_csv_with_extra_columns_does_not_crash(tmp_path):
+    # A row with MORE fields than headers -> csv.DictReader adds a None key.
+    # This previously raised: AttributeError: 'NoneType' has no attribute 'lower'.
+    p = tmp_path / "signins.csv"
+    p.write_text(
+        "Date,User,IP address\n"
+        "2026-09-26T09:00:00Z,admin,203.0.113.5,EXTRA1,EXTRA2\n"   # 5 cols, 3 headers
+        "2026-09-26T09:01:00Z,bob,10.0.0.2\n",
+        encoding="utf-8",
+    )
+    events = ingest_path(str(p))
+    assert len(events) == 2   # both rows parsed, no crash
+
+
+def test_csv_with_blank_header_column(tmp_path):
+    p = tmp_path / "weird.csv"
+    p.write_text("timestamp,,message\n2026-09-26T09:00:00Z,junk,hello\n", encoding="utf-8")
+    events = ingest_path(str(p))  # empty-string header is fine; must not raise
+    assert len(events) == 1
+
+
 def test_ingest_missing_file_dir_recursion():
     # ingest_paths over a single csv returns firewall events
     events = ingest_paths([os.path.join(SAMPLES, "firewall.csv")])

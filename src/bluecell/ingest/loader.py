@@ -36,8 +36,10 @@ def detect_source(filename: str, record: Optional[dict] = None,
     if override:
         return override.lower()
     if record:
+        # Stringify keys: CSV rows with extra columns yield a None key.
+        low = {str(k).lower(): x for k, x in record.items() if k is not None}
         for key in ("source", "log_type", "logtype", "type", "product"):
-            v = record.get(key) or {k.lower(): x for k, x in record.items()}.get(key)
+            v = record.get(key) or low.get(key)
             if isinstance(v, str):
                 for hint in _SOURCE_HINTS:
                     if hint in v.lower():
@@ -117,8 +119,10 @@ def ingest_file(path: str, override: Optional[str] = None) -> list:
     elif ext == ".csv":
         reader = csv.DictReader(io.StringIO(text))
         for rec in reader:
-            source = detect_source(path, rec, override)
-            ev = _parse_record({k: v for k, v in rec.items() if v != ""}, source)
+            # Drop None keys (ragged rows / restkey) and empty values.
+            clean = {k: v for k, v in rec.items() if k is not None and v not in (None, "")}
+            source = detect_source(path, clean, override)
+            ev = _parse_record(clean, source)
             if ev:
                 events.append(ev)
     else:  # syslog / plaintext
