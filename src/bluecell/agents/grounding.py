@@ -92,7 +92,7 @@ def check_text(text: str, index: dict) -> dict:
                          if d not in index["domains"]
                          and not any(d.endswith("." + kd) or kd.endswith("." + d)
                                      for kd in index["domains"]))
-    bad_tech = sorted(found_tech - index["techniques"]) if index["techniques"] else []
+    bad_tech = sorted(found_tech - index["techniques"])
 
     if bad_ips:
         unverified["ips"] = bad_ips

@@ -393,3 +393,28 @@ def test_benign_verdict_reframes_the_summary(monkeypatch):
     assert "**How it started:**" in md and "**What happened:**" in md
     assert "How they got in" not in md and "What they did" not in md
     assert "Written before the final verdict" in md
+
+
+def test_overall_verdict_is_the_most_serious_incident(monkeypatch, tmp_path):
+    """Dismissing the top-scoring incident must not make the headline 'benign'
+    while another incident is still open."""
+    import shutil
+    import bluecell.analyzer as analyzer
+    from conftest import BENIGN_SAMPLES
+    for d in (SAMPLES, BENIGN_SAMPLES):
+        for name in os.listdir(d):
+            if not name.endswith(".md"):
+                shutil.copy(os.path.join(d, name), tmp_path / (os.path.basename(d) + name))
+    real_run_swarm = analyzer.run_swarm
+
+    def dismiss_top(events, incidents, *a, **kw):
+        out = real_run_swarm(events, incidents, *a, **dict(kw, use_llm=False))
+        for f in out["findings"]:
+            if f["tier"] == 2 and f["incident_id"] == incidents[0].id:
+                f.update(status="dismissed", origin="agent", confidence=0.9, rationale="ok")
+        return out
+    monkeypatch.setattr(analyzer, "run_swarm", dismiss_top)
+    result = analyzer.analyze([str(tmp_path)], use_llm=False)
+    levels = [b["verdict"]["level"] for b in result["incidents"]]
+    assert len(levels) == 2 and "likely-benign" in levels
+    assert levels[0] != "likely-benign"

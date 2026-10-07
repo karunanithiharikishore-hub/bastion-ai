@@ -26,6 +26,9 @@ from .agents import run_swarm, ai_analyze
 from . import provenance
 
 
+_VERDICT_RANK = {"likely-malicious": 0, "needs-review": 1, "likely-benign": 2}
+
+
 def analyze(paths, *, source_override=None, window_minutes=60,
             max_incidents=10, backbone=None, intel_store=None,
             max_digest_lines=400, run_agents=True, use_llm=True):
@@ -93,6 +96,12 @@ def analyze(paths, *, source_override=None, window_minutes=60,
     for block in incident_blocks:
         if block["verdict"].get("level") == "likely-benign":
             reframe_benign(by_id[block["id"]], block["storyline"]["structured"])
+
+    # Most serious verdict first, then score. The report headline, executive
+    # summary and dashboard all describe incidents[0], so a dismissed high-score
+    # incident must not hide an open one behind it.
+    incident_blocks.sort(key=lambda b: (_VERDICT_RANK.get(b["verdict"].get("level"), 1),
+                                        -b["score"]))
 
     # Model-driven AI analyst — genuine LLM reasoning over the evidence, grounded.
     # Opt-in: only runs when an LLM backbone is available (use_llm and backbone).

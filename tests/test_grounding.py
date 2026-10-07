@@ -72,3 +72,12 @@ def test_domains_mentioned_in_log_messages_are_grounded():
     e = Event(ts="2026-10-03T22:00:00Z", source="syslog", category="other",
               action="log", message="apt fetched from archive.ubuntu.com", host="app01")
     assert check_text("Patched from archive.ubuntu.com", evidence_index([e], []))["ok"]
+
+
+def test_technique_flagged_even_when_logs_have_none():
+    from bluecell.models import Event
+    from bluecell.agents.grounding import evidence_index, check_text
+    e = Event(ts="2026-10-03T22:00:00Z", source="syslog", category="other",
+              action="log", message="routine", host="h1")
+    res = check_text("Credential dumping via T1003 on h1", evidence_index([e], []))
+    assert res["unverified"] == {"techniques": ["T1003"]}
