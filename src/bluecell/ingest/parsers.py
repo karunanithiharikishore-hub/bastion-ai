@@ -158,7 +158,12 @@ _SYSLOG_RE = re.compile(
     r"(?P<msg>.*)$"
 )
 _IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
-_USER_RE = re.compile(r"(?:user|for|account)\s+(?P<u>[\w.\-\\@]+)", re.I)
+# "for"/"user"/"account" followed by the account name. Filler words that can sit
+# in between ("session closed for user X", "for invalid user X") are skipped so
+# they are never taken as the account itself.
+_USER_RE = re.compile(
+    r"\b(?:user|for|account)\s+"
+    r"(?!(?:user|for|account|invalid|illegal|from)\b)(?P<u>[\w.\-\\@]+)", re.I)
 
 
 def parse_syslog_line(line: str) -> Optional[Event]:

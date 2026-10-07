@@ -86,3 +86,16 @@ def test_ingest_missing_file_dir_recursion():
     events = ingest_paths([os.path.join(SAMPLES, "firewall.csv")])
     assert all(e.source in ("firewall",) or e.category == "network" for e in events)
     assert len(events) == 4
+
+
+def test_syslog_user_skips_filler_words():
+    cases = {
+        "Oct  3 22:20:41 app01 sshd[3101]: pam_unix(sshd:session): session closed for user jsmith": "jsmith",
+        "Oct  3 22:20:41 app01 sshd[3101]: pam_unix(sshd:session): session opened for user root by (uid=0)": "root",
+        "Oct  3 22:01:10 app01 sshd[3101]: Failed password for invalid user oracle from 192.0.2.9 port 22 ssh2": "oracle",
+        "Oct  3 22:01:10 app01 sshd[3101]: Invalid user test from 192.0.2.9 port 22": "test",
+        "Oct  3 22:01:10 app01 sshd[3101]: Failed password for admin from 192.0.2.9 port 22 ssh2": "admin",
+        "Oct  3 22:01:25 app01 sshd[3103]: Accepted publickey for jsmith from 10.0.5.20 port 51026 ssh2": "jsmith",
+    }
+    for line, user in cases.items():
+        assert parse_syslog_line(line).user == user, line
