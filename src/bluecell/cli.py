@@ -24,6 +24,16 @@ from .llm import LLMBackbone, BackboneUnavailable
 from .report import render_markdown, render_json
 
 
+def _positive_int(value: str) -> int:
+    try:
+        n = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected a whole number, got {value!r}")
+    if n < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, got {n}")
+    return n
+
+
 def _make_backbone(mode: str, model: str):
     if mode == "off":
         return None
@@ -199,9 +209,9 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("paths", nargs="+", help="Log files or directories")
     a.add_argument("--source", help="Override source type for all inputs "
                    "(edr|dns|network|firewall|cloud|auth|syslog)")
-    a.add_argument("--window", type=int, default=60,
+    a.add_argument("--window", type=_positive_int, default=60,
                    help="Correlation window in minutes (default 60)")
-    a.add_argument("--max-incidents", type=int, default=10, dest="max_incidents")
+    a.add_argument("--max-incidents", type=_positive_int, default=10, dest="max_incidents")
     a.add_argument("--no-agents", action="store_true", dest="no_agents",
                    help="Skip the agent swarm (pipeline only)")
     a.add_argument("--llm", choices=["auto", "cli", "api", "off"], default="auto",
@@ -233,7 +243,7 @@ def build_parser() -> argparse.ArgumentParser:
     sv.add_argument("paths", nargs="+", help="Log files or directories to analyze")
     sv.add_argument("--host", default="127.0.0.1", help="Bind host (default 127.0.0.1)")
     sv.add_argument("--port", type=int, default=8787, help="Port (default 8787)")
-    sv.add_argument("--window", type=int, default=60, help="Correlation window minutes")
+    sv.add_argument("--window", type=_positive_int, default=60, help="Correlation window minutes")
     sv.add_argument("--llm", choices=["auto", "cli", "api", "off"], default="off",
                     help="LLM backbone for RCA/agents (default off for speed)")
     sv.add_argument("--model", default="claude-sonnet-5")
