@@ -242,6 +242,8 @@ def _render_swarm(swarm: dict) -> str:
                 line += f" · {r['note']}"
             out.append(line)
         out.append("")
+    if swarm.get("tier3_skipped"):
+        out += [f"**Tier-3 specialists skipped:** {swarm['tier3_skipped']}", ""]
     # Tier-3 specialist recommendations are the actionable output.
     t3 = [f for f in swarm["findings"] if f["tier"] == 3]
     if t3:

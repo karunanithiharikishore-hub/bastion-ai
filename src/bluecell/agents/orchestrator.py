@@ -39,6 +39,7 @@ class SwarmOrchestrator:
         self.tier2 = []
         self.tier3 = []
         self.agent_runs = []      # per-agent run record (mode, tools, errors)
+        self.tier3_skipped = None  # reason string when Tier-3 did not run
 
     def _register(self, agent) -> None:
         self.roster.append({"name": agent.name, "role": agent.role, "tier": agent.tier})
@@ -84,10 +85,21 @@ class SwarmOrchestrator:
         confirmed_ids = {f.incident_id for f in self.tier2
                          if f.status == "escalated"}
 
-        # ---- Tier 3: specialists (scoped to confirmed incidents) ----
+        # ---- Tier 3: specialists ----
+        # Scope: the confirmed incidents; if none, everything a Tier-2 *agent*
+        # did not dismiss (rule-only dismissals are advisory, like the headline).
+        # If the agent dismissed every incident there is nothing left to work.
+        agent_dismissed = {f.incident_id for f in self.tier2
+                           if f.status == "dismissed" and f.origin == "agent"}
+        scope = [i for i in ctx.incidents if i.id in confirmed_ids] or \
+                [i for i in ctx.incidents if i.id not in agent_dismissed]
+        if ctx.incidents and not scope:
+            self.tier3_skipped = (f"Tier-2 agent dismissed all {len(ctx.incidents)} "
+                                  f"incident(s); specialists not deployed.")
+            return self._reconcile(confirmed_ids)
+
         confirmed_ctx = AgentContext(
-            events=ctx.events,
-            incidents=[i for i in ctx.incidents if i.id in confirmed_ids] or ctx.incidents,
+            events=ctx.events, incidents=scope,
             iocs=ctx.iocs, digest=ctx.digest,
             intel_store=ctx.intel_store, backbone=ctx.backbone,
         )
@@ -140,6 +152,7 @@ class SwarmOrchestrator:
                     1 for r in self.agent_runs if r.get("mode") == "autonomous"),
             },
             "agent_runs": self.agent_runs,
+            "tier3_skipped": self.tier3_skipped,
             "findings": [f.to_dict() for f in all_findings],
             "consensus": list(per_incident.values()),
         }

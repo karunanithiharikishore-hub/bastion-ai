@@ -303,3 +303,57 @@ def test_analyzer_headline_uses_agent_dismissal(monkeypatch):
     assert v["level"] == "likely-benign" and v["decided_by"] == "tier2-agent"
     md = render_markdown(result)
     assert "LIKELY BENIGN" in md and "overruled the rule-based score" in md
+
+
+class DismissAll(ScriptedModel):
+    """Tier-1 and Tier-2 agents look; Tier-2 dismisses every incident.
+    Records which roles were ever called, so we can prove Tier-3 never ran."""
+
+    def __init__(self, incidents):
+        super().__init__([])
+        self.incidents = incidents
+        self.roles_called = set()
+
+    def messages(self, body):
+        role = body["system"].split(" on a blue team")[0].replace("You are the ", "")
+        self.roles_called.add(role)
+        n = len(body["messages"])
+        if role == "Tier-2 SOC Analyst" and n == 1:
+            return {"content": [
+                {"type": "tool_use", "id": f"v{i}", "name": "submit_verdict",
+                 "input": {"incident_id": inc.id, "decision": "dismissed",
+                           "confidence": 0.8, "rationale": "approved maintenance",
+                           "evidence": [inc.events[0].event_id]}}
+                for i, inc in enumerate(self.incidents)]}
+        if n == 1:
+            return {"content": [{"type": "tool_use", "id": "o",
+                                 "name": "case_overview", "input": {}}]}
+        return {"content": [{"type": "text", "text": "done"}]}
+
+
+def test_tier3_skipped_when_tier2_agent_dismisses_everything():
+    ctx = _ctx()
+    model = DismissAll(ctx.incidents)
+    ctx.backbone = model
+    out = SwarmOrchestrator(ctx).run()
+    assert out["tier3_skipped"] and "dismissed all" in out["tier3_skipped"]
+    assert out["counts"]["tier3_findings"] == 0
+    assert {r["tier"] for r in out["agent_runs"]} == {1, 2}
+    assert all(a["tier"] != 3 for a in out["roster"])
+    assert model.roles_called == {"Tier-1 SOC Analyst", "Tier-2 SOC Analyst"}
+    from bluecell.report.render import _render_swarm
+    assert "Tier-3 specialists skipped" in _render_swarm(out)
+
+
+def test_rule_only_dismissal_still_runs_specialists():
+    """Without a model, a rule-based Tier-2 dismissal is advisory: Tier-3 still runs."""
+    from bluecell.models import Event
+    e = Event(ts="2026-09-26T09:00:00Z", source="syslog", category="other",
+              action="log", message="benign", host="h1")
+    e.attack.append("T1059")
+    ctx = AgentContext(events=[e], incidents=correlate([e], window_minutes=30),
+                       iocs=extract_iocs([e]), digest=compress([e]))
+    out = SwarmOrchestrator(ctx, use_llm=False).run()
+    assert out["counts"]["confirmed_incidents"] == 0
+    assert out["tier3_skipped"] is None
+    assert 3 in {r["tier"] for r in out["agent_runs"]}
