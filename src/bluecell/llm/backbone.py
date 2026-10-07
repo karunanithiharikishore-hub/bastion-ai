@@ -24,6 +24,9 @@ import urllib.request
 import urllib.error
 
 DEFAULT_MODEL = "claude-sonnet-5"
+# Seconds per call. The AI analyst's lead call has been measured at 36-120+ s
+# on the samples; 120 s was too tight and failed intermittently.
+DEFAULT_TIMEOUT = 300
 _API_URL = "https://api.anthropic.com/v1/messages"
 _API_VERSION = "2023-06-01"
 
@@ -34,7 +37,7 @@ class BackboneUnavailable(RuntimeError):
 
 class LLMBackbone:
     def __init__(self, mode: str = "auto", model: str = DEFAULT_MODEL,
-                 timeout: int = 120):
+                 timeout: int = DEFAULT_TIMEOUT):
         self.mode = mode
         self.model = model
         self.timeout = timeout
