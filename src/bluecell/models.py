@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field, asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 
@@ -37,11 +38,13 @@ def _parse_ts(value: Any) -> datetime:
     back to now(). Never raises: a bad timestamp must not crash ingestion.
     """
     if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-    if isinstance(value, (int, float)):
+        return _utc(value)
+    if isinstance(value, str) and re.fullmatch(r"\s*\d{9,16}(\.\d+)?\s*", value):
+        value = float(value)          # epoch stored as text (every CSV value is text)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
         # Heuristic: values > 1e12 are milliseconds.
-        seconds = value / 1000.0 if value > 1_000_000_000_000 else float(value)
         try:
+            seconds = value / 1000.0 if value > 1_000_000_000_000 else float(value)
             return datetime.fromtimestamp(seconds, tz=timezone.utc)
         except (OverflowError, OSError, ValueError):
             return datetime.now(timezone.utc)
@@ -49,20 +52,34 @@ def _parse_ts(value: Any) -> datetime:
         v = value.strip().replace("Z", "+00:00")
         for candidate in (v, v.split(".")[0] + "+00:00" if "." in v else v):
             try:
-                dt = datetime.fromisoformat(candidate)
-                return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+                return _utc(datetime.fromisoformat(candidate))
             except ValueError:
                 continue
         # Common syslog format: "Mmm dd HH:MM:SS" (no year) -> assume current.
         for fmt in ("%b %d %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
             try:
                 dt = datetime.strptime(v, fmt)
-                if dt.year == 1900:
-                    dt = dt.replace(year=datetime.now(timezone.utc).year)
-                return dt.replace(tzinfo=timezone.utc)
             except ValueError:
                 continue
+            dt = dt.replace(tzinfo=timezone.utc)
+            if dt.year == 1900:
+                now = datetime.now(timezone.utc)
+                dt = dt.replace(year=now.year)
+                # "Dec 31" read in January belongs to last year, not this one.
+                if dt > now + timedelta(days=2):
+                    dt = dt.replace(year=now.year - 1)
+            return dt
     return datetime.now(timezone.utc)
+
+
+def _utc(dt: datetime) -> datetime:
+    """Tz-aware UTC; naive values are taken to be UTC already."""
+    return dt.astimezone(timezone.utc) if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+# Entity fields that must be strings (JSON may hold numbers, lists or objects).
+_STR_FIELDS = ("host", "user", "process", "src_ip", "dst_ip", "domain",
+               "file_path", "file_hash")
 
 
 @dataclass
@@ -90,14 +107,27 @@ class Event:
 
     def __post_init__(self) -> None:
         self.ts = _parse_ts(self.ts)
+        for name in _STR_FIELDS:
+            val = getattr(self, name)
+            if val is not None:
+                val = str(val).strip()
+                setattr(self, name, val or None)
+        self.message = "" if self.message is None else str(self.message)
+        self.action = str(self.action or "event")
+        self.source = str(self.source or "unknown")
         if self.category not in CATEGORIES:
             self.category = "other"
-        self.severity = max(0, min(4, int(self.severity or 0)))
+        try:
+            self.severity = max(0, min(4, int(self.severity or 0)))
+        except (TypeError, ValueError, OverflowError):   # "high", NaN, inf
+            self.severity = 0
 
     @property
     def event_id(self) -> str:
         """Stable id derived from content — used for dedup and evidence refs."""
-        basis = f"{self.ts.isoformat()}|{self.source}|{self.action}|{self.host}|{self.user}|{self.dst_ip}|{self.domain}|{self.message}"
+        basis = (f"{self.ts.isoformat()}|{self.source}|{self.action}|{self.host}|{self.user}|"
+                 f"{self.src_ip}|{self.dst_ip}|{self.domain}|{self.process}|{self.file_hash}|"
+                 f"{self.file_path}|{self.message}")
         return hashlib.sha1(basis.encode("utf-8", "replace")).hexdigest()[:12]
 
     def entities(self) -> dict:

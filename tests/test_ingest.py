@@ -99,3 +99,75 @@ def test_syslog_user_skips_filler_words():
     }
     for line, user in cases.items():
         assert parse_syslog_line(line).user == user, line
+
+
+# ---- from-scratch review fixes ---------------------------------------------
+
+def test_timestamps_epoch_text_utc_and_year_rollover():
+    from datetime import datetime, timezone, timedelta
+    from bluecell.models import _parse_ts
+    assert _parse_ts("1700000000").year == 2023                      # CSV epoch text
+    assert _parse_ts("1700000000000") == _parse_ts(1700000000)       # millis text
+    dt = _parse_ts("2026-10-03T22:00:00+05:30")
+    assert dt.utcoffset() == timedelta(0) and dt.hour == 16           # converted to UTC
+    now = datetime.now(timezone.utc)
+    future = now + timedelta(days=30)
+    assert _parse_ts(future.strftime("%b %d %H:%M:%S")).year == now.year - 1
+
+
+def test_event_coerces_non_string_entities_and_bad_severity():
+    from bluecell.models import Event
+    e = Event(ts="2026-10-03T22:00:00Z", source="edr", category="process", action="x",
+              message=None, host=1234, user="  ", src_ip=["10.0.0.1"], severity=float("nan"))
+    assert e.host == "1234" and e.user is None and isinstance(e.src_ip, str)
+    assert e.severity == 0 and e.message == ""
+
+
+def test_dedup_keeps_events_that_differ_only_by_source_ip():
+    from bluecell.models import Event
+    from bluecell.pipeline import normalize
+    a = Event(ts="2026-10-03T22:00:00Z", source="firewall", category="network", action="allow",
+              message="c2 beacon", src_ip="10.0.0.11", dst_ip="198.51.100.7")
+    b = Event(ts="2026-10-03T22:00:00Z", source="firewall", category="network", action="allow",
+              message="c2 beacon", src_ip="10.0.0.12", dst_ip="198.51.100.7")
+    assert len(normalize([a, b])) == 2
+
+
+def test_syslog_publickey_success_sudo_user_and_iso_timestamp():
+    ok = parse_syslog_line("Oct  3 22:01:25 app01 sshd[3103]: Accepted publickey for jsmith from 10.0.5.20 port 51026 ssh2")
+    assert ok.action == "login_success" and ok.user == "jsmith"
+    sudo = parse_syslog_line("Oct  3 22:01:40 app01 sudo[3110]: jsmith : TTY=pts/0 ; PWD=/home/jsmith ; USER=root ; COMMAND=/usr/bin/id")
+    assert sudo.action == "sudo" and sudo.user == "jsmith"
+    iso = parse_syslog_line("2026-10-03T22:01:10.123+00:00 app01 sshd[1]: Failed password for root from 192.0.2.9 port 22 ssh2")
+    assert iso.host == "app01" and iso.action == "login_failed"
+    assert iso.ts.isoformat().startswith("2026-10-03T22:01:10")
+
+
+def test_cloudtrail_user_from_identity_and_assumed_role():
+    plain = parse_cloud({"eventTime": "2026-10-03T22:00:00Z", "eventName": "ListBuckets",
+                         "userIdentity": {"type": "IAMUser", "userName": "alice"}})
+    assert plain.user == "alice"
+    role = parse_cloud({"eventTime": "2026-10-03T22:00:00Z", "eventName": "ListBuckets",
+                        "userIdentity": {"type": "AssumedRole",
+                                         "arn": "arn:aws:sts::1:assumed-role/Admin/bob"}})
+    assert role.user == "bob"
+    flat = parse_cloud({"eventTime": "2026-10-03T22:00:00Z", "eventName": "x", "caller": "carol"})
+    assert flat.user == "carol"
+
+
+def test_csv_with_byte_order_mark_keeps_timestamp(tmp_path):
+    from bluecell.ingest import ingest_path
+    p = tmp_path / "firewall.csv"
+    p.write_bytes(b"\xef\xbb\xbftimestamp,action,src_ip,dst_ip,message\n"
+                  b"2026-09-26T09:07:05Z,allow,10.0.0.11,203.0.113.90,dl\n")
+    assert ingest_path(str(p))[0].ts.isoformat().startswith("2026-09-26T09:07:05")
+
+
+def test_json_lines_inside_a_log_file_are_structured(tmp_path):
+    from bluecell.ingest import ingest_path
+    p = tmp_path / "dns_export.log"
+    p.write_text('{"timestamp": "2026-10-03T22:01:45Z", "query": "evil.top", "host": "h1"}\n'
+                 "Oct  3 22:02:00 h1 sshd[1]: Failed password for root from 192.0.2.9 port 22 ssh2\n")
+    evs = ingest_path(str(p))
+    assert [e.source for e in evs] == ["dns", "syslog"]
+    assert evs[0].domain == "evil.top"

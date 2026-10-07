@@ -133,7 +133,9 @@ def ingest_file(path: str, override: Optional[str] = None) -> list:
     """Parse one file into a list of Events."""
     ext = os.path.splitext(path)[1].lower()
     events: list = []
-    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+    # utf-8-sig strips the byte-order mark Excel / Microsoft portal CSVs start
+    # with; otherwise the first column header becomes "\ufefftimestamp".
+    with open(path, "r", encoding="utf-8-sig", errors="replace") as fh:
         text = fh.read()
 
     if ext in (".json", ".jsonl", ".ndjson"):
@@ -154,14 +156,30 @@ def ingest_file(path: str, override: Optional[str] = None) -> list:
             ev = _parse_record(clean, source)
             if ev:
                 events.append(ev)
-    else:  # syslog / plaintext
+    else:  # syslog / plaintext (lines that are JSON objects are parsed as records,
+           # since many SIEM exports write JSON-per-line into .log / .txt files)
         for line in text.splitlines():
-            ev = parse_syslog_line(line)
-            if ev:
-                if override:
+            rec = _json_object(line)
+            if rec is not None:
+                ev = _parse_record(rec, detect_source(path, rec, override))
+            else:
+                ev = parse_syslog_line(line)
+                if ev and override:
                     ev.source = override
+            if ev:
                 events.append(ev)
     return events
+
+
+def _json_object(line: str) -> Optional[dict]:
+    line = line.strip()
+    if not (line.startswith("{") and line.endswith("}")):
+        return None
+    try:
+        obj = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    return obj if isinstance(obj, dict) else None
 
 
 def ingest_path(path: str, override: Optional[str] = None) -> list:

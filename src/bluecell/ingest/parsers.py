@@ -45,8 +45,10 @@ def _severity(val) -> int:
     if val is None:
         return 0
     if isinstance(val, (int, float)):
-        n = int(val)
-        return max(0, min(4, n))
+        try:
+            return max(0, min(4, int(val)))
+        except (ValueError, OverflowError):   # NaN / inf
+            return 0
     s = str(val).strip().lower()
     if s.isdigit():
         return max(0, min(4, int(s)))
@@ -125,11 +127,20 @@ def parse_cloud(r: dict) -> Optional[Event]:
         action=str(action),
         message=str(_get(r, "message", "errorMessage", default=action)),
         severity=_severity(_get(r, "severity", default=("high" if _get(r, "errorCode") else "info"))),
-        user=_get(r, "userIdentity.userName", "userName", "principal", "caller")
-        or (r.get("userIdentity", {}) or {}).get("userName") if isinstance(r.get("userIdentity"), dict) else _get(r, "userName", "principal"),
+        user=_cloud_user(r),
         src_ip=_get(r, "sourceIPAddress", "callerIp", "src_ip"),
         raw=r,
     )
+
+
+def _cloud_user(r: dict):
+    """CloudTrail userIdentity.userName, else a flat user field, else the
+    role/session name from the ARN (AssumedRole identities have no userName)."""
+    ident = r.get("userIdentity") if isinstance(r.get("userIdentity"), dict) else {}
+    user = ident.get("userName") or _get(r, "userName", "principal", "caller")
+    if not user and ident.get("arn"):
+        user = str(ident["arn"]).rsplit("/", 1)[-1]
+    return user
 
 
 def parse_auth(r: dict) -> Optional[Event]:
@@ -152,11 +163,18 @@ def parse_auth(r: dict) -> Optional[Event]:
 # ---- syslog (line) parser --------------------------------------------------
 
 _SYSLOG_RE = re.compile(
-    r"^(?P<ts>\w{3}\s+\d+\s+\d{2}:\d{2}:\d{2})\s+"
+    # BSD "Oct  3 22:00:00" or ISO/RFC 5424 "2026-10-03T22:00:00.123+00:00"
+    r"^(?:<\d+>\d?\s*)?"
+    r"(?P<ts>\w{3}\s+\d+\s+\d{2}:\d{2}:\d{2}"
+    r"|\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)\s+"
     r"(?P<host>\S+)\s+"
     r"(?P<proc>[\w\-/.]+)(?:\[(?P<pid>\d+)\])?:\s*"
     r"(?P<msg>.*)$"
 )
+# sshd: "Accepted password|publickey|keyboard-interactive/pam|... for USER from IP"
+_SSH_ACCEPTED_RE = re.compile(r"\baccepted\s+\S+\s+for\s+", re.I)
+# sudo: "jsmith : TTY=pts/0 ; PWD=/home/jsmith ; USER=root ; COMMAND=..."
+_SUDO_RE = re.compile(r"^\s*(?P<u>[\w.\-\\@]+)\s+:\s+.*\bCOMMAND=", re.I)
 _IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 # "for"/"user"/"account" followed by the account name. Filler words that can sit
 # in between ("session closed for user X", "for invalid user X") are skipped so
@@ -179,14 +197,15 @@ def parse_syslog_line(line: str) -> Optional[Event]:
     low = msg.lower()
     if "fail" in low and ("password" in low or "authentication" in low or "login" in low):
         action, category, sev = "login_failed", "authentication", 3
-    elif "accepted" in low and "password" in low:
+    elif _SSH_ACCEPTED_RE.search(msg):
         action, category, sev = "login_success", "authentication", 1
     elif "sudo" in (m.group("proc") or "").lower():
         action, category, sev = "sudo", "process", 2
     else:
         action, category, sev = "log", "other", 1
     ips = _IP_RE.findall(msg)
-    um = _USER_RE.search(msg)
+    sm = _SUDO_RE.match(msg) if action == "sudo" else None
+    um = sm or _USER_RE.search(msg)
     return Event(
         ts=m.group("ts"),
         source="syslog",
