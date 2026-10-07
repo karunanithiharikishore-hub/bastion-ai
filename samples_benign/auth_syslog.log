@@ -1,0 +1,10 @@
+Oct  3 22:00:02 app01 change-mgmt[901]: Maintenance window CHG0042117 opened by it-ops (approved patching: OpenSSL update, node_exporter rollout, logrotate fix)
+Oct  3 22:01:10 app01 sshd[3101]: Failed password for jsmith from 10.0.5.20 port 51022 ssh2
+Oct  3 22:01:18 app01 sshd[3102]: Failed password for jsmith from 10.0.5.20 port 51024 ssh2
+Oct  3 22:01:25 app01 sshd[3103]: Accepted publickey for jsmith from 10.0.5.20 port 51026 ssh2
+Oct  3 22:01:40 app01 sudo[3110]: jsmith : TTY=pts/0 ; PWD=/home/jsmith ; USER=root ; COMMAND=/usr/bin/apt-get install --only-upgrade openssl
+Oct  3 22:04:12 app01 sudo[3120]: jsmith : TTY=pts/0 ; PWD=/home/jsmith ; USER=root ; COMMAND=/usr/bin/systemctl enable node_exporter
+Oct  3 22:04:13 app01 systemd[1]: Started node_exporter.service - Prometheus Node Exporter (CHG0042117).
+Oct  3 22:06:30 app01 sudo[3131]: jsmith : TTY=pts/0 ; PWD=/etc ; USER=root ; COMMAND=/usr/bin/crontab -e (cron: logrotate nightly 02:00 per CHG0042117)
+Oct  3 22:20:41 app01 sshd[3101]: pam_unix(sshd:session): session closed for user jsmith
+Oct  3 22:45:00 app01 change-mgmt[902]: Maintenance window CHG0042117 closed by it-ops: all tasks completed, validation passed

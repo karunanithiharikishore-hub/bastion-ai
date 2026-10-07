@@ -246,3 +246,16 @@ def test_full_swarm_runs_every_tier_as_agents():
     # Nobody filed anything; the Tier-2 run record must say the incident went undecided.
     senior = next(r for r in out["agent_runs"] if r["tier"] == 2)
     assert "got no verdict" in senior["note"]
+
+
+def test_benign_sample_is_a_real_false_positive_test_case():
+    """samples_benign must look suspicious to the rules (an incident forms across
+    every source), or it cannot test whether Tier-2 dismisses benign activity."""
+    from conftest import BENIGN_SAMPLES
+    events = normalize(ingest_path(BENIGN_SAMPLES))
+    map_attack(events)
+    assert {e.source for e in events} == {"auth", "dns", "edr", "firewall", "syslog"}
+    incidents = correlate(events, window_minutes=60)
+    assert len(incidents) == 1 and incidents[0].techniques
+    # The change ticket the agents should find is in the evidence.
+    assert any("CHG0042117" in e.message for e in events)

@@ -218,6 +218,7 @@ src/bluecell/
   cli.py               Command-line interface
 scripts/update_intel.py  Scheduled NVD CVE ingester
 samples/                 Example multi-source attack chain
+samples_benign/          Benign maintenance window that trips the rules (false-positive test)
 feeds/                   Example threat-intel feed
 tests/                   Test suite (pytest)
 ```
