@@ -185,7 +185,11 @@ def deterministic_storyline(inc) -> dict:
             phases.setdefault(tactic, []).append((ev, tid))
 
     ordered_phases = []
-    for tactic in sorted(phases, key=_tactic_rank):
+    # Chronological: the storyline must start with what happened first (the
+    # brute force at 09:01, not the execution at 09:06). Kill-chain rank only
+    # breaks ties between phases that start at the same moment.
+    first = {t: min(e.ts for e, _t in evs) for t, evs in phases.items()}
+    for tactic in sorted(phases, key=lambda t: (first[t], _tactic_rank(t))):
         evs = phases[tactic]
         tids = sorted({tid for _e, tid in evs})
         # De-duplicated example event lines for the clickable phase drawer.
@@ -245,7 +249,7 @@ _TACTIC_VERB = {
     "persistence": "established persistence to survive reboots/log-offs",
     "privilege-escalation": "escalated privileges",
     "defense-evasion": "disabled or evaded defenses",
-    "credential-access": "harvested credentials",
+    "credential-access": "went after credentials (e.g. brute force or theft)",
     "discovery": "mapped internal systems",
     "lateral-movement": "moved to other machines",
     "collection": "collected data of interest",
@@ -264,7 +268,7 @@ def _attack_summary(inc, patient_zero, ordered_phases, objective,
     """
     benign = framing == "benign"
     # Entry vector: earliest phase in kill-chain order, plus patient zero.
-    entry_phase = ordered_phases[0] if ordered_phases else None
+    entry_phase = ordered_phases[0] if ordered_phases else None   # earliest phase
     entry_bits = []
     if patient_zero is not None:
         pz = patient_zero.compact() if hasattr(patient_zero, "compact") else str(patient_zero)

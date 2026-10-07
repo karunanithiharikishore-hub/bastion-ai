@@ -134,3 +134,13 @@ def test_routine_cron_run_is_not_a_scheduled_task_technique():
     edit = parse_syslog_line("Oct  3 10:00:01 h1 sudo[1]: bob : TTY=pts/0 ; PWD=/ ; USER=root ; COMMAND=/usr/bin/crontab -e")
     map_attack([run, edit])
     assert "T1053" not in run.attack and "T1053" in edit.attack
+
+
+def test_storyline_phases_are_chronological():
+    from conftest import SAMPLES
+    from bluecell.analyzer import analyze
+    r = analyze([SAMPLES], use_llm=False)
+    phases = r["incidents"][0]["storyline"]["structured"]["phases"]
+    firsts = [p["first_seen"] for p in phases]
+    assert firsts == sorted(firsts)
+    assert phases[0]["tactic"] == "credential-access"      # the 09:01 brute force
