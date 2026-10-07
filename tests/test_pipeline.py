@@ -125,3 +125,12 @@ def test_hash_counted_once_per_event_case_insensitive():
               message=f"dropped {h.lower()}", file_hash=h)
     hashes = extract_iocs([e])["hash"]
     assert hashes == [{"value": h.lower(), "count": 1, "suspicious": False, "hosts": []}]
+
+
+def test_routine_cron_run_is_not_a_scheduled_task_technique():
+    from bluecell.ingest.parsers import parse_syslog_line
+    from bluecell.pipeline import map_attack
+    run = parse_syslog_line("Oct  3 10:00:01 h1 CRON[42]: (root) CMD (run-parts /etc/cron.hourly)")
+    edit = parse_syslog_line("Oct  3 10:00:01 h1 sudo[1]: bob : TTY=pts/0 ; PWD=/ ; USER=root ; COMMAND=/usr/bin/crontab -e")
+    map_attack([run, edit])
+    assert "T1053" not in run.attack and "T1053" in edit.attack

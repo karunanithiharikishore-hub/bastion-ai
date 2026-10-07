@@ -110,7 +110,10 @@ def map_attack(events: list) -> list:
             _tag(ev, "T1490", "shadow-copy-delete")
 
         # Persistence.
-        if any(t in msg or t in act for t in ("scheduled task", "schtasks", "cron", "at.exe")):
+        # Creating/changing a scheduled job, not the scheduler running one
+        # ("CRON[123]: (root) CMD (run-parts /etc/cron.hourly)" is routine).
+        if any(t in msg or t in act for t in ("scheduled task", "schtasks", "crontab",
+                                              "at.exe", "new cron job", "cron job created")):
             _tag(ev, "T1053", "scheduled-task")
         if any(t in msg or t in act for t in ("new service", "sc create", "systemctl enable")):
             _tag(ev, "T1543", "new-service")
