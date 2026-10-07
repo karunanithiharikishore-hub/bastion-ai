@@ -119,7 +119,9 @@ def correlate(events: list, window_minutes: int = 60,
     last_seen: dict = {}  # (entity_key, value) -> index
     for i, ev in enumerate(events):
         for key, val in ev.entities().items():
-            token = (key, str(val).lower())
+            # An IP is the same entity whether it is the source or destination
+            # (attacker IP as SSH source, then as a firewall destination).
+            token = ("ip" if key in ("src_ip", "dst_ip") else key, str(val).lower())
             j = last_seen.get(token)
             if j is not None and (ev.ts - events[j].ts) <= window:
                 dsu.union(j, i)

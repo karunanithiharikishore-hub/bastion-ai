@@ -4,27 +4,32 @@
 """IOC extraction and threat-hunt checklist generation."""
 from __future__ import annotations
 
+import ipaddress
 import re
 from collections import Counter
 
 _IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 _HASH_RE = re.compile(r"\b[a-fA-F0-9]{64}\b|\b[a-fA-F0-9]{40}\b|\b[a-fA-F0-9]{32}\b")
 
-# RFC1918 / loopback / link-local — not useful as external IOCs.
-_PRIVATE_PREFIXES = ("10.", "192.168.", "127.", "169.254.", "0.")
-
-
-def _is_public_ip(ip: str) -> bool:
-    if ip.startswith(_PRIVATE_PREFIXES):
+def is_public_ip(ip) -> bool:
+    """True for a globally routable IPv4/IPv6 address. Private, loopback,
+    link-local, CGNAT, multicast, reserved and malformed values are not
+    useful as external IOCs. RFC 5737/3849 documentation ranges count as
+    public so the bundled synthetic samples behave like real external IPs."""
+    try:
+        addr = ipaddress.ip_address(str(ip).strip().strip("[]").split("%")[0])
+    except ValueError:
         return False
-    if ip.startswith("172."):
-        try:
-            second = int(ip.split(".")[1])
-            if 16 <= second <= 31:
-                return False
-        except (IndexError, ValueError):
-            return True
-    return True
+    if addr.is_multicast:          # Python counts some multicast as "global"
+        return False
+    if addr.is_global:
+        return True
+    doc = (ipaddress.ip_network("192.0.2.0/24"), ipaddress.ip_network("198.51.100.0/24"),
+           ipaddress.ip_network("203.0.113.0/24"), ipaddress.ip_network("2001:db8::/32"))
+    return any(addr in net for net in doc if net.version == addr.version)
+
+
+_is_public_ip = is_public_ip   # backwards-compatible name
 
 
 def extract_iocs(events: list) -> dict:
@@ -51,26 +56,27 @@ def extract_iocs(events: list) -> dict:
                 if flagged:
                     suspicious["ip"].add(ip)
         if ev.domain:
-            buckets["domain"][ev.domain] += 1
-            note_host("domain", ev.domain, ev.host)
+            dom = ev.domain.lower().rstrip(".")
+            buckets["domain"][dom] += 1
+            note_host("domain", dom, ev.host)
             if flagged:
-                suspicious["domain"].add(ev.domain)
+                suspicious["domain"].add(dom)
+        # Each distinct hash counts once per event, whether it came from the
+        # hash field or was mined from the message (and case-insensitively).
+        hashes = set(h.lower() for h in _HASH_RE.findall(ev.message or ""))
         if ev.file_hash and _HASH_RE.fullmatch(ev.file_hash):
-            buckets["hash"][ev.file_hash] += 1
-            note_host("hash", ev.file_hash, ev.host)
+            hashes.add(ev.file_hash.lower())
+        for h in hashes:
+            buckets["hash"][h] += 1
+            note_host("hash", h, ev.host)
             if flagged:
-                suspicious["hash"].add(ev.file_hash)
+                suspicious["hash"].add(h)
         if ev.process and flagged:
             buckets["process"][ev.process] += 1
             suspicious["process"].add(ev.process)
         if ev.user and flagged:
             buckets["user"][ev.user] += 1
             suspicious["user"].add(ev.user)
-        # Mine free-text messages for hashes/IPs the parser missed.
-        for h in _HASH_RE.findall(ev.message or ""):
-            buckets["hash"][h] += 1
-            if flagged:
-                suspicious["hash"].add(h)
 
     out: dict = {}
     for kind, counter in buckets.items():

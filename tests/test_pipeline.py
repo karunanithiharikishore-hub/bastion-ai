@@ -92,3 +92,36 @@ def test_compress_collapses_bursts_and_estimates_tokens():
     digest = compress(bursts)
     assert "x50" in digest            # 50 identical events collapsed to one line
     assert digest.count("\n") < 5
+
+
+# ---- from-scratch review fixes ---------------------------------------------
+
+def test_correlate_links_ip_across_source_and_destination():
+    from bluecell.models import Event
+    from bluecell.pipeline import correlate
+    login = Event(ts="2026-09-26T09:01:00Z", source="syslog", category="authentication",
+                  action="login_failed", message="x", src_ip="203.0.113.66")
+    fw = Event(ts="2026-09-26T09:05:00Z", source="firewall", category="network",
+               action="allow", message="y", dst_ip="203.0.113.66")
+    login.attack.append("T1110")
+    incs = correlate([login, fw], window_minutes=60)
+    assert len(incs) == 1 and len(incs[0].events) == 2
+
+
+def test_public_ip_check_handles_ipv6_and_special_ranges():
+    from bluecell.pipeline.ioc import is_public_ip
+    for ip in ("::1", "fe80::1", "fd00::1", "100.64.1.1", "224.0.0.1", "10.1.1.1",
+               "172.20.0.1", "999.1.1.1", "not-an-ip"):
+        assert not is_public_ip(ip), ip
+    for ip in ("8.8.8.8", "2606:4700::1111", "203.0.113.66"):
+        assert is_public_ip(ip), ip
+
+
+def test_hash_counted_once_per_event_case_insensitive():
+    from bluecell.models import Event
+    from bluecell.pipeline import extract_iocs
+    h = "A3F5C1E2B4D6789012345678901234567890ABCDEF1234567890ABCDEF123456"
+    e = Event(ts="2026-09-26T09:07:02Z", source="edr", category="process", action="x",
+              message=f"dropped {h.lower()}", file_hash=h)
+    hashes = extract_iocs([e])["hash"]
+    assert hashes == [{"value": h.lower(), "count": 1, "suspicious": False, "hosts": []}]

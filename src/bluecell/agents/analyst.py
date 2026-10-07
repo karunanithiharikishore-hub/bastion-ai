@@ -22,19 +22,7 @@ from collections import Counter
 
 from .grounding import evidence_index, check_text
 
-_PRIVATE = ("10.", "192.168.", "127.", "169.254.", "0.", "::1")
-
-
-def _is_public(ip: str) -> bool:
-    ip = (ip or "").strip()
-    if not ip or ip.startswith(_PRIVATE):
-        return False
-    if ip.startswith("172."):
-        try:
-            return not (16 <= int(ip.split(".")[1]) <= 31)
-        except (IndexError, ValueError):
-            return True
-    return True
+from ..pipeline.ioc import is_public_ip as _is_public
 
 
 def build_evidence_brief(events, iocs, max_lines=60) -> str:
