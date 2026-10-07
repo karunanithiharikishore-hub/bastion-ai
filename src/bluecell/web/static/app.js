@@ -154,6 +154,8 @@ function renderHero(r) {
   host.appendChild(metric(m.events_ingested ?? 0, "Events Ingested", ""));
   host.appendChild(metric((r.incidents || []).length, "Incidents", "g"));
   $("backbone").textContent = "backbone: " + (m.backbone || "unknown");
+  $("hc-backbone").textContent = (m.backbone || "unknown").split(" ")[0];
+  $("hc-agents").textContent = (m.agents_deployed ?? sw.agent_count ?? 0) + " deployed";
   $("ver").textContent = "v" + (m.version || "");
 }
 
@@ -187,6 +189,8 @@ function renderVerdict(r) {
   const label = v.level === "likely-malicious" ? "LIKELY REAL ATTACK"
     : v.level === "likely-benign" ? "LIKELY BENIGN / NOISE" : "NEEDS REVIEW";
   host.className = "verdict " + cls;
+  document.body.dataset.threat = cls;
+  $("hc-verdict").textContent = label.toLowerCase();
   host.innerHTML = "";
   const top = el("div", "vtop");
   top.appendChild(el("span", "vlabel", label));
@@ -439,3 +443,11 @@ async function downloadIR() {
 // On first open, show whatever the server was launched with (samples), so the
 // deck isn't empty, but the drop zone is the primary call to action.
 load("/api/report");
+
+
+/* ================= hero shortcuts ================= */
+$("hs-drop").addEventListener("click", () => {
+  $("intake").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+  $("dropzone").classList.add("drag"); setTimeout(() => $("dropzone").classList.remove("drag"), 900);
+});
+$("hs-sample").addEventListener("click", () => $("loadsample").click());

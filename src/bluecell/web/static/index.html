@@ -12,19 +12,49 @@
 <body>
   <canvas id="bg"></canvas>
   
-  <header class="topbar glass">
+  <header class="topbar">
     <div class="brand">
       <span class="logo" aria-hidden="true"></span>
       <div>
-        <h1>BLUECELL</h1>
+        <div class="wm">BLUECELL</div>
         <p class="tag">THREAT INTELLIGENCE · COMMAND DECK</p>
       </div>
     </div>
+    <nav class="topnav" aria-label="Sections">
+      <a href="#intake">Intake</a>
+      <a href="#verdict">Verdict</a>
+      <a href="#pinpointer-panel">Root cause</a>
+      <a href="#stage-wrap">Storyline</a>
+      <a href="#iocs">Indicators</a>
+    </nav>
     <div class="head-right">
       <span id="backbone" class="pill">backbone: …</span>
       <span id="live" class="pill live">● LIVE</span>
     </div>
   </header>
+
+  <section class="hero-stage" id="top">
+    <div class="hs-grid" aria-hidden="true"></div>
+    <h1 class="hs-title">BLUECELL</h1>
+    <canvas id="sentinel" aria-hidden="true"></canvas>
+    <div class="hs-copy">
+      <p>Local, read-only log analysis. Drop EDR, DNS and cloud logs, get a grounded verdict and attack storyline.</p>
+      <div class="hs-cta">
+        <button id="hs-drop" class="btn pill-solid" type="button">Drop logs</button>
+        <button id="hs-sample" class="btn ghost" type="button">Load sample attack</button>
+      </div>
+    </div>
+    <aside class="hs-card" aria-label="Sentinel status">
+      <div class="hs-card-h">SENTINEL-01</div>
+      <dl>
+        <dt>Mode</dt><dd>Read-only</dd>
+        <dt>Data</dt><dd>Stays local</dd>
+        <dt>Backbone</dt><dd id="hc-backbone">idle</dd>
+        <dt>Agents</dt><dd id="hc-agents">ready</dd>
+        <dt>Verdict</dt><dd id="hc-verdict">awaiting logs</dd>
+      </dl>
+    </aside>
+  </section>
 
   <div class="author-bar">
     ENGINEERED BY <strong>HARIKISHORE KARUNANITHI</strong> · © 2026 · MIT (ATTRIBUTION REQUIRED)
@@ -32,7 +62,7 @@
 
   <main id="app">
     <!-- ===== STEP 1: LOG INTAKE (drop zone) ===== -->
-    <section class="panel glass intake">
+    <section class="panel glass intake" id="intake">
       <div class="panel-head">
         <h2>DROP YOUR LOGS HERE</h2>
         <span class="sub">EDR · syslog · DNS · firewall/router/switch · cloud · CSV/JSON/JSONL</span>
@@ -142,5 +172,6 @@
 
   <div id="toast" class="toast hidden"></div>
   <script src="app.js"></script>
+  <script src="sentinel.js"></script>
 </body>
 </html>

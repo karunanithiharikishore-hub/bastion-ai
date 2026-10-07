@@ -396,3 +396,155 @@ code { background: var(--surface-3); padding: 1px 6px; border-radius: 5px; color
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
   #bg { display: none; }
 }
+
+/* ===================== futuristic layer =====================
+   1. accent glow on the two focal elements only
+   2. HUD framing: corner brackets, line grid, drop-zone scan sweep
+   3. boot sequence on load, staggered reveal on results
+   All motion is disabled by the reduced-motion block above. */
+
+/* 1. focal glow */
+.verdict.malicious { box-shadow: var(--shadow), 0 0 0 1px color-mix(in srgb, var(--crit) 30%, transparent), 0 0 44px -14px var(--crit); }
+.verdict.benign { box-shadow: var(--shadow), 0 0 40px -16px var(--low); }
+.verdict.review { box-shadow: var(--shadow), 0 0 40px -16px var(--med); }
+.verdict.malicious::before { box-shadow: 0 0 18px var(--crit); }
+.layer.active { box-shadow: 0 26px 34px -18px rgba(0,0,0,.55), 0 0 28px -4px var(--accent); }
+.beam { box-shadow: 0 0 10px var(--accent); }
+.logo::before { box-shadow: 0 0 12px -2px var(--accent); }
+.orbit .core { box-shadow: 0 0 0 6px var(--accent-soft), 0 0 36px -4px var(--accent); }
+.btn:not(.ghost):not(:disabled):hover { box-shadow: 0 0 22px -6px var(--accent); }
+
+/* 2a. HUD corner brackets on panels (inset so the 12px radius never clips them) */
+.panel {
+  --br: var(--accent-line); --bl: 12px;
+  background:
+    linear-gradient(var(--br), var(--br)) left 8px top 8px / var(--bl) 1.5px no-repeat,
+    linear-gradient(var(--br), var(--br)) left 8px top 8px / 1.5px var(--bl) no-repeat,
+    linear-gradient(var(--br), var(--br)) right 8px top 8px / var(--bl) 1.5px no-repeat,
+    linear-gradient(var(--br), var(--br)) right 8px top 8px / 1.5px var(--bl) no-repeat,
+    linear-gradient(var(--br), var(--br)) left 8px bottom 8px / var(--bl) 1.5px no-repeat,
+    linear-gradient(var(--br), var(--br)) left 8px bottom 8px / 1.5px var(--bl) no-repeat,
+    linear-gradient(var(--br), var(--br)) right 8px bottom 8px / var(--bl) 1.5px no-repeat,
+    linear-gradient(var(--br), var(--br)) right 8px bottom 8px / 1.5px var(--bl) no-repeat,
+    var(--surface);
+}
+.pinpointer { --br: color-mix(in srgb, var(--crit) 55%, transparent); }
+
+/* 2b. line grid behind everything, fading toward the bottom */
+body::before { content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background:
+    linear-gradient(var(--grid-line) 1px, transparent 1px) 0 0 / 56px 56px,
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px) 0 0 / 56px 56px;
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, transparent 70%);
+  mask-image: linear-gradient(180deg, #000 0%, transparent 70%); }
+:root { --grid-line: rgba(90, 169, 255, .06); }
+@media (prefers-color-scheme: light) { :root { --grid-line: rgba(26, 102, 204, .07); } }
+
+/* 2c. scan sweep across the drop zone */
+.dropzone { overflow: hidden; }
+.dropzone > * { position: relative; z-index: 1; }
+.dropzone::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 32%;
+  background: linear-gradient(180deg, transparent, var(--accent-soft));
+  border-bottom: 1px solid var(--accent-line); pointer-events: none;
+  animation: scan 6s linear infinite; }
+.dropzone.drag::after { animation-duration: 1.6s; }
+@keyframes scan { from { transform: translateY(-100%); } to { transform: translateY(312%); } }
+
+/* 3. boot sequence */
+.topbar, .author-bar, .intake, .foot { animation: boot .8s var(--ease) backwards; }
+.topbar { animation-delay: .05s; }
+.author-bar { animation-delay: .2s; }
+.intake { animation-delay: .35s; }
+.foot { animation-delay: .6s; }
+.topbar h1 { animation: boot-type 1s steps(8, end) .25s backwards; }
+.pill { animation: boot .6s var(--ease) .5s backwards; }
+@keyframes boot { from { opacity: 0; transform: translateY(10px); clip-path: inset(0 0 100% 0); } to { clip-path: inset(0 0 0 0); } }
+@keyframes boot-type { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+#results.show > :nth-child(5) { animation-delay: .24s; }
+#results.show > :nth-child(6) { animation-delay: .30s; }
+#results.show > :nth-child(7) { animation-delay: .36s; }
+#results.show > :nth-child(8) { animation-delay: .42s; }
+#results.show > :nth-child(9) { animation-delay: .48s; }
+#results.show .panel-head h2 { animation: boot .7s var(--ease) .2s backwards; }
+.hero .metric { animation: boot .7s var(--ease) backwards; }
+.hero .metric:nth-child(2) { animation-delay: .08s; }
+.hero .metric:nth-child(3) { animation-delay: .16s; }
+.hero .metric:nth-child(4) { animation-delay: .24s; }
+
+/* ===================== hero stage: defense-robotics front =====================
+   Black stage, oversized wordmark, procedural 3D sentinel (sentinel.js), hairline
+   frame grid, floating status card. Buttons are pills everywhere (rule: buttons pill,
+   panels 12px, inputs 8px, badges pill). */
+.btn { border-radius: 999px; }
+.btn.pill-solid { background: var(--ink); color: var(--bg); }
+.btn.pill-solid:hover { background: var(--accent-2); color: var(--accent-ink); }
+
+.topbar { background: transparent; border: 0; box-shadow: none; }
+.topbar .wm { font-size: 15px; font-weight: 800; letter-spacing: .26em; color: var(--ink); line-height: 1.1; }
+.topnav { display: flex; gap: 30px; }
+.topnav a { color: var(--ink-2); text-decoration: none; font-size: 12px; font-weight: 600;
+  letter-spacing: .12em; text-transform: uppercase; padding: 6px 0; border-bottom: 1px solid transparent;
+  transition: color .2s var(--ease), border-color .2s var(--ease); }
+.topnav a:hover { color: var(--accent-2); border-color: var(--accent-line); }
+
+.hero-stage { position: relative; width: calc(100% - 36px); max-width: 1304px; margin: 6px auto 0;
+  min-height: clamp(560px, calc(100dvh - 130px), 780px); overflow: hidden; isolation: isolate;
+  border: 1px solid var(--line); border-radius: var(--r-panel);
+  background:
+    radial-gradient(closest-side at 50% 56%, var(--accent-soft), transparent 72%),
+    var(--bg-2);
+  box-shadow: var(--shadow); animation: boot 1s var(--ease) .1s backwards; }
+
+/* hairline frame: 4 columns, 3 rows */
+.hs-grid { position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  --l: var(--line-strong);
+  background:
+    linear-gradient(90deg, transparent calc(25% - .5px), var(--l) calc(25% - .5px) calc(25% + .5px), transparent calc(25% + .5px)),
+    linear-gradient(90deg, transparent calc(50% - .5px), var(--l) calc(50% - .5px) calc(50% + .5px), transparent calc(50% + .5px)),
+    linear-gradient(90deg, transparent calc(75% - .5px), var(--l) calc(75% - .5px) calc(75% + .5px), transparent calc(75% + .5px)),
+    linear-gradient(180deg, transparent calc(24% - .5px), var(--l) calc(24% - .5px) calc(24% + .5px), transparent calc(24% + .5px)),
+    linear-gradient(180deg, transparent calc(78% - .5px), var(--l) calc(78% - .5px) calc(78% + .5px), transparent calc(78% + .5px));
+  opacity: .55; }
+
+.hs-title { position: absolute; z-index: 1; top: 5%; left: 50%; transform: translateX(-50%);
+  margin: 0; font-size: clamp(52px, 10.5vw, 150px); font-weight: 800; line-height: 1;
+  letter-spacing: .05em; color: var(--ink); white-space: nowrap;
+  animation: boot-type 1.3s steps(8, end) .3s backwards; }
+
+#sentinel { position: absolute; z-index: 2; inset: 6% 0 -10% 0; margin: auto;
+  height: min(106%, 760px); aspect-ratio: 1; width: auto; max-width: 100%;
+  animation: sentinel-in 1.6s var(--ease) .45s backwards; pointer-events: none; }
+@keyframes sentinel-in { from { opacity: 0; transform: scale(.86) rotate(-6deg); } }
+
+.hs-copy { position: absolute; z-index: 3; left: 4%; bottom: 8%; width: min(340px, 30%); animation: boot .9s var(--ease) .8s backwards; }
+.hs-copy p { margin: 0 0 18px; font-size: 14px; line-height: 1.6; color: var(--ink-2); max-width: 34ch; }
+.hs-cta { display: flex; gap: 10px; flex-wrap: wrap; }
+
+.hs-card { position: absolute; z-index: 3; right: 4%; bottom: 9%; width: min(262px, 24%);
+  padding: 16px 18px; border-radius: var(--r-panel); border: 1px solid var(--line-strong);
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  -webkit-backdrop-filter: blur(16px) saturate(140%); backdrop-filter: blur(16px) saturate(140%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 18px 40px -20px rgba(0,0,0,.7);
+  animation: boot .9s var(--ease) 1s backwards; }
+.hs-card-h { font: 700 11px var(--mono); letter-spacing: .2em; color: var(--accent); margin-bottom: 12px; }
+.hs-card dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 7px 14px; font-size: 12px; }
+.hs-card dt { color: var(--muted); }
+.hs-card dd { margin: 0; text-align: right; font-family: var(--mono); color: var(--ink); }
+@media (prefers-reduced-transparency: reduce) { .hs-card { background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; } }
+
+body::before { -webkit-mask-image: linear-gradient(180deg, #000 0%, transparent 55%); mask-image: linear-gradient(180deg, #000 0%, transparent 55%); }
+
+@media (max-width: 1100px) { .topnav { display: none; } }
+@media (max-width: 900px) {
+  .hero-stage { display: flex; flex-direction: column; align-items: center; min-height: 0;
+    padding: 28px 18px 24px; gap: 18px; width: calc(100% - 24px); }
+  .hs-title { position: static; transform: none; font-size: clamp(40px, 15vw, 96px); }
+  #sentinel { position: relative; inset: auto; margin: -10px 0; height: auto; width: min(100%, 480px); }
+  .hs-copy, .hs-card { position: static; width: 100%; max-width: 420px; }
+  .hs-grid { opacity: .3; }
+}
+@media (max-width: 600px) {
+  #backbone { display: none; }
+  .author-bar { padding: 10px 14px 4px; letter-spacing: .08em; line-height: 1.7; }
+  .topbar .wm { font-size: 13px; letter-spacing: .2em; }
+}
