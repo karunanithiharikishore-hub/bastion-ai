@@ -48,7 +48,7 @@ def assess_incident(inc) -> dict:
         return {
             "level": "likely-malicious",
             "confidence": 0.8,
-            "headline": "Likely a real attack — investigate now.",
+            "headline": "Likely a real attack. Investigate now.",
             "why": (f"Multiple kill-chain stages ({', '.join(sorted(tactics))}) "
                     f"across {len(sources)} log source(s) at high severity "
                     f"({inc.score()}/100). That progression is not normal noise."),
@@ -63,7 +63,7 @@ def assess_incident(inc) -> dict:
         return {
             "level": "likely-benign",
             "confidence": 0.7,
-            "headline": "Likely benign failed-login noise — not a confirmed breach.",
+            "headline": "Likely benign failed-login noise, not a confirmed breach.",
             "why": (f"{fail_ct} failed sign-in(s) with NO successful compromise, "
                     f"single source ({', '.join(sorted(sources)) or 'n/a'}), and no "
                     f"follow-on activity (no lateral movement, C2, or impact). "
@@ -81,7 +81,7 @@ def assess_incident(inc) -> dict:
         return {
             "level": "needs-review",
             "confidence": 0.55,
-            "headline": "Failed sign-ins followed by a success — verify it was the real user.",
+            "headline": "Failed sign-ins followed by a success. Verify it was the real user.",
             "why": (f"{fail_ct} failed sign-in(s) and at least one SUCCESS. This is "
                     f"either the user finally entering the right password, or an "
                     f"account takeover. It needs a human check."),
@@ -94,7 +94,7 @@ def assess_incident(inc) -> dict:
     return {
         "level": "needs-review",
         "confidence": 0.5,
-        "headline": "Needs analyst review — not enough to call automatically.",
+        "headline": "Needs analyst review: not enough to call automatically.",
         "why": (f"Observed tactics {', '.join(sorted(tactics)) or 'none'} across "
                 f"{len(sources)} source(s), but not enough corroboration for a firm "
                 f"verdict."),
@@ -161,7 +161,7 @@ def deterministic_storyline(inc) -> dict:
     objective = "unknown"
     tset = inc.tactics
     if "impact" in tset:
-        objective = "impact (destruction/ransomware) — highest urgency"
+        objective = "impact (destruction/ransomware), highest urgency"
     elif "exfiltration" in tset:
         objective = "data exfiltration"
     elif "command-and-control" in tset:
@@ -227,7 +227,7 @@ def _attack_summary(inc, patient_zero, ordered_phases, objective) -> dict:
         techs = ", ".join(t["id"] for t in p["techniques"])
         where = (" on " + ", ".join(p["hosts"])) if p["hosts"] else ""
         steps.append(f"{i}. The attacker {verb}{where} "
-                     f"[{techs}] — first seen {p['first_seen'][11:19]}, {p['count']} event(s).")
+                     f"[{techs}] - first seen {p['first_seen'][11:19]}, {p['count']} event(s).")
 
     return {
         "how_they_got_in": " ".join(entry_bits) or "Entry vector could not be determined from the evidence.",
@@ -316,7 +316,7 @@ def build_storyline(inc, digest: str = "", intel: list | None = None,
 
 def _fallback_narrative(story: dict) -> str:
     lines = [
-        f"Incident {story['incident_id']} — {story['severity'].upper()} "
+        f"Incident {story['incident_id']} - {story['severity'].upper()} "
         f"(score {story['score']}/100).",
         f"Observed between {story['window']['start']} and {story['window']['end']} "
         f"across sources: {', '.join(story['sources_involved'])}.",
@@ -329,8 +329,8 @@ def _fallback_narrative(story: dict) -> str:
         lines.append("Progression by ATT&CK tactic:")
         for p in story["phases"]:
             techs = ", ".join(f"{t['id']} ({t['name']})" for t in p["techniques"])
-            lines.append(f"  - {p['tactic']}: {techs} — first seen {p['first_seen']} ({p['count']} events).")
+            lines.append(f"  - {p['tactic']}: {techs} - first seen {p['first_seen']} ({p['count']} events).")
     lines.append(f"Likely objective: {story['likely_objective']}.")
-    lines.append("(Deterministic storyline — LLM backbone unavailable; enable "
+    lines.append("(Deterministic storyline: LLM backbone unavailable; enable "
                  "`claude` CLI or ANTHROPIC_API_KEY for a narrative RCA.)")
     return "\n".join(lines)

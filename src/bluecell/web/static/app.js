@@ -1,4 +1,4 @@
-// BlueCell — futuristic command deck
+// BlueCell - dashboard command deck
 // WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
 // Built by Harikishore Karunanithi. MIT - attribution required.
 "use strict";
@@ -18,16 +18,19 @@ const toast = (m) => { const t = $("toast"); t.innerHTML = m; t.classList.remove
     pts = Array.from({ length: Math.min(90, Math.floor(w * h / 18000)) }, () => ({
       x: Math.random() * w, y: Math.random() * h,
       vx: (Math.random() - .5) * .35, vy: (Math.random() - .5) * .35 })); };
+  const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)");
   resize(); addEventListener("resize", resize);
   (function draw() {
     x.clearRect(0, 0, w, h);
+    const node = css("--bg-node"), edge = css("--bg-edge");
     for (const p of pts) { p.x = (p.x + p.vx + w) % w; p.y = (p.y + p.vy + h) % h;
-      x.beginPath(); x.arc(p.x, p.y, 1.4, 0, 7); x.fillStyle = "rgba(38,230,255,.7)"; x.fill(); }
+      x.beginPath(); x.arc(p.x, p.y, 1.4, 0, 7); x.fillStyle = `rgba(${node},.55)`; x.fill(); }
     for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) {
       const a = pts[i], b = pts[j], d = Math.hypot(a.x - b.x, a.y - b.y);
-      if (d < 130) { x.strokeStyle = `rgba(120,170,255,${(1 - d / 130) * .18})`;
+      if (d < 130) { x.strokeStyle = `rgba(${edge},${(1 - d / 130) * .16})`;
         x.beginPath(); x.moveTo(a.x, a.y); x.lineTo(b.x, b.y); x.stroke(); } }
-    requestAnimationFrame(draw);
+    if (!reduce.matches) requestAnimationFrame(draw);
   })();
 })();
 
@@ -41,7 +44,7 @@ function renderFileList() {
   const host = $("filelist"); host.innerHTML = "";
   pending.forEach((f) => {
     const chip = el("div", "fchip",
-      `<span>📄 ${esc(f.name)}</span><span class="sz">${humanSize(f.size)}</span><span class="x" data-n="${esc(f.name)}">✕</span>`);
+      `<span>${esc(f.name)}</span><span class="sz">${humanSize(f.size)}</span><span class="x" data-n="${esc(f.name)}">&times;</span>`);
     host.appendChild(chip);
   });
   host.querySelectorAll(".x").forEach((b) => b.addEventListener("click", () => {
@@ -59,7 +62,7 @@ function addFiles(fileList) {
   if (!arr.length) return;
   arr.forEach((file) => {
     if (file.size > MAX_FILE) {
-      toast(`⚠ ${esc(file.name)} is ${humanSize(file.size)} — over the ${MAX_FILE / (1024*1024)} MB per-file limit`);
+      toast(`${esc(file.name)} is ${humanSize(file.size)}, over the ${MAX_FILE / (1024*1024)} MB per-file limit`);
       done++; if (done === arr.length) renderFileList(); return;
     }
     const reader = new FileReader();
@@ -110,16 +113,16 @@ async function analyzeUploads() {
     let i = 0;
     for (const f of files) {
       i++;
-      $("status").innerHTML = `<span class="spinner"></span> uploading ${i}/${files.length} — ${esc(f.name)}`;
+      $("status").innerHTML = `<span class="spinner"></span> uploading ${i}/${files.length}: ${esc(f.name)}`;
       await postJSON("/api/stage/add", { name: f.name, content: f.content });
     }
     $("status").innerHTML = '<span class="spinner"></span> analyzing ' + files.length + ' file(s)…';
     const data = await postJSON("/api/stage/run", { window: win });
     await mergeMetaAndRender(data);
-    $("status").textContent = "✓ analysis complete";
-    toast("✓ Analyzed " + files.length + " file(s)");
+    $("status").textContent = "analysis complete";
+    toast("Analyzed " + files.length + " file(s)");
   } catch (e) {
-    toast("⚠ " + (e.message || e)); $("status").textContent = "error: " + (e.message || e);
+    toast("" + (e.message || e)); $("status").textContent = "error: " + (e.message || e);
   } finally { $("analyze").disabled = false; }
 }
 
@@ -181,8 +184,8 @@ function renderVerdict(r) {
   const v = inc.verdict;
   const cls = v.level === "likely-malicious" ? "malicious"
     : v.level === "likely-benign" ? "benign" : "review";
-  const label = v.level === "likely-malicious" ? "⚠ LIKELY REAL ATTACK"
-    : v.level === "likely-benign" ? "✓ LIKELY BENIGN / NOISE" : "◑ NEEDS REVIEW";
+  const label = v.level === "likely-malicious" ? "LIKELY REAL ATTACK"
+    : v.level === "likely-benign" ? "LIKELY BENIGN / NOISE" : "NEEDS REVIEW";
   host.className = "verdict " + cls;
   host.innerHTML = "";
   const top = el("div", "vtop");
@@ -215,14 +218,14 @@ function renderSummary(r) {
   right.appendChild(ol);
   host.appendChild(left); host.appendChild(right);
 
-  // Analyst narrative — richer when an LLM backbone produced it.
+  // Analyst narrative, richer when an LLM backbone produced it.
   const src = inc.storyline.narrative_source, txt = inc.storyline.narrative;
   if (txt) {
     const nb = el("div", "narrative");
     const isAI = src === "llm";
     nb.appendChild(el("h3", null,
       "ANALYST NARRATIVE" + (isAI
-        ? '<span class="badge ai">🤖 AI-GENERATED</span>'
+        ? '<span class="badge ai">AI-GENERATED</span>'
         : '<span class="badge rule">RULE-BASED · run with --llm auto for AI</span>')));
     nb.appendChild(el("div", "ntext", esc(txt)));
     host.appendChild(nb);
@@ -233,7 +236,7 @@ function renderSummary(r) {
 let _phases = [];
 function renderStage(r) {
   const stage = $("stage"); stage.innerHTML = "";
-  $("stage-detail").innerHTML = '<div class="detail-hint">👆 Click any phase above to see its techniques and the exact events.</div>';
+  $("stage-detail").innerHTML = '<div class="detail-hint">Click any phase above to see its techniques and the exact events.</div>';
   const inc = (r.incidents || [])[0], sub = $("story-sub");
   if (!inc) { stage.innerHTML = '<p class="empty">No storyline.</p>'; sub.textContent = ""; return; }
   const s = inc.storyline.structured; _phases = s.phases || [];
@@ -262,7 +265,7 @@ function showPhaseDetail(i) {
     + (p.hosts && p.hosts.length ? ` · hosts: ${esc(p.hosts.join(", "))}` : "")
     + (p.users && p.users.length ? ` · users: ${esc(p.users.join(", "))}` : "")));
   const tw = el("div", null);
-  (p.techniques || []).forEach((t) => tw.appendChild(el("span", "dt-tech", `${esc(t.id)} — ${esc(t.name)}`)));
+  (p.techniques || []).forEach((t) => tw.appendChild(el("span", "dt-tech", `${esc(t.id)} - ${esc(t.name)}`)));
   card.appendChild(tw);
   card.appendChild(el("div", "meta-line", "EVENTS"));
   (p.events || []).forEach((line) => card.appendChild(el("div", "evline", esc(line))));
@@ -331,7 +334,7 @@ function renderSwarm(r) {
     orbit.appendChild(spinner);
   });
   (sw.consensus || []).forEach((c) => side.appendChild(el("div", "cons",
-    `${esc(c.incident_id)} — <span class="${c.confirmed_by_tier2 ? "ok" : "no"}">${c.confirmed_by_tier2 ? "✅ CONFIRMED" : "⏳ uncorroborated"}</span><br><span class="meta-line">${c.agents_involved} agents · tiers ${JSON.stringify(c.tiers_involved)} · conf ${c.consensus_confidence}</span>`)));
+    `${esc(c.incident_id)}: <span class="${c.confirmed_by_tier2 ? "ok" : "no"}">${c.confirmed_by_tier2 ? "CONFIRMED" : "uncorroborated"}</span><br><span class="meta-line">${c.agents_involved} agents · tiers ${JSON.stringify(c.tiers_involved)} · conf ${c.consensus_confidence}</span>`)));
   const t3 = (sw.findings || []).filter((f) => f.tier === 3);
   if (t3.length) { side.appendChild(el("div", "meta-line", "SPECIALIST FINDINGS"));
     t3.forEach((f) => { const d = el("div", "spec", `<b>[${esc(f.severity.toUpperCase())}]</b> <span class="who">${esc(f.role)}</span>: ${esc(f.title)}`);
@@ -346,13 +349,13 @@ function renderIncidents(r) {
     const s = inc.storyline.structured, box = el("div", "incident");
     const row = el("div", "row"); row.appendChild(el("span", "id", esc(s.incident_id)));
     row.appendChild(el("span", "sev " + s.severity, `${s.severity.toUpperCase()} · ${s.score}`)); box.appendChild(row);
-    // Verdict badge — is it real, noise, or unclear?
+    // Verdict badge: is it real, noise, or unclear?
     const v = inc.verdict;
     if (v) {
       const vcls = v.level === "likely-malicious" ? "malicious"
         : v.level === "likely-benign" ? "benign" : "review";
-      const vtxt = v.level === "likely-malicious" ? "⚠ LIKELY REAL ATTACK"
-        : v.level === "likely-benign" ? "✓ LIKELY BENIGN / NOISE" : "◑ NEEDS REVIEW";
+      const vtxt = v.level === "likely-malicious" ? "LIKELY REAL ATTACK"
+        : v.level === "likely-benign" ? "LIKELY BENIGN / NOISE" : "NEEDS REVIEW";
       const vb = el("div", "vbadge " + vcls,
         `${vtxt} <span class="vbc">${Math.round((v.confidence || 0) * 100)}%</span>`);
       vb.title = v.headline || "";
@@ -373,7 +376,7 @@ function renderIocs(r) {
     host.appendChild(el("h2", null, `<span style="color:var(--cyan);font-size:11px;letter-spacing:1px">${kind.toUpperCase()}</span>`));
     const t = el("table"); t.appendChild(el("tr", null, "<th>value</th><th>×</th><th>hosts</th>"));
     show.slice(0, 10).forEach((x) => t.appendChild(el("tr", null,
-      `<td><code>${esc(x.value)}</code> ${x.suspicious ? '<span class="flag">⚠</span>' : ""}</td><td>${x.count}</td><td>${esc((x.hosts || []).join(", "))}</td>`)));
+      `<td><code>${esc(x.value)}</code> ${x.suspicious ? '<span class="flag" title="suspicious">!</span>' : ""}</td><td>${x.count}</td><td>${esc((x.hosts || []).join(", "))}</td>`)));
     host.appendChild(t);
   });
   if (!any) host.appendChild(el("p", "empty", "No IOCs."));
@@ -396,7 +399,7 @@ function renderIntel(r) {
 }
 
 function renderAll(r) {
-  if (r.error) { toast("⚠ " + esc(r.error)); return; }
+  if (r.error) { toast("" + esc(r.error)); return; }
   $("results").classList.add("show");
   renderVerdict(r); renderHero(r); renderPinpointer(r); renderSummary(r); renderStage(r); renderSwarm(r);
   renderIncidents(r); renderIocs(r); renderHunt(r); renderIntel(r);
@@ -407,7 +410,7 @@ async function mergeMetaAndRender(data) {
 }
 async function load(url) {
   try { const data = await (await fetch(url)).json(); await mergeMetaAndRender(data);
-    if ($("status").textContent.includes("loading")) $("status").textContent = "✓ sample loaded";
+    if ($("status").textContent.includes("loading")) $("status").textContent = "sample loaded";
     return data;
   } catch (e) { toast("Load failed: " + e); }
 }
@@ -427,12 +430,12 @@ async function downloadIR() {
     const a = document.createElement("a");
     a.href = url; a.download = fname; document.body.appendChild(a); a.click();
     a.remove(); URL.revokeObjectURL(url);
-    toast("✓ IR report downloaded");
-  } catch (e) { toast("⚠ report failed: " + (e.message || e)); }
+    toast("IR report downloaded");
+  } catch (e) { toast("report failed: " + (e.message || e)); }
   finally { btn.disabled = false; }
 }
 (function () { const b = $("download-ir"); if (b) b.addEventListener("click", downloadIR); })();
 
 // On first open, show whatever the server was launched with (samples), so the
-// deck isn't empty — but the drop zone is the primary call to action.
+// deck isn't empty, but the drop zone is the primary call to action.
 load("/api/report");

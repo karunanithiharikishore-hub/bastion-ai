@@ -29,7 +29,7 @@ def _verdict_badge(level: str) -> str:
 def render_markdown(result: dict) -> str:
     meta = result["meta"]
     lines = [
-        "# BlueCell — Incident Analysis Report",
+        "# BlueCell - Incident Analysis Report",
         "",
         f"> Built by **{meta.get('author', provenance.AUTHOR)}** · "
         f"{provenance.COPYRIGHT}",
@@ -71,7 +71,7 @@ def render_markdown(result: dict) -> str:
         "## Executive Summary",
         "",
         f"**Overall verdict:** {_verdict_badge(tv.get('level'))} "
-        f"(confidence {round(tv.get('confidence', 0) * 100)}%) — {tv.get('headline', '')}",
+        f"(confidence {round(tv.get('confidence', 0) * 100)}%): {tv.get('headline', '')}",
         "",
         f"**How they got in:** {asum.get('how_they_got_in', 'n/a')}",
         "",
@@ -95,7 +95,7 @@ def render_markdown(result: dict) -> str:
     for i, inc in enumerate(result["incidents"], 1):
         s = inc["storyline"]["structured"]
         lines += [
-            f"### {i}. {s['incident_id']} — {_sev_badge(s['severity'])} "
+            f"### {i}. {s['incident_id']} - {_sev_badge(s['severity'])} "
             f"(score {s['score']}/100)",
             "",
         ]
@@ -142,7 +142,7 @@ def render_markdown(result: dict) -> str:
         lines.append(f"**{kind.upper()}**")
         for x in items[:15]:
             flag = " ⚠️" if x["suspicious"] else ""
-            hosts = f" — hosts: {', '.join(x['hosts'])}" if x["hosts"] else ""
+            hosts = f" - hosts: {', '.join(x['hosts'])}" if x["hosts"] else ""
             lines.append(f"- `{x['value']}` (x{x['count']}){flag}{hosts}")
         lines.append("")
 
@@ -175,20 +175,20 @@ def render_markdown(result: dict) -> str:
 
 def _footer() -> str:
     return (f"\n<!-- {provenance.WATERMARK} -->\n"
-            f"_BlueCell — built by {provenance.AUTHOR}. "
+            f"_BlueCell - built by {provenance.AUTHOR}. "
             f"{provenance.COPYRIGHT}_")
 
 
 def _render_swarm(swarm: dict) -> str:
-    out = ["## Agent Swarm — findings & consensus\n"]
+    out = ["## Agent Swarm - findings & consensus\n"]
     out.append(f"**Roster ({swarm['agent_count']} agents):**")
     for a in swarm["roster"]:
-        out.append(f"- T{a['tier']} `{a['name']}` — {a['role']}")
+        out.append(f"- T{a['tier']} `{a['name']}` - {a['role']}")
     out.append("")
     out.append("**Per-incident consensus:**")
     for con in swarm["consensus"]:
         out.append(
-            f"- {con['incident_id']} — {con['severity'].upper()} "
+            f"- {con['incident_id']} - {con['severity'].upper()} "
             f"(score {con['score']}/100) · "
             f"{'✅ CONFIRMED by Tier-2' if con['confirmed_by_tier2'] else '⏳ not corroborated'} · "
             f"{con['agents_involved']} agents, tiers {con['tiers_involved']}, "

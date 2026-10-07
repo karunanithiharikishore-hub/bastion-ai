@@ -84,7 +84,7 @@ def _print_verdicts(result) -> None:
         s = inc["storyline"]["structured"]
         icon = _VERDICT_ICON.get(v.get("level"), (v.get("level") or "?").upper())
         print(f"[bluecell] {s['incident_id']}: {icon} "
-              f"({round(v.get('confidence', 0) * 100)}%) — {v.get('headline', '')}")
+              f"({round(v.get('confidence', 0) * 100)}%): {v.get('headline', '')}")
 
 
 def cmd_intel(args) -> int:
@@ -156,7 +156,7 @@ def _print_ai(result) -> None:
         return
     lead = ai.get("lead", {})
     print(f"[bluecell] AI analyst (model-driven): {ai.get('final_verdict')} "
-          f"(conf {lead.get('confidence')}) — {lead.get('headline', '')}")
+          f"(conf {lead.get('confidence')}): {lead.get('headline', '')}")
 
 
 def cmd_info(args) -> int:
@@ -185,7 +185,7 @@ def cmd_info(args) -> int:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="bluecell",
-        description="BlueCell — Blue-Team Log Intelligence (read-only analysis).")
+        description="BlueCell - Blue-Team Log Intelligence (read-only analysis).")
     p.add_argument("--version", action="version", version=f"bluecell {__version__}")
     sub = p.add_subparsers(dest="command", required=True)
 

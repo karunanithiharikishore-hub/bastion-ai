@@ -106,7 +106,7 @@ def annotate(text: str, index: dict) -> str:
     parts = []
     for kind, vals in result["unverified"].items():
         parts.append(f"{kind}: {', '.join(vals[:10])}")
-    warn = ("\n\n⚠ GROUNDING CHECK — the following indicators were NOT found in "
+    warn = ("\n\nGROUNDING CHECK: the following indicators were NOT found in "
             "the ingested evidence and may be model hallucinations; ignore them: "
             + " | ".join(parts))
     return text + warn
