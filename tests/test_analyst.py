@@ -47,3 +47,40 @@ def test_ai_analyze_without_backbone_is_safe():
     ev = _events()
     out = ai_analyze(ev, extract_iocs(ev), backbone=None)
     assert out["available"] is False
+
+
+class _CapturingBackbone:
+    def __init__(self):
+        self.prompts = []
+
+    def complete(self, prompt, system=None, max_tokens=0):
+        self.prompts.append(prompt)
+        if "LEAD ANALYST JSON" in prompt:
+            return '{"agree": true, "corrected_verdict": "likely-benign", "confidence": 0.8, "notes": "ok"}'
+        return ('{"verdict": "likely-benign", "confidence": 0.8, "headline": "h", '
+                '"tier2_assessment": "agree"}')
+
+
+def test_ai_analyze_shows_tier2_verdict_with_cited_events():
+    ev = _events()
+    verdict = {"incident_id": "INC-1", "status": "dismissed", "confidence": 0.9,
+               "rationale": "Approved change window.", "evidence": [ev[2].event_id, "bogus"]}
+    bb = _CapturingBackbone()
+    out = ai_analyze(ev, extract_iocs(ev), bb, tier2_verdicts=[verdict])
+    lead_prompt, review_prompt = bb.prompts
+    for p in (lead_prompt, review_prompt):
+        assert "TIER-2 ANALYST VERDICTS" in p and "NOT evidence" in p
+        assert "INC-1: DISMISSED (confidence 0.9)" in p
+        assert "Approved change window." in p
+        assert ev[2].event_id in p and "New-InboxRule" in p   # the cited event line
+        assert "bogus" not in p                               # unknown ids are dropped
+    assert out["tier2_verdicts_seen"] == 1
+    assert out["final_verdict"] == "likely-benign"
+
+
+def test_ai_analyze_without_tier2_has_no_tier2_section():
+    ev = _events()
+    bb = _CapturingBackbone()
+    out = ai_analyze(ev, extract_iocs(ev), bb)
+    assert all("TIER-2 ANALYST VERDICTS" not in p for p in bb.prompts)
+    assert out["tier2_verdicts_seen"] == 0

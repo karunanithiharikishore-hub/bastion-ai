@@ -78,6 +78,7 @@ def analyze(paths, *, source_override=None, window_minutes=60,
     # The headline follows the Tier-2 agent's confirm/dismiss decision when there
     # is one. Rule-only Tier-2 verdicts are a cruder heuristic than the scorer,
     # so without a model agent the scorer's verdict stands.
+    tier2 = {}
     if swarm:
         tier2 = {f["incident_id"]: f for f in swarm["findings"]
                  if f["tier"] == 2 and f.get("origin") == "agent"}
@@ -90,7 +91,8 @@ def analyze(paths, *, source_override=None, window_minutes=60,
     ai_analysis = None
     if run_agents and use_llm and backbone is not None:
         try:
-            ai_analysis = ai_analyze(events, iocs, backbone, want_review=True)
+            ai_analysis = ai_analyze(events, iocs, backbone, want_review=True,
+                                     tier2_verdicts=list(tier2.values()))
         except Exception as exc:  # never break the deterministic result
             ai_analysis = {"available": False, "reason": f"{type(exc).__name__}: {exc}"}
 

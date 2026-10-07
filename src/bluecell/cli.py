@@ -160,7 +160,8 @@ def _print_ai(result) -> None:
               f"deterministic verdict shown above.")
         return
     lead = ai.get("lead", {})
-    print(f"[bluecell] AI analyst (model-driven): {ai.get('final_verdict')} "
+    seen = " (checked against the Tier-2 verdict)" if ai.get("tier2_verdicts_seen") else ""
+    print(f"[bluecell] AI analyst (model-driven){seen}: {ai.get('final_verdict')} "
           f"(conf {lead.get('confidence')}): {lead.get('headline', '')}")
 
 

@@ -129,12 +129,21 @@ _SYSTEM = (
     "Return STRICT JSON only, no prose outside the JSON."
 )
 
+_TIER2_HEADER = """
+TIER-2 ANALYST VERDICTS (another analyst's conclusions, NOT evidence):
+A Tier-2 agent investigated the full logs with search tools and reached the
+verdicts below, citing the event lines shown. Check each one against those
+lines and the brief. Agree only if the cited events support it; you may
+disagree, and you must say why either way in "tier2_assessment".
+{verdicts}
+"""
+
 _LEAD_PROMPT = """Analyze this security evidence and decide whether it shows a real
 compromise. Base every statement strictly on the brief.
 
 EVIDENCE BRIEF:
 {brief}
-
+{tier2}
 Return JSON with EXACTLY these keys:
 {{
   "verdict": "likely-malicious" | "needs-review" | "likely-benign",
@@ -145,7 +154,8 @@ Return JSON with EXACTLY these keys:
   "key_iocs": ["ips/users/devices ACTUALLY in the brief"],
   "attack_techniques": ["ATT&CK ids supported by the brief"],
   "recommended_actions": ["concrete next steps"],
-  "evidence_gaps": ["what the logs do NOT establish"]
+  "evidence_gaps": ["what the logs do NOT establish"],
+  "tier2_assessment": "agree/disagree with the Tier-2 verdicts and why, or 'none provided'"
 }}"""
 
 _REVIEW_PROMPT = """You are a senior reviewer. Independently check the Lead analyst's
@@ -153,7 +163,7 @@ conclusion against the SAME evidence brief. Do not invent anything.
 
 EVIDENCE BRIEF:
 {brief}
-
+{tier2}
 LEAD ANALYST JSON:
 {lead}
 
@@ -178,17 +188,41 @@ def _extract_json(text: str):
         return None
 
 
-def ai_analyze(events, iocs, backbone, want_review=True) -> dict:
-    """Run the model-driven Lead + Reviewer agents. Returns a grounded result."""
+def tier2_context(events, tier2_verdicts, max_verdicts=5, max_cited=15) -> str:
+    """Prompt section with each Tier-2 agent verdict plus the event lines it cited,
+    so the analyst can check the claim against real events rather than trust it."""
+    if not tier2_verdicts:
+        return ""
+    by_id = {e.event_id: e for e in events}
+    blocks = []
+    for v in tier2_verdicts[:max_verdicts]:
+        decision = "CONFIRMED" if v.get("status") == "escalated" else "DISMISSED"
+        cited = [by_id[x] for x in v.get("evidence", []) if x in by_id][:max_cited]
+        lines = [f"- {v.get('incident_id')}: {decision} (confidence {v.get('confidence')})",
+                 f"  Rationale: {str(v.get('rationale', ''))[:1500]}",
+                 "  Cited events:"]
+        lines += [f"    {e.event_id} {e.compact()} | {e.message[:180]}" for e in cited]
+        blocks.append("\n".join(lines))
+    return _TIER2_HEADER.format(verdicts="\n".join(blocks))
+
+
+def ai_analyze(events, iocs, backbone, want_review=True, tier2_verdicts=None) -> dict:
+    """Run the model-driven Lead + Reviewer agents. Returns a grounded result.
+
+    ``tier2_verdicts`` (Tier-2 agent findings) are shown to both agents as another
+    analyst's conclusions, with the events they cite, to be checked not trusted.
+    """
     if backbone is None:
         return {"available": False, "reason": "no LLM backbone"}
     brief = build_evidence_brief(events, iocs)
+    tier2 = tier2_context(events, tier2_verdicts)
     idx = evidence_index(events, [t for e in events for t in e.attack])
 
     out = {"available": True, "brief_tokens": max(1, len(brief) // 4),
+           "tier2_verdicts_seen": len((tier2_verdicts or [])[:5]),
            "agents": []}
     try:
-        lead_raw = backbone.complete(_LEAD_PROMPT.format(brief=brief),
+        lead_raw = backbone.complete(_LEAD_PROMPT.format(brief=brief, tier2=tier2),
                                      system=_SYSTEM, max_tokens=1400)
     except Exception as exc:
         return {"available": False, "reason": f"lead call failed: {exc}"}
@@ -203,7 +237,8 @@ def ai_analyze(events, iocs, backbone, want_review=True) -> dict:
     if want_review:
         try:
             rev_raw = backbone.complete(
-                _REVIEW_PROMPT.format(brief=brief, lead=json.dumps(lead)[:2000]),
+                _REVIEW_PROMPT.format(brief=brief, tier2=tier2,
+                                      lead=json.dumps(lead)[:2000]),
                 system=_SYSTEM, max_tokens=600)
             review = _extract_json(rev_raw) or {"raw": rev_raw}
         except Exception as exc:
