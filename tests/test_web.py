@@ -137,3 +137,60 @@ def test_stage_run_without_files_errors(server):
     with pytest.raises(urllib.error.HTTPError) as exc:
         _post(server + "/api/stage/run", {"window": 60})
     assert exc.value.code == 500
+
+
+def _raw(server, method, path, headers=None, body=None):
+    import http.client
+    from urllib.parse import urlparse
+    u = urlparse(server)
+    conn = http.client.HTTPConnection(u.hostname, u.port, timeout=10)
+    conn.request(method, path, body=body, headers=headers or {})
+    r = conn.getresponse()
+    data = r.read()
+    conn.close()
+    return r.status, data
+
+
+def test_foreign_host_header_refused(server):
+    """DNS-rebinding guard: a loopback server only answers localhost Host headers."""
+    status, _ = _raw(server, "GET", "/api/report", {"Host": "evil.example:8787"})
+    assert status == 403
+    status, _ = _raw(server, "GET", "/api/meta", {"Host": "localhost:1"})
+    assert status == 200
+
+
+def test_cross_origin_post_refused(server):
+    host = server.split("//")[1]
+    body = json.dumps({"name": "x.log", "content": "hello"})
+    status, _ = _raw(server, "POST", "/api/stage/add",
+                     {"Host": host, "Origin": "https://evil.example",
+                      "Content-Type": "text/plain"}, body)
+    assert status == 403
+    status, _ = _raw(server, "POST", "/api/stage/add",
+                     {"Host": host, "Origin": f"http://{host}"}, body)
+    assert status == 200
+
+
+def test_bad_post_bodies_return_400(server):
+    host = server.split("//")[1]
+    status, _ = _raw(server, "POST", "/api/stage/add", {"Host": host}, json.dumps([1, 2]))
+    assert status == 400
+    status, data = _raw(server, "POST", "/api/stage/run", {"Host": host},
+                        json.dumps({"window": "soon"}))
+    assert status == 400 and b"window" in data
+
+
+def test_static_sibling_directory_not_served(server, tmp_path):
+    import os
+    from bluecell.web import server as srv
+    sibling = srv._STATIC + "_x"
+    os.makedirs(sibling, exist_ok=True)
+    try:
+        with open(os.path.join(sibling, "secret.txt"), "w") as fh:
+            fh.write("secret")
+        status, _ = _raw(server, "GET", "/../static_x/secret.txt",
+                         {"Host": server.split("//")[1]})
+        assert status == 404
+    finally:
+        import shutil
+        shutil.rmtree(sibling, ignore_errors=True)

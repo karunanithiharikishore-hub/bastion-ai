@@ -153,6 +153,30 @@ class _State:
             return self.result
 
 
+_LOOPBACK = {"127.0.0.1", "localhost", "::1"}
+
+
+def _host_name(host_header: str) -> str:
+    """Hostname part of a Host header ("127.0.0.1:8787", "[::1]:8787")."""
+    h = (host_header or "").strip().lower()
+    if h.startswith("["):
+        return h[1:h.find("]")] if "]" in h else h[1:]
+    return h.rsplit(":", 1)[0] if h.count(":") == 1 else h
+
+
+def _int_or(value, default: int) -> int:
+    """A positive window in minutes from a request body (default when absent)."""
+    if value in (None, ""):
+        return default
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"window must be an integer, got {value!r}")
+    if n < 1:
+        raise ValueError(f"window must be at least 1 minute, got {n}")
+    return n
+
+
 def _make_handler(state: _State):
     class Handler(BaseHTTPRequestHandler):
         server_version = f"BlueCell/{__version__}"
@@ -174,11 +198,27 @@ def _make_handler(state: _State):
             self._send(code, json.dumps(obj, default=str).encode("utf-8"),
                        "application/json")
 
+        def _request_allowed(self) -> bool:
+            """Block cross-site use of the local dashboard. When bound to loopback,
+            only localhost Host headers are served (defeats DNS rebinding), and a
+            POST carrying an Origin must come from the dashboard itself (a page on
+            another site cannot upload logs or start an analysis)."""
+            host = self.headers.get("Host", "")
+            if self.server.server_address[0] in _LOOPBACK and _host_name(host) not in _LOOPBACK:
+                self._send(403, b"forbidden host", "text/plain")
+                return False
+            origin = self.headers.get("Origin")
+            if self.command == "POST" and origin and origin.lower() != f"http://{host}".lower():
+                self._send(403, b"cross-origin request refused", "text/plain")
+                return False
+            return True
+
         def _static(self, rel):
             rel = rel.lstrip("/") or "index.html"
-            # Prevent path traversal.
+            # Prevent path traversal (compare against the directory WITH a separator,
+            # so a sibling like "static_x" cannot pass a plain prefix check).
             safe = os.path.normpath(os.path.join(_STATIC, rel))
-            if not safe.startswith(_STATIC) or not os.path.isfile(safe):
+            if not safe.startswith(_STATIC + os.sep) or not os.path.isfile(safe):
                 self._send(404, b"not found", "text/plain")
                 return
             ext = os.path.splitext(safe)[1].lower()
@@ -189,6 +229,8 @@ def _make_handler(state: _State):
             self.do_GET()
 
         def do_GET(self):
+            if not self._request_allowed():
+                return
             route = urlparse(self.path)
             path = route.path
             if path == "/api/report":
@@ -245,12 +287,24 @@ def _make_handler(state: _State):
                     break
                 buf.extend(chunk); remaining -= len(chunk)
             try:
-                return json.loads(bytes(buf).decode("utf-8", "replace"))
+                body = json.loads(bytes(buf).decode("utf-8", "replace"))
             except (ValueError, TypeError) as exc:
                 self._json({"error": f"bad request: {exc}"}, 400)
                 return None
+            if not isinstance(body, dict):
+                self._json({"error": "bad request: expected a JSON object"}, 400)
+                return None
+            return body
 
         def do_POST(self):
+            if not self._request_allowed():
+                return
+            try:
+                self._post()
+            except ValueError as exc:
+                self._json({"error": f"bad request: {exc}"}, 400)
+
+        def _post(self):
             path = urlparse(self.path).path
             # Preferred: staged upload — one file per request, then run.
             if path == "/api/stage/reset":
@@ -265,7 +319,7 @@ def _make_handler(state: _State):
                 p = self._read_json()
                 if p is None:
                     return
-                window = int((p or {}).get("window") or state.window)
+                window = _int_or(p.get("window"), state.window)
                 res = state.stage_run(window)
                 self._json(res if res else {"error": state.error or "analysis failed"},
                            200 if res else 500); return
@@ -275,7 +329,7 @@ def _make_handler(state: _State):
                 if p is None:
                     return
                 res = state.run_on_uploads(p.get("files") or [],
-                                           int(p.get("window") or state.window))
+                                           _int_or(p.get("window"), state.window))
                 self._json(res if res else {"error": state.error or "analysis failed"},
                            200 if res else 500); return
             self._send(404, b"not found", "text/plain")
