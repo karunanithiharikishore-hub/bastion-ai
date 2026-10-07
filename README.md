@@ -93,9 +93,9 @@ roster any time: `bluecell roster`.
 Built by **Harikishore Karunanithi**. Licensed MIT — you may use and share it,
 but you must keep the author attribution. Every source file carries a watermark
 header, and `provenance.py` runs an integrity check at startup: if the
-attribution is removed or altered, BlueCell **halts** (exit 3) and prints where
-the watermark lives so it can be restored. This detects casual rebranding; it is
-not unbreakable DRM — the enforceable protection is the MIT license + copyright.
+attribution is removed or altered, BlueCell prints a warning asking for the
+credit to be kept. It never stops the program: the enforceable protection is
+the MIT license + copyright, not a runtime kill switch.
 
 ## Why it's different
 

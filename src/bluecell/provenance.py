@@ -116,32 +116,3 @@ def enforce(strict: bool = True) -> None:
               f"({reason}). Please keep the author credit per the MIT license.",
               file=sys.stderr)
 
-
-def _halt(reason: str) -> None:
-    import sys
-    # The true author is written literally here so a tamperer cannot make the
-    # halt message credit their own (altered) name.
-    true_author = "Harikishore Karunanithi"
-    bar = "=" * 66
-    lines = [
-        "",
-        bar,
-        " BlueCell HALTED - authorship attribution integrity check failed.",
-        f" Reason: {reason}",
-        "",
-        f" This software was built by {true_author}.",
-        " Under its MIT license you may use and share it, but you must keep",
-        " the author attribution intact. It has been removed or altered.",
-        "",
-        " The watermark lives in these locations - restore the author name",
-        " to run BlueCell again:",
-    ]
-    for rel in WATERMARK_LOCATIONS:
-        lines.append(f"   - {rel}")
-    lines += [
-        f"   (source constant: src/bluecell/provenance.py -> AUTHOR = \"{true_author}\")",
-        bar,
-        "",
-    ]
-    print("\n".join(lines), file=sys.stderr)
-    raise SystemExit(3)

@@ -70,12 +70,15 @@ def fetch_nvd(days: int, keyword: str | None, limit: int) -> list:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Update BlueCell threat-intel store from NVD.")
-    ap.add_argument("--days", type=int, default=3, help="Look back this many days")
+    ap.add_argument("--days", type=int, default=3,
+                    help="Look back this many days (NVD allows at most 120)")
     ap.add_argument("--keyword", help="Optional keyword filter (e.g. ransomware)")
     ap.add_argument("--limit", type=int, default=200)
     ap.add_argument("--intel-db", dest="intel_db", help="Path to intel store JSON")
     args = ap.parse_args(argv)
 
+    if not 1 <= args.days <= 120:
+        ap.error("--days must be between 1 and 120 (the NVD API's maximum range)")
     store = IntelStore(args.intel_db) if args.intel_db else IntelStore()
     try:
         records = fetch_nvd(args.days, args.keyword, args.limit)

@@ -122,7 +122,7 @@ async function analyzeUploads() {
     $("status").textContent = "analysis complete";
     toast("Analyzed " + files.length + " file(s)");
   } catch (e) {
-    toast("" + (e.message || e)); $("status").textContent = "error: " + (e.message || e);
+    toast(esc(e.message || e)); $("status").textContent = "error: " + (e.message || e);
   } finally { $("analyze").disabled = false; }
 }
 
@@ -425,7 +425,7 @@ async function load(url) {
   try { const data = await (await fetch(url)).json(); await mergeMetaAndRender(data);
     if ($("status").textContent.includes("loading")) $("status").textContent = "sample loaded";
     return data;
-  } catch (e) { toast("Load failed: " + e); }
+  } catch (e) { toast("Load failed: " + esc(e)); }
 }
 
 /* ================= download IR report ================= */
@@ -444,7 +444,7 @@ async function downloadIR() {
     a.href = url; a.download = fname; document.body.appendChild(a); a.click();
     a.remove(); URL.revokeObjectURL(url);
     toast("IR report downloaded");
-  } catch (e) { toast("report failed: " + (e.message || e)); }
+  } catch (e) { toast("report failed: " + esc(e.message || e)); }
   finally { btn.disabled = false; }
 }
 (function () { const b = $("download-ir"); if (b) b.addEventListener("click", downloadIR); })();
