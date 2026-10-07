@@ -395,6 +395,48 @@ def test_benign_verdict_reframes_the_summary(monkeypatch):
     assert "Written before the final verdict" in md
 
 
+def test_toolbox_tolerates_loosely_typed_arguments(tmp_path):
+    ctx, box = _box(tmp_path)
+    inc = ctx.incidents[0]
+    e = next(x for x in inc.events if x.attack)
+    res = json.loads(box.call("get_incident", {"incident_id": inc.id, "max_events": "3"}))
+    assert len(res["events"]) == 3
+    assert json.loads(box.call("search_events", {"limit": "abc"}))["returned"] >= 1
+    high = json.loads(box.call("search_events", {"min_severity": "high"}))
+    assert high["matches"] == sum(1 for x in ctx.events if x.severity >= 3)
+    assert "error" in json.loads(box.call("pivot", {"value": "  "}))
+    ok = json.loads(box.call("submit_finding", {
+        "title": "t", "severity": "HIGH", "confidence": "0.7", "rationale": "r",
+        "evidence": e.event_id, "attack": e.attack[0], "incident_id": ""}))
+    assert ok["accepted"], ok
+    assert box.findings[0]["evidence"] == [e.event_id]
+    assert box.findings[0]["attack"] == [e.attack[0].upper()]
+    assert box.findings[0]["incident_id"] is None
+
+
+def test_dismissal_without_severity_is_low(tmp_path):
+    ctx, box = _box(tmp_path)
+    inc = ctx.incidents[0]
+    t2 = SecurityToolbox(ctx, "soc2-lead", "Tier-2", box.board, tools=SeniorSocAnalyst.tools)
+    for decision, expected in (("dismissed", "low"), ("confirmed", inc.severity_label())):
+        t2.call("submit_verdict", {"incident_id": inc.id, "decision": decision,
+                                   "confidence": 0.8, "rationale": "r",
+                                   "evidence": [inc.events[0].event_id]})
+        assert t2.verdicts[inc.id]["severity"] == expected
+
+
+def test_no_events_launches_no_tier2_or_tier3_agents():
+    class Counting(ScriptedModel):
+        def messages(self, body):
+            self.seen.append(body["system"][:40])
+            return {"content": [{"type": "text", "text": "done"}]}
+    model = Counting([])
+    out = SwarmOrchestrator(AgentContext(events=[], incidents=[], iocs={}, digest="",
+                                         backbone=model)).run()
+    assert model.seen == []
+    assert out["agent_count"] == 0 and "No events" in out["tier3_skipped"]
+
+
 def test_overall_verdict_is_the_most_serious_incident(monkeypatch, tmp_path):
     """Dismissing the top-scoring incident must not make the headline 'benign'
     while another incident is still open."""

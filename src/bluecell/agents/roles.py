@@ -98,6 +98,12 @@ class SeniorSocAnalyst(AutonomousAgent):
         for f in tier1:
             by_incident.setdefault(f.incident_id, []).append(f)
         agent_verdicts = {}
+        if not ctx.incidents:
+            # Nothing to confirm or dismiss: don't spend a model run on it.
+            self.last_run = {"agent": self.name, "role": self.role, "tier": self.tier,
+                             "mode": "not run (no incidents)", "error": None,
+                             "findings_filed": 0}
+            return []
         if use_llm and ctx.backbone is not None and session is not None:
             try:
                 self.investigate(ctx, session)

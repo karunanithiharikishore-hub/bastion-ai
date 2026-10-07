@@ -74,12 +74,14 @@ class SwarmOrchestrator:
 
         # ---- Tier 2: senior analyst confirms or dismisses incidents ----
         senior = SeniorSocAnalyst(name="soc2-lead")
-        self._register(senior)
+        if ctx.incidents:
+            self._register(senior)
         if session is not None:
             session.stage(ctx, seed=self._seed(self.tier1))
         self.tier2 = senior.verify(ctx, self.tier1, use_llm=session is not None,
                                    session=session)
-        self.agent_runs.append(senior.last_run)
+        if ctx.incidents:
+            self.agent_runs.append(senior.last_run)
 
         # Which incidents did Tier-2 confirm?
         confirmed_ids = {f.incident_id for f in self.tier2
@@ -93,6 +95,9 @@ class SwarmOrchestrator:
                            if f.status == "dismissed" and f.origin == "agent"}
         scope = [i for i in ctx.incidents if i.id in confirmed_ids] or \
                 [i for i in ctx.incidents if i.id not in agent_dismissed]
+        if not ctx.events:
+            self.tier3_skipped = "No events were ingested; specialists not deployed."
+            return self._reconcile(confirmed_ids)
         if ctx.incidents and not scope:
             self.tier3_skipped = (f"Tier-2 agent dismissed all {len(ctx.incidents)} "
                                   f"incident(s); specialists not deployed.")

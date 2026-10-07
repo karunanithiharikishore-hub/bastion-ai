@@ -35,6 +35,25 @@ _EVENT_FIELDS = ("source", "category", "action", "host", "user", "process",
                  "src_ip", "dst_ip", "domain", "file_path", "file_hash")
 
 
+_SEV_NAMES = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+
+
+def _as_list(value) -> list:
+    """Model-supplied list argument; a bare string is one item, not characters."""
+    if value is None or value == "":
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return list(value)
+    return [value]
+
+
+def _as_int(value, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def file_slug(name: str) -> str:
     """Filesystem-safe form of an agent name ("Security Engineer / Architect")."""
     return re.sub(r"[^A-Za-z0-9_.-]+", "-", name).strip("-") or "agent"
@@ -268,11 +287,12 @@ class SecurityToolbox:
         inc = self._inc.get(incident_id)
         if inc is None:
             return {"error": f"no incident {incident_id!r}; known: {sorted(self._inc)}"}
+        max_events = max(1, min(_as_int(max_events, 60), 300))
         return {
             "id": inc.id, "score": inc.score(), "severity": inc.severity_label(),
             "tactics": sorted(inc.tactics), "techniques": inc.techniques,
             "entities": {k: sorted(map(str, v)) for k, v in inc.entities.items()},
-            "events": [self._line(e) for e in inc.events[:max(1, min(int(max_events), 300))]],
+            "events": [self._line(e) for e in inc.events[:max_events]],
             "truncated": len(inc.events) > max_events,
         }
 
@@ -280,6 +300,9 @@ class SecurityToolbox:
                         domain=None, process=None, action=None, technique=None,
                         min_severity=None, start=None, end=None, limit=40):
         lo, hi = self._ts(start), self._ts(end)
+        if min_severity is not None:
+            sev = _SEV_NAMES.get(str(min_severity).lower())
+            min_severity = sev if sev is not None else _as_int(min_severity, None)
         low = lambda v: str(v).lower() if v is not None else None
         text, source, host, user, ip, domain, process, action = map(
             low, (text, source, host, user, ip, domain, process, action))
@@ -293,12 +316,12 @@ class SecurityToolbox:
             if process and process not in (e.process or "").lower(): continue
             if action and action not in (e.action or "").lower(): continue
             if technique and technique.upper() not in [t.upper() for t in e.attack]: continue
-            if min_severity is not None and e.severity < int(min_severity): continue
+            if min_severity is not None and e.severity < min_severity: continue
             if lo and e.ts < lo: continue
             if hi and e.ts > hi: continue
             if text and text not in self._haystack(e): continue
             hits.append(e)
-        limit = max(1, min(int(limit), 200))
+        limit = max(1, min(_as_int(limit, 40), 200))
         return {"matches": len(hits), "returned": min(len(hits), limit),
                 "events": [self._line(e) for e in hits[:limit]]}
 
@@ -312,7 +335,9 @@ class SecurityToolbox:
         return d
 
     def t_pivot(self, value):
-        v = str(value).lower()
+        v = str(value or "").strip().lower()
+        if not v:
+            return {"error": "pivot needs a value (an IP, host, user, domain, hash or process)"}
         hits = [e for e in self.ctx.events if v in self._haystack(e)]
         if not hits:
             return {"value": value, "matches": 0}
@@ -331,7 +356,7 @@ class SecurityToolbox:
               if (not source or e.source == source) and (not action or e.action == action)]
         counts = Counter(getattr(e, group_by) or "-" for e in ev)
         return {"group_by": group_by, "total": len(ev), "distinct": len(counts),
-                "top": counts.most_common(int(limit)),
+                "top": counts.most_common(max(1, _as_int(limit, 25))),
                 "rarest": sorted(counts.items(), key=lambda kv: kv[1])[:10]}
 
     def t_list_iocs(self, kind=None, suspicious_only=False):
@@ -390,9 +415,10 @@ class SecurityToolbox:
             confidence = -1
         if not 0.0 <= confidence <= 1.0:
             problems.append("confidence must be a number in [0, 1]")
+        incident_id = incident_id or None
         if incident_id and incident_id not in self._inc:
             problems.append(f"unknown incident_id {incident_id!r}")
-        evidence = [str(x) for x in (evidence or [])]
+        evidence = [str(x) for x in _as_list(evidence)]
         cited = [self._by_id[x] for x in evidence if x in self._by_id]
         unknown = [x for x in evidence if x not in self._by_id]
         if unknown:
@@ -402,7 +428,7 @@ class SecurityToolbox:
         elif self.source_scope and not any(e.source == self.source_scope for e in cited):
             problems.append(f"you triage the {self.source_scope!r} source: cite at "
                             f"least one {self.source_scope!r} event")
-        attack = [str(t).upper() for t in (attack or [])]
+        attack = [str(t).upper() for t in _as_list(attack)]
         cited_techs = {t.upper() for e in cited for t in e.attack}
         bad_techs = [t for t in attack if t not in cited_techs]
         if bad_techs:
@@ -436,7 +462,14 @@ class SecurityToolbox:
         decision = str(decision).lower()
         if decision not in ("confirmed", "dismissed"):
             problems.append("decision must be 'confirmed' or 'dismissed'")
-        severity = str(severity).lower() if severity else (inc.severity_label() if inc else "low")
+        # Without an explicit severity, a dismissal is low; a confirmation keeps
+        # the incident's own severity.
+        if severity:
+            severity = str(severity).lower()
+        elif str(decision).lower() == "confirmed" and inc is not None:
+            severity = inc.severity_label()
+        else:
+            severity = "low"
         if severity not in _SEVERITIES:
             problems.append(f"severity must be one of {_SEVERITIES}")
         try:
@@ -445,7 +478,7 @@ class SecurityToolbox:
             confidence = -1
         if not 0.0 <= confidence <= 1.0:
             problems.append("confidence must be a number in [0, 1]")
-        evidence = [str(x) for x in (evidence or [])]
+        evidence = [str(x) for x in _as_list(evidence)]
         unknown = [x for x in evidence if x not in self._by_id]
         if unknown:
             problems.append(f"unknown event_ids (not in the logs): {unknown[:10]}")
@@ -454,7 +487,7 @@ class SecurityToolbox:
             if not any(x in in_inc for x in evidence):
                 problems.append(f"cite at least one event_id from {incident_id}")
         known = {c.get("id") for c in self.board_seed}
-        reviewed = [str(x) for x in (reviewed_candidates or [])]
+        reviewed = [str(x) for x in _as_list(reviewed_candidates)]
         bad = [x for x in reviewed if x not in known]
         if bad:
             problems.append(f"unknown candidate ids: {bad[:10]}")
