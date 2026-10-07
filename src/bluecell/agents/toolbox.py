@@ -31,10 +31,6 @@ from .grounding import evidence_index, check_text, _DOMAIN_RE
 from ..pipeline.attack import ATTACK_TECHNIQUES
 
 _SEVERITIES = ("low", "medium", "high", "critical")
-# Domain-shaped tokens that are really file names ("certutil.exe"), not hosts.
-_FILE_EXTS = {"exe", "dll", "sys", "ps1", "psm1", "bat", "cmd", "vbs", "js", "hta",
-              "msi", "scr", "lnk", "jar", "py", "sh", "log", "txt", "tmp", "dat",
-              "doc", "docx", "docm", "xls", "xlsx", "xlsm", "pdf", "iso", "img"}
 _EVENT_FIELDS = ("source", "category", "action", "host", "user", "process",
                  "src_ip", "dst_ip", "domain", "file_path", "file_hash")
 
@@ -246,12 +242,7 @@ class SecurityToolbox:
 
     def _ungrounded(self, text: str) -> dict:
         """Indicators in `text` that do not occur in the evidence ({} if none)."""
-        bad = dict(check_text(str(text or ""), self._index)["unverified"])
-        doms = [d for d in bad.pop("domains", [])
-                if d.rsplit(".", 1)[-1] not in _FILE_EXTS]
-        if doms:
-            bad["domains"] = doms
-        return bad
+        return dict(check_text(str(text or ""), self._index)["unverified"])
 
     # ---- read-only investigation tools --------------------------------------
     def t_case_overview(self):

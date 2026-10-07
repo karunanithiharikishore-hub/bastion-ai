@@ -52,3 +52,23 @@ def test_domain_subdomain_is_grounded():
     txt = "Beacon to sub.evil.top observed."
     res = check_text(txt, idx)
     assert "domains" not in res["unverified"]
+
+
+def test_file_names_are_not_treated_as_domains():
+    from bluecell.models import Event
+    from bluecell.agents.grounding import evidence_index, check_text
+    e = Event(ts="2026-10-03T22:11:02Z", source="edr", category="process",
+              action="process_create", message="wusa C:\\Installers\\KB5044284.msu /quiet",
+              host="win-app02")
+    idx = evidence_index([e], [])
+    res = check_text("Installed via wusa.exe and verified with certutil.exe; "
+                     "KB5044284.msu applied. Beacon to evil-c2.top.", idx)
+    assert res["unverified"] == {"domains": ["evil-c2.top"]}   # only the real fake
+
+
+def test_domains_mentioned_in_log_messages_are_grounded():
+    from bluecell.models import Event
+    from bluecell.agents.grounding import evidence_index, check_text
+    e = Event(ts="2026-10-03T22:00:00Z", source="syslog", category="other",
+              action="log", message="apt fetched from archive.ubuntu.com", host="app01")
+    assert check_text("Patched from archive.ubuntu.com", evidence_index([e], []))["ok"]

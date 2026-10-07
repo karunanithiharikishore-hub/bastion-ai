@@ -24,6 +24,11 @@ _TECH_RE = re.compile(r"\bT1\d{3}(?:\.\d{3})?\b")
 
 # Tokens that look like domains but are noise / self-references we don't verify.
 _DOMAIN_STOPWORDS = {"microsoft.com", "office.com", "windows.com"}
+# Domain-shaped tokens that are really file names ("certutil.exe", "KB5044284.msu").
+_FILE_EXTS = {"exe", "dll", "sys", "ps1", "psm1", "bat", "cmd", "vbs", "js", "hta",
+              "msi", "msu", "msp", "cab", "scr", "lnk", "jar", "py", "sh", "so", "bin",
+              "log", "txt", "tmp", "dat", "doc", "docx", "docm", "xls", "xlsx", "xlsm",
+              "pdf", "iso", "img"}
 
 
 def evidence_index(events, valid_techniques) -> dict:
@@ -60,6 +65,8 @@ def evidence_index(events, valid_techniques) -> dict:
             ips.add(ip.lower())
         for h in _HASH_RE.findall(msg):
             hashes.add(h.lower())
+        for d in _DOMAIN_RE.findall(msg):
+            domains.add(d.lower())
     return {"ips": ips, "domains": domains, "hashes": hashes,
             "hosts": hosts, "users": users,
             "techniques": {t.upper() for t in (valid_techniques or [])}}
@@ -73,6 +80,7 @@ def check_text(text: str, index: dict) -> dict:
     found_hashes = {m.lower() for m in _HASH_RE.findall(text)}
     found_domains = {m.lower() for m in _DOMAIN_RE.findall(text)
                      if m.lower() not in _DOMAIN_STOPWORDS
+                     and m.rsplit(".", 1)[-1].lower() not in _FILE_EXTS
                      and not _IP_RE.fullmatch(m)}
     found_tech = {m.upper() for m in _TECH_RE.findall(text)}
 
