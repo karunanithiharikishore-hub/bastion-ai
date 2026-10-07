@@ -18,7 +18,7 @@ from .pipeline import (
 )
 from .pipeline.compress import token_estimate
 from .pipeline.ioc import hunt_checklist
-from .report.rca import build_storyline, assess_incident
+from .report.rca import build_storyline, assess_incident, apply_tier2_verdict
 from .intel import IntelStore
 from .agents import run_swarm, ai_analyze
 from . import provenance
@@ -74,6 +74,16 @@ def analyze(paths, *, source_override=None, window_minutes=60,
                           intel_store=intel_store, backbone=backbone,
                           use_llm=use_llm)
     swarm_ms = int((time.perf_counter() - _t_swarm0) * 1000)
+
+    # The headline follows the Tier-2 agent's confirm/dismiss decision when there
+    # is one. Rule-only Tier-2 verdicts are a cruder heuristic than the scorer,
+    # so without a model agent the scorer's verdict stands.
+    if swarm:
+        tier2 = {f["incident_id"]: f for f in swarm["findings"]
+                 if f["tier"] == 2 and f.get("origin") == "agent"}
+        for block in incident_blocks:
+            if block["id"] in tier2:
+                block["verdict"] = apply_tier2_verdict(block["verdict"], tier2[block["id"]])
 
     # Model-driven AI analyst — genuine LLM reasoning over the evidence, grounded.
     # Opt-in: only runs when an LLM backbone is available (use_llm and backbone).

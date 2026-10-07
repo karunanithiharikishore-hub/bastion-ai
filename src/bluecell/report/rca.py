@@ -16,6 +16,14 @@ from __future__ import annotations
 from ..pipeline.attack import ATTACK_TECHNIQUES
 
 
+_ATTACK_CHECKS = (
+    "Isolate/scope the affected hosts and accounts immediately.",
+    "Confirm the successful/impact events are not the legitimate user.",
+    "Pull EDR + network for the same hosts around the window.",
+    "Preserve logs; begin incident response.",
+)
+
+
 def assess_incident(inc) -> dict:
     """Produce a plain-English analyst VERDICT: is this real, noise, or unclear —
     and what to do next. This is the judgment a Tier-2 analyst gives, surfaced so
@@ -52,12 +60,7 @@ def assess_incident(inc) -> dict:
             "why": (f"Multiple kill-chain stages ({', '.join(sorted(tactics))}) "
                     f"across {len(sources)} log source(s) at high severity "
                     f"({inc.score()}/100). That progression is not normal noise."),
-            "recommended_checks": [
-                "Isolate/scope the affected hosts and accounts immediately.",
-                "Confirm the successful/impact events are not the legitimate user.",
-                "Pull EDR + network for the same hosts around the window.",
-                "Preserve logs; begin incident response.",
-            ],
+            "recommended_checks": list(_ATTACK_CHECKS),
         }
     if only_cred and not has_success:
         return {
@@ -112,6 +115,38 @@ _TACTIC_ORDER = [
     "discovery", "lateral-movement", "collection", "command-and-control",
     "exfiltration", "impact",
 ]
+
+
+def apply_tier2_verdict(rule_verdict: dict, tier2: dict) -> dict:
+    """Replace the rule-based verdict with the Tier-2 agent's decision.
+
+    ``tier2`` is the Tier-2 finding dict (status escalated|dismissed). The rule
+    verdict is kept under ``rule_verdict`` so an override stays visible.
+    """
+    confirmed = tier2.get("status") == "escalated"
+    if confirmed:
+        level = "likely-malicious"
+        headline = "Tier-2 analyst confirmed a real attack. Investigate now."
+        checks = (rule_verdict.get("recommended_checks")
+                  if rule_verdict.get("level") == "likely-malicious" else list(_ATTACK_CHECKS))
+    else:
+        level = "likely-benign"
+        headline = "Tier-2 analyst dismissed this as benign after reviewing the evidence."
+        checks = [
+            "Close the incident without escalation.",
+            "Review the detection rules that flagged it; they over-scored this activity.",
+            "Watch the same hosts and accounts for similar activity outside expected work.",
+        ]
+    return {
+        "level": level,
+        "confidence": tier2.get("confidence", 0.0),
+        "headline": headline,
+        "why": tier2.get("rationale", ""),
+        "recommended_checks": checks,
+        "decided_by": "tier2-agent",
+        "overrides_rules": level != rule_verdict.get("level"),
+        "rule_verdict": {k: rule_verdict.get(k) for k in ("level", "confidence", "headline")},
+    }
 
 
 def _tactic_rank(tactic: str) -> int:

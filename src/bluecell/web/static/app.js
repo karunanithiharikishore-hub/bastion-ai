@@ -197,6 +197,11 @@ function renderVerdict(r) {
   top.appendChild(el("span", "vhead", esc(v.headline)));
   top.appendChild(el("span", "vconf", "VERDICT CONFIDENCE " + Math.round((v.confidence || 0) * 100) + "%"));
   host.appendChild(top);
+  if (v.overrides_rules && v.rule_verdict) {
+    host.appendChild(el("div", "voverride", esc("Tier-2 agent overruled the rule-based score, which said "
+      + (v.rule_verdict.level || "unknown").replace("-", " ") + " ("
+      + Math.round((v.rule_verdict.confidence || 0) * 100) + "%).")));
+  }
   host.appendChild(el("div", "vwhy", esc(v.why)));
   host.appendChild(el("div", "vchecks-h", "WHAT TO DO NEXT"));
   const ul = el("ul", "vchecks");

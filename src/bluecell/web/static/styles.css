@@ -184,6 +184,7 @@ main { padding: 8px 18px 56px; }
 .verdict .vhead { font-size: 19px; font-weight: 650; letter-spacing: -.015em; }
 .verdict .vconf { color: var(--muted); font: 500 11.5px var(--mono); margin-left: auto; }
 .verdict .vwhy { margin: 12px 0 6px; font-size: 14px; line-height: 1.7; color: var(--ink-2); max-width: 80ch; }
+.verdict .voverride { margin-top: 10px; font: 12px/1.5 var(--mono); color: var(--muted); }
 .verdict .vchecks { margin: 6px 0 0; padding-left: 0; list-style: none; }
 .verdict .vchecks li { font-size: 13px; padding: 5px 0 5px 24px; position: relative; color: var(--ink-2); }
 .verdict .vchecks li::before { content: ""; position: absolute; left: 4px; top: 11px; width: 10px; height: 5px;

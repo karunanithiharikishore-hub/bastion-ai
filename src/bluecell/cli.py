@@ -85,6 +85,11 @@ def _print_verdicts(result) -> None:
         icon = _VERDICT_ICON.get(v.get("level"), (v.get("level") or "?").upper())
         print(f"[bluecell] {s['incident_id']}: {icon} "
               f"({round(v.get('confidence', 0) * 100)}%): {v.get('headline', '')}")
+        if v.get("overrides_rules"):
+            rv = v.get("rule_verdict") or {}
+            rule_icon = _VERDICT_ICON.get(rv.get("level"), (rv.get("level") or "?").upper())
+            print(f"[bluecell]   (overruled the rule-based score: {rule_icon} "
+                  f"{round((rv.get('confidence') or 0) * 100)}%)")
 
 
 def cmd_intel(args) -> int:

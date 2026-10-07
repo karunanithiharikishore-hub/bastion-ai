@@ -259,3 +259,47 @@ def test_benign_sample_is_a_real_false_positive_test_case():
     assert len(incidents) == 1 and incidents[0].techniques
     # The change ticket the agents should find is in the evidence.
     assert any("CHG0042117" in e.message for e in events)
+
+
+def test_headline_follows_tier2_agent_verdict():
+    from bluecell.report.rca import apply_tier2_verdict
+    rule = {"level": "likely-malicious", "confidence": 0.8, "headline": "Likely a real attack.",
+            "why": "rules", "recommended_checks": ["isolate"]}
+    dismissed = apply_tier2_verdict(rule, {"status": "dismissed", "confidence": 0.85,
+                                           "rationale": "ticketed maintenance"})
+    assert dismissed["level"] == "likely-benign" and dismissed["confidence"] == 0.85
+    assert dismissed["why"] == "ticketed maintenance" and dismissed["overrides_rules"]
+    assert dismissed["rule_verdict"]["level"] == "likely-malicious"
+    confirmed = apply_tier2_verdict(rule, {"status": "escalated", "confidence": 0.95,
+                                           "rationale": "real"})
+    assert confirmed["level"] == "likely-malicious" and not confirmed["overrides_rules"]
+    assert confirmed["recommended_checks"] == ["isolate"]
+
+
+def test_analyzer_headline_uses_agent_dismissal(monkeypatch):
+    """End to end through analyze(): an agent dismissal flips the headline, and the
+    markdown report says the rule score was overruled."""
+    import bluecell.analyzer as analyzer
+    from conftest import BENIGN_SAMPLES
+    from bluecell.report.render import render_markdown
+
+    rules_only = analyzer.analyze([BENIGN_SAMPLES], use_llm=False)
+    assert rules_only["incidents"][0]["verdict"]["level"] == "likely-malicious"
+    assert "decided_by" not in rules_only["incidents"][0]["verdict"]
+
+    real_run_swarm = analyzer.run_swarm
+
+    def fake_swarm(events, incidents, *a, **kw):
+        out = real_run_swarm(events, incidents, *a, **dict(kw, use_llm=False))
+        for f in out["findings"]:
+            if f["tier"] == 2:
+                f.update(status="dismissed", origin="agent", confidence=0.85,
+                         rationale="Approved change CHG0042117.")
+        return out
+    monkeypatch.setattr(analyzer, "run_swarm", fake_swarm)
+
+    result = analyzer.analyze([BENIGN_SAMPLES], use_llm=False)
+    v = result["incidents"][0]["verdict"]
+    assert v["level"] == "likely-benign" and v["decided_by"] == "tier2-agent"
+    md = render_markdown(result)
+    assert "LIKELY BENIGN" in md and "overruled the rule-based score" in md

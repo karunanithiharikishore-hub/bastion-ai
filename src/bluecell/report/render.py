@@ -26,6 +26,15 @@ def _verdict_badge(level: str) -> str:
     }.get(level, (level or "unknown").upper())
 
 
+def _override_note(v: dict) -> str:
+    """One line saying the Tier-2 agent overruled the rule score, or ''."""
+    if not v.get("overrides_rules"):
+        return ""
+    rv = v.get("rule_verdict") or {}
+    return (f"Tier-2 agent overruled the rule-based score, which said "
+            f"{_verdict_badge(rv.get('level'))} ({round((rv.get('confidence') or 0) * 100)}%).")
+
+
 def render_markdown(result: dict) -> str:
     meta = result["meta"]
     lines = [
@@ -74,6 +83,10 @@ def render_markdown(result: dict) -> str:
         f"**Overall verdict:** {_verdict_badge(tv.get('level'))} "
         f"(confidence {round(tv.get('confidence', 0) * 100)}%): {tv.get('headline', '')}",
         "",
+    ]
+    if _override_note(tv):
+        lines += [f"_{_override_note(tv)}_", ""]
+    lines += [
         f"**How they got in:** {asum.get('how_they_got_in', 'n/a')}",
         "",
         f"**Objective:** {asum.get('objective', ts.get('likely_objective', 'unknown'))}",
@@ -107,6 +120,10 @@ def render_markdown(result: dict) -> str:
                 f"> **VERDICT: {_verdict_badge(v['level'])}** "
                 f"(confidence {round(v.get('confidence', 0) * 100)}%)  ",
                 f"> {v['headline']}  ",
+            ]
+            if _override_note(v):
+                lines.append(f"> _{_override_note(v)}_  ")
+            lines += [
                 f"> {v['why']}",
                 "",
                 "**What to do next:**",
