@@ -65,7 +65,7 @@
 html, body { margin: 0; min-height: 100%; }
 body {
   background:
-    radial-gradient(900px 480px at 85% -8%, var(--accent-soft), transparent 70%),
+    radial-gradient(900px 480px at 85% -8%, var(--tint, var(--accent-soft)), transparent 70%),
     radial-gradient(var(--grid-dot) 1px, transparent 1px) 0 0 / 22px 22px,
     var(--bg);
   color: var(--ink);
@@ -491,7 +491,7 @@ body::before { content: ""; position: fixed; inset: 0; z-index: 0; pointer-event
   min-height: clamp(560px, calc(100dvh - 130px), 780px); overflow: hidden; isolation: isolate;
   border: 1px solid var(--line); border-radius: var(--r-panel);
   background:
-    radial-gradient(closest-side at 50% 56%, var(--accent-soft), transparent 72%),
+    radial-gradient(closest-side at 50% 56%, var(--tint, var(--accent-soft)), transparent 72%),
     var(--bg-2);
   box-shadow: var(--shadow); animation: boot 1s var(--ease) .1s backwards; }
 
@@ -548,3 +548,9 @@ body::before { -webkit-mask-image: linear-gradient(180deg, #000 0%, transparent 
   .author-bar { padding: 10px 14px 4px; letter-spacing: .08em; line-height: 1.7; }
   .topbar .wm { font-size: 13px; letter-spacing: .2em; }
 }
+
+/* ---- verdict tint: body[data-threat] is set by renderVerdict() in app.js ---- */
+body[data-threat="malicious"] { --tint: color-mix(in srgb, var(--crit) 16%, transparent); --threat: var(--crit); }
+body[data-threat="review"] { --tint: color-mix(in srgb, var(--med) 14%, transparent); --threat: var(--med); }
+body[data-threat="benign"] { --tint: color-mix(in srgb, var(--low) 12%, transparent); --threat: var(--low); }
+body[data-threat] #hc-verdict { color: var(--threat); font-weight: 600; }
