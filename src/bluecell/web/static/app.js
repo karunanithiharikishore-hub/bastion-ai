@@ -171,7 +171,7 @@ function renderPinpointer(r) {
   const info = el("div", "pin-info");
   info.appendChild(el("div", "pin-title", `${esc(s.incident_id)} · ${s.severity.toUpperCase()} (${s.score}/100)`));
   info.appendChild(el("div", "pin-row", `<span class="k">ROOT CAUSE / PATIENT-ZERO</span><br><span class="pin-target">${esc(s.patient_zero || "n/a")}</span>`));
-  info.appendChild(el("div", "pin-row", `<span class="k">OBJECTIVE</span><span class="pin-obj">${esc(s.likely_objective)}</span>`));
+  info.appendChild(el("div", "pin-row", `<span class="k">${(s.attack_summary || {}).framing === "benign" ? "ASSESSMENT" : "OBJECTIVE"}</span><span class="pin-obj">${esc(s.likely_objective)}</span>`));
   info.appendChild(el("div", "pin-row", `<span class="k">BLAST RADIUS</span>${esc((s.affected_hosts || []).join(", ") || "n/a")} · ${(s.affected_users || []).length} users`));
   info.appendChild(el("div", "pin-row", `<span class="k">WINDOW</span>${esc(s.window.start)} → ${esc(s.window.end)}`));
   host.appendChild(info);
@@ -215,12 +215,13 @@ function renderSummary(r) {
   const inc = (r.incidents || [])[0];
   if (!inc) { host.appendChild(el("p", "empty", "No attack to summarize.")); return; }
   const a = inc.storyline.structured.attack_summary || {};
+  const benign = a.framing === "benign";
   const left = el("div", "sum-block");
-  left.appendChild(el("h3", null, "HOW THEY GOT IN"));
+  left.appendChild(el("h3", null, benign ? "HOW IT STARTED" : "HOW THEY GOT IN"));
   left.appendChild(el("div", "sum-in", esc(a.how_they_got_in || "Unknown.")));
-  left.appendChild(el("div", "sum-obj", "OBJECTIVE: <b>" + esc(a.objective || "unknown") + "</b>"));
+  left.appendChild(el("div", "sum-obj", (benign ? "ASSESSMENT: <b>" : "OBJECTIVE: <b>") + esc(a.objective || "unknown") + "</b>"));
   const right = el("div", "sum-block");
-  right.appendChild(el("h3", null, "WHAT THEY DID"));
+  right.appendChild(el("h3", null, benign ? "WHAT HAPPENED" : "WHAT THEY DID"));
   const ol = el("ul", "sum-steps");
   (a.what_they_did || []).forEach((step) => ol.appendChild(el("li", null, esc(step))));
   if (!(a.what_they_did || []).length) ol.appendChild(el("li", null, "No discrete actions reconstructed."));
@@ -236,6 +237,9 @@ function renderSummary(r) {
       "ANALYST NARRATIVE" + (isAI
         ? '<span class="badge ai">AI-GENERATED</span>'
         : '<span class="badge rule">RULE-BASED · run with --llm auto for AI</span>')));
+    if ((inc.storyline.structured.attack_summary || {}).framing === "benign") {
+      nb.appendChild(el("div", "voverride", "Written before the final verdict, so it describes the rule matches as an attack. The verdict is that this activity is benign."));
+    }
     nb.appendChild(el("div", "ntext", esc(txt)));
     host.appendChild(nb);
   }

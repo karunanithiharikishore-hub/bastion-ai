@@ -149,6 +149,21 @@ def apply_tier2_verdict(rule_verdict: dict, tier2: dict) -> dict:
     }
 
 
+def reframe_benign(inc, structured: dict) -> None:
+    """Rewrite an incident's attack-framed summary in neutral terms, in place,
+    once its final verdict is likely-benign. The rule-derived objective is kept
+    as ``rule_objective``."""
+    rule_objective = structured.get("likely_objective", "unknown")
+    objective = "none: assessed as benign"
+    if rule_objective and rule_objective != "unknown":
+        objective += f" (the rules matched patterns of {rule_objective})"
+    structured["rule_objective"] = rule_objective
+    structured["likely_objective"] = objective
+    structured["attack_summary"] = _attack_summary(
+        inc, structured.get("patient_zero"), structured.get("phases") or [],
+        objective, framing="benign")
+
+
 def _tactic_rank(tactic: str) -> int:
     for i, t in enumerate(_TACTIC_ORDER):
         if t in tactic:
@@ -240,18 +255,25 @@ _TACTIC_VERB = {
 }
 
 
-def _attack_summary(inc, patient_zero, ordered_phases, objective) -> dict:
-    """Plain-English 'how they got in and what they did' for non-experts."""
+def _attack_summary(inc, patient_zero, ordered_phases, objective,
+                    framing: str = "attack") -> dict:
+    """Plain-English 'how they got in and what they did' for non-experts.
+
+    ``framing="benign"`` describes the same facts without presuming an attacker,
+    for incidents whose final verdict is likely-benign.
+    """
+    benign = framing == "benign"
     # Entry vector: earliest phase in kill-chain order, plus patient zero.
     entry_phase = ordered_phases[0] if ordered_phases else None
     entry_bits = []
     if patient_zero is not None:
         pz = patient_zero.compact() if hasattr(patient_zero, "compact") else str(patient_zero)
-        entry_bits.append(f"Earliest suspicious activity: {pz}.")
+        entry_bits.append(f"{'Earliest activity' if benign else 'Earliest suspicious activity'}: {pz}.")
     if entry_phase:
         techs = ", ".join(f"{t['id']} ({t['name']})" for t in entry_phase["techniques"])
         entry_bits.append(
-            f"First observed tactic was {entry_phase['tactic']} via {techs}"
+            f"{'First rule match was' if benign else 'First observed tactic was'} "
+            f"{entry_phase['tactic']} via {techs}"
             f" at {entry_phase['first_seen'][:19].replace('T', ' ')}.")
     if inc.users:
         entry_bits.append(f"Accounts involved: {', '.join(sorted(inc.users))}.")
@@ -261,11 +283,18 @@ def _attack_summary(inc, patient_zero, ordered_phases, objective) -> dict:
         verb = _TACTIC_VERB.get(p["tactic"], p["tactic"])
         techs = ", ".join(t["id"] for t in p["techniques"])
         where = (" on " + ", ".join(p["hosts"])) if p["hosts"] else ""
-        steps.append(f"{i}. The attacker {verb}{where} "
-                     f"[{techs}] - first seen {p['first_seen'][11:19]}, {p['count']} event(s).")
+        if benign:
+            steps.append(f"{i}. Activity the rules matched to {p['tactic']}{where} "
+                         f"[{techs}] - first seen {p['first_seen'][11:19]}, {p['count']} event(s).")
+        else:
+            steps.append(f"{i}. The attacker {verb}{where} "
+                         f"[{techs}] - first seen {p['first_seen'][11:19]}, {p['count']} event(s).")
 
     return {
-        "how_they_got_in": " ".join(entry_bits) or "Entry vector could not be determined from the evidence.",
+        "framing": framing,
+        "how_they_got_in": " ".join(entry_bits) or (
+            "Starting point could not be determined from the evidence." if benign
+            else "Entry vector could not be determined from the evidence."),
         "what_they_did": steps,
         "objective": objective,
         "span": {"start": inc.start.isoformat(), "end": inc.end.isoformat()},

@@ -357,3 +357,39 @@ def test_rule_only_dismissal_still_runs_specialists():
     assert out["counts"]["confirmed_incidents"] == 0
     assert out["tier3_skipped"] is None
     assert 3 in {r["tier"] for r in out["agent_runs"]}
+
+
+def test_benign_verdict_reframes_the_summary(monkeypatch):
+    """A likely-benign final verdict must not leave 'The attacker ...' wording."""
+    import bluecell.analyzer as analyzer
+    from conftest import BENIGN_SAMPLES
+    from bluecell.report.render import render_markdown
+
+    attack = analyzer.analyze([BENIGN_SAMPLES], use_llm=False)
+    asum = attack["incidents"][0]["storyline"]["structured"]["attack_summary"]
+    assert asum["framing"] == "attack"
+    assert any("The attacker" in s for s in asum["what_they_did"])
+
+    real_run_swarm = analyzer.run_swarm
+
+    def dismissing_swarm(events, incidents, *a, **kw):
+        out = real_run_swarm(events, incidents, *a, **dict(kw, use_llm=False))
+        for f in out["findings"]:
+            if f["tier"] == 2:
+                f.update(status="dismissed", origin="agent", confidence=0.9,
+                         rationale="Approved change CHG0042117.")
+        return out
+    monkeypatch.setattr(analyzer, "run_swarm", dismissing_swarm)
+
+    result = analyzer.analyze([BENIGN_SAMPLES], use_llm=False)
+    s = result["incidents"][0]["storyline"]["structured"]
+    asum = s["attack_summary"]
+    assert asum["framing"] == "benign"
+    assert not any("attacker" in step.lower() for step in asum["what_they_did"])
+    assert "suspicious" not in asum["how_they_got_in"].lower()
+    assert s["likely_objective"].startswith("none: assessed as benign")
+    assert s["rule_objective"] == attack["incidents"][0]["storyline"]["structured"]["likely_objective"]
+    md = render_markdown(result)
+    assert "**How it started:**" in md and "**What happened:**" in md
+    assert "How they got in" not in md and "What they did" not in md
+    assert "Written before the final verdict" in md

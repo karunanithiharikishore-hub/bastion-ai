@@ -18,7 +18,9 @@ from .pipeline import (
 )
 from .pipeline.compress import token_estimate
 from .pipeline.ioc import hunt_checklist
-from .report.rca import build_storyline, assess_incident, apply_tier2_verdict
+from .report.rca import (
+    build_storyline, assess_incident, apply_tier2_verdict, reframe_benign,
+)
 from .intel import IntelStore
 from .agents import run_swarm, ai_analyze
 from . import provenance
@@ -85,6 +87,12 @@ def analyze(paths, *, source_override=None, window_minutes=60,
         for block in incident_blocks:
             if block["id"] in tier2:
                 block["verdict"] = apply_tier2_verdict(block["verdict"], tier2[block["id"]])
+
+    # Benign incidents get a summary that does not presume an attacker.
+    by_id = {inc.id: inc for inc in incidents}
+    for block in incident_blocks:
+        if block["verdict"].get("level") == "likely-benign":
+            reframe_benign(by_id[block["id"]], block["storyline"]["structured"])
 
     # Model-driven AI analyst — genuine LLM reasoning over the evidence, grounded.
     # Opt-in: only runs when an LLM backbone is available (use_llm and backbone).

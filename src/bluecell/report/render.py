@@ -26,6 +26,15 @@ def _verdict_badge(level: str) -> str:
     }.get(level, (level or "unknown").upper())
 
 
+_BENIGN_NARRATIVE_NOTE = ("Written before the final verdict, so it describes the rule "
+                          "matches as an attack. The verdict above is that this "
+                          "activity is benign.")
+
+
+def _benign(structured: dict) -> bool:
+    return (structured.get("attack_summary") or {}).get("framing") == "benign"
+
+
 def _override_note(v: dict) -> str:
     """One line saying the Tier-2 agent overruled the rule score, or ''."""
     if not v.get("overrides_rules"):
@@ -86,12 +95,15 @@ def render_markdown(result: dict) -> str:
     ]
     if _override_note(tv):
         lines += [f"_{_override_note(tv)}_", ""]
+    benign = asum.get("framing") == "benign"
     lines += [
-        f"**How they got in:** {asum.get('how_they_got_in', 'n/a')}",
+        f"**{'How it started' if benign else 'How they got in'}:** "
+        f"{asum.get('how_they_got_in', 'n/a')}",
         "",
-        f"**Objective:** {asum.get('objective', ts.get('likely_objective', 'unknown'))}",
+        f"**{'Assessment' if benign else 'Objective'}:** "
+        f"{asum.get('objective', ts.get('likely_objective', 'unknown'))}",
         "",
-        "**What they did:**",
+        f"**{'What happened' if benign else 'What they did'}:**",
     ]
     for step in asum.get("what_they_did", []):
         lines.append(f"- {step}")
@@ -136,11 +148,16 @@ def render_markdown(result: dict) -> str:
             f"- Hosts: {', '.join(s['affected_hosts']) or 'n/a'}",
             f"- Users: {', '.join(s['affected_users']) or 'n/a'}",
             f"- Sources: {', '.join(s['sources_involved'])}",
-            f"- Likely objective: **{s['likely_objective']}**",
+            f"- {'Assessment' if _benign(s) else 'Likely objective'}: "
+            f"**{s['likely_objective']}**",
             "",
             "**RCA / Storyline** "
             f"_(source: {inc['storyline']['narrative_source']})_",
             "",
+        ]
+        if _benign(s):
+            lines += [f"_{_BENIGN_NARRATIVE_NOTE}_", ""]
+        lines += [
             inc["storyline"]["narrative"],
             "",
             "**ATT&CK phases:**",
