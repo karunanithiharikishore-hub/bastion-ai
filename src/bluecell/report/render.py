@@ -51,7 +51,8 @@ def render_markdown(result: dict) -> str:
             f"- Agent swarm: **{swarm['agent_count']} agents** "
             f"(T1:{c['tier1_findings']} findings, T2:{c['tier2_findings']} verifications, "
             f"T3:{c['tier3_findings']} specialist findings, "
-            f"{c['confirmed_incidents']} confirmed)",
+            f"{c['confirmed_incidents']} confirmed, "
+            f"{c.get('autonomous_agents', 0)} of {swarm['agent_count']} ran as autonomous AI agents)",
             "",
         ]
 
@@ -190,16 +191,51 @@ def _render_swarm(swarm: dict) -> str:
         out.append(
             f"- {con['incident_id']} - {con['severity'].upper()} "
             f"(score {con['score']}/100) · "
-            f"{'✅ CONFIRMED by Tier-2' if con['confirmed_by_tier2'] else '⏳ not corroborated'} · "
+            f"{'✅ CONFIRMED by Tier-2' if con['confirmed_by_tier2'] else '⏳ not confirmed'} · "
             f"{con['agents_involved']} agents, tiers {con['tiers_involved']}, "
             f"consensus confidence {con['consensus_confidence']}")
     out.append("")
+    t2 = [f for f in swarm["findings"] if f["tier"] == 2]
+    if t2:
+        out.append("**Tier-2 verdicts:**")
+        for f in t2:
+            tag = "AI agent" if f.get("origin") == "agent" else "rule"
+            out.append(f"- **{f['title']}** ({tag}, conf {f['confidence']}): {f['rationale']}")
+        out.append("")
+    t1 = [f for f in swarm["findings"] if f["tier"] == 1]
+    if t1:
+        out.append("**Tier-1 candidates:**")
+        for f in t1:
+            tag = "AI agent" if f.get("origin") == "agent" else "rule"
+            out.append(f"- [{f['severity'].upper()}] `{f['agent']}` ({tag}, "
+                       f"{f['status']}): {f['title']}")
+        out.append("")
+    runs = swarm.get("agent_runs") or []
+    if runs:
+        out.append("**How each agent ran:**")
+        for r in runs:
+            line = f"- T{r.get('tier', '?')} `{r['agent']}`: {r['mode']}"
+            if r.get("mode") == "autonomous":
+                line += (f" · {r.get('tool_calls', 0)} tool calls, {r.get('turns')} turns, "
+                         f"{r.get('findings_filed', 0)} submissions accepted, "
+                         f"{r.get('rejected_submissions', 0)} rejected by grounding")
+            if r.get("error"):
+                line += f" · error: {r['error'][:160]}"
+            if r.get("note"):
+                line += f" · {r['note']}"
+            out.append(line)
+        out.append("")
     # Tier-3 specialist recommendations are the actionable output.
     t3 = [f for f in swarm["findings"] if f["tier"] == 3]
     if t3:
         out.append("**Specialist findings (Tier-3):**")
         for f in t3:
-            out.append(f"- [{f['severity'].upper()}] _{f['role']}_: **{f['title']}**")
+            tag = "AI agent" if f.get("origin") == "agent" else "rule"
+            out.append(f"- [{f['severity'].upper()}] _{f['role']}_ ({tag}, "
+                       f"conf {f['confidence']}): **{f['title']}**")
+            if f.get("origin") == "agent":
+                out.append(f"    - why: {f['rationale']}")
+                out.append(f"    - evidence: {', '.join(f['evidence'][:12])}")
             if f.get("recommended_action"):
                 out.append(f"    - action: {f['recommended_action']}")
         out.append("")

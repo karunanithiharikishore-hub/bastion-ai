@@ -35,22 +35,58 @@ firewall/router/switch, cloud audit trails, and **Microsoft 365 / Entra**
 > externally except optional NVD intel fetches and optional Claude API calls,
 > and treats every finding as a hypothesis to validate — not proof.
 
-## The agent swarm (true multi-agent model)
+## The agent swarm
 
-BlueCell runs a swarm of specialist blue-team agents, not a single script. Each
-agent has a deterministic brain (always runs, offline) plus optional Claude
-enrichment:
+BlueCell runs three tiers of blue-team agents. **Every one of them is an
+autonomous, tool-using Claude agent** when a model backbone is available:
 
-- **Tier 1 — Junior SOC Analysts:** one per log source, triage and raise candidates.
-- **Tier 2 — Senior SOC Analysts:** verify/confirm or dismiss Tier-1 candidates
-  (cross-source corroboration = confirmation).
+- **Tier 1 — Junior SOC Analysts:** one per log source, run in parallel. Each
+  triages its own source and raises candidates. A candidate must cite at least
+  one event from that analyst's source.
+- **Tier 2 — Senior SOC Analyst:** does not take Tier-1 on trust. It
+  re-examines the evidence, looks for benign explanations and for anything
+  Tier-1 missed, and records a `confirmed` / `dismissed` verdict per incident
+  with `submit_verdict` (a tool only Tier-2 has). Confirmed incidents go to
+  Tier 3.
 - **Tier 3 — Specialists:** Incident Responder, Digital Forensics Analyst,
-  Threat Hunter, Malware Analyst, Threat Intelligence Analyst,
-  Security Engineer/Architect, Vulnerability Analyst.
+  Threat Hunter, Malware Analyst, Threat Intelligence Analyst, Security
+  Engineer/Architect, Vulnerability Analyst, run in parallel on the confirmed
+  incidents.
 
-An orchestrator fans work out across tiers and reconciles everything into a
-per-incident **consensus** (which agents agreed, confirmation status, confidence).
-See the roster any time: `bluecell roster`.
+All tiers share one board, so later tiers read the notes earlier tiers left.
+
+Each agent gets a mission brief for its role and a
+toolbox (`case_overview`, `search_events`, `get_incident`, `get_event`, `pivot`,
+`aggregate`, `list_iocs`, `attack_lookup`, `intel_search`, `read_board`,
+`post_note`, `submit_finding`) and runs its own loop: the model decides what to
+look at, follows leads across all the logs, shares leads with the other
+agents on the shared board, and files findings.
+
+Findings are **checked against the evidence before they are accepted**:
+evidence must be real event ids, ATT&CK techniques must be tagged on the cited
+events, and any IP/domain/hash in the text must occur in the logs. A rejected
+finding goes back to the agent with the reasons, and the agent fixes and
+resubmits it.
+
+How it runs depends on the backbone:
+
+- `--llm cli` (keyless): each agent is its own `claude -p` process with
+  BlueCell's tools served over MCP (`agents/mcp_server.py`) and every built-in
+  Claude Code tool disabled, so the agent can only read the evidence.
+- `--llm api`: native Anthropic tool use, looped in-process.
+- `--llm off` / no backbone: every agent falls back to its rule-based logic
+  (per-source triage rules, the cross-source corroboration rule for Tier-2,
+  and fixed playbooks for the specialists).
+
+The report's **"How each agent ran"** section shows, for every agent,
+whether it ran autonomously or fell back to rules (and why), how many tool calls
+it made, and how many submissions were rejected by grounding. Every finding and
+verdict is labelled `AI agent` or `rule`. On the bundled samples a full
+autonomous run takes roughly 10-15 minutes (three rounds of agents); `--llm off`
+takes well under a second.
+
+The orchestrator reconciles all tiers into a per-incident **consensus**. See the
+roster any time: `bluecell roster`.
 
 ## Authorship & integrity
 
@@ -102,7 +138,7 @@ bluecell info
 
 ```bash
 bluecell serve samples --window 120 --port 8787 --open
-# add --llm auto  to enable Claude-enriched RCA/agent notes
+# add --llm auto  to run every swarm agent as an autonomous Claude agent
 ```
 
 A dependency-free local dashboard (binds to `127.0.0.1`, read-only): a futuristic
@@ -131,8 +167,10 @@ output.
 
 ## The hybrid Claude backbone
 
-The deterministic pipeline always runs. The **RCA narrative** is optionally
-enriched by Claude, via one of two paths (auto-selected):
+The deterministic pipeline (parse, normalize, correlate, ATT&CK tagging, IOCs)
+always runs. Claude powers the **agent swarm** (every tier), the **AI analyst**
+lead/reviewer verdict, and the **RCA narrative**, via one of two paths
+(auto-selected):
 
 | Mode  | How | Best for |
 |-------|-----|----------|

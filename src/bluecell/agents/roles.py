@@ -4,28 +4,48 @@
 """Concrete blue-team agent roles.
 
 Tier 1  : Junior SOC analysts — triage, one per log source, raise candidates.
-Tier 2  : Senior SOC analysts — verify/confirm or dismiss Tier-1 candidates.
-Tier 3  : Specialists & command — IR, forensics, hunt, malware, intel, security
+Tier 2  : Senior SOC analyst — confirm or dismiss incidents from the candidates.
+Tier 3  : Specialists — IR, forensics, hunt, malware, intel, security
           engineering, vulnerability analysis.
+
+Every agent here is an autonomous, tool-using model agent (see runtime.py). The
+``analyze`` / rule-verdict code on each is the fallback used only when no model
+backbone is available or the agent fails.
 """
 from __future__ import annotations
 
 from .base import Agent, Finding, AgentContext, _sev_from_score
 from ..pipeline.attack import ATTACK_TECHNIQUES
 from ..pipeline.ioc import hunt_checklist
+from .runtime import AutonomousAgent
+from .toolbox import BASE_TOOLS
 
 
 # ---------------------------------------------------------------------------
 # TIER 1 — Junior SOC Analysts (triage)
 # ---------------------------------------------------------------------------
-class JuniorSocAnalyst(Agent):
-    """Triages one log source's contribution to each incident."""
+class JuniorSocAnalyst(AutonomousAgent):
+    """Triages one log source and raises candidates for Tier-2."""
     role = "Tier-1 SOC Analyst"
     tier = 1
+    default_max_turns = 16
+    mission = """Mission: you are the Tier-1 analyst who owns the {source!r} log source.
+    Triage it: go through the {source} events (search_events with source={source!r},
+    aggregate by action/host/user/process), separate the malicious or suspicious
+    from routine noise, and raise each real candidate with submit_finding. Each
+    candidate must cite at least one {source} event; cite events from other
+    sources too when they corroborate it, and set incident_id when the activity
+    belongs to a correlated incident. Rate severity and confidence honestly: a
+    noisy-but-benign pattern should not be raised. Tier-2 will verify your
+    candidates, so make the rationale precise enough to check."""
 
     def __init__(self, source: str, **kw):
         super().__init__(name=f"soc1-{source}", **kw)
         self.source = source
+        self.source_scope = source
+
+    def brief(self) -> str:
+        return self.mission.format(source=self.source)
 
     def analyze(self, ctx: AgentContext) -> list:
         findings = []
@@ -55,48 +75,112 @@ class JuniorSocAnalyst(Agent):
 # ---------------------------------------------------------------------------
 # TIER 2 — Senior SOC Analysts (verification / confirmation)
 # ---------------------------------------------------------------------------
-class SeniorSocAnalyst(Agent):
-    """Verifies Tier-1 candidates: corroboration across sources raises confidence."""
+class SeniorSocAnalyst(AutonomousAgent):
+    """Confirms or dismisses incidents from the Tier-1 candidates."""
     role = "Tier-2 SOC Analyst"
     tier = 2
+    tools = tuple(t for t in BASE_TOOLS if t != "submit_finding") + ("submit_verdict",)
+    mission = """Mission: you are the Tier-2 analyst. The Tier-1 analysts' candidates are
+    in case_overview under earlier_tiers (with their ids, rationale and evidence).
+    Do not take them on trust: for every correlated incident, re-examine the
+    events yourself, check whether independent sources corroborate each other,
+    look for benign explanations (admin activity, scanners, misconfiguration),
+    and look for anything Tier-1 missed. Then record exactly one decision per
+    incident with submit_verdict: 'confirmed' if the evidence shows real
+    malicious activity that the specialists must work, 'dismissed' if it does
+    not. List the candidate ids you reviewed. Confirmed incidents go to the
+    Tier-3 specialists, so be decisive and explain the deciding evidence."""
 
-    def verify(self, ctx: AgentContext, tier1: list) -> list:
+    def verify(self, ctx: AgentContext, tier1: list, use_llm: bool = False,
+               session=None) -> list:
+        """Return Tier-2 verdict findings, and mark the Tier-1 candidates."""
         by_incident = {}
         for f in tier1:
             by_incident.setdefault(f.incident_id, []).append(f)
+        agent_verdicts = {}
+        if use_llm and ctx.backbone is not None and session is not None:
+            try:
+                self.investigate(ctx, session)
+                agent_verdicts = {v["incident_id"]: v for v in self.verdicts}
+            except Exception as exc:
+                self.last_run = dict(self.last_run or {}, agent=self.name, role=self.role,
+                                     tier=self.tier, mode="fallback (rules)", error=str(exc))
+        else:
+            self.last_run = {"agent": self.name, "role": self.role, "tier": self.tier,
+                             "mode": "rules", "error": None}
+        by_id = {f.id: f for f in tier1}
 
         verified = []
         for inc in ctx.incidents:
             cands = by_incident.get(inc.id, [])
-            if not cands:
-                continue
-            sources = {c.agent.replace("soc1-", "") for c in cands}
-            techs = sorted({t for c in cands for t in c.attack})
-            multi_source = len(sources) >= 2
-            has_attack = bool(techs)
-            # Confirmation rule: corroborated by >=2 sources OR high incident score.
-            confirmed = multi_source or inc.score() >= 50
-            status = "confirmed" if confirmed else "dismissed"
-            conf = 0.9 if (multi_source and has_attack) else 0.7 if confirmed else 0.3
-            for c in cands:
+            v = agent_verdicts.get(inc.id)
+            if v is not None:
+                verified.append(self._apply_verdict(inc, v, cands, by_id))
+            elif cands:
+                verified.append(self._rule_verdict(inc, cands))
+        if self.last_run.get("mode") == "autonomous":
+            notes = []
+            by_rules = [f.incident_id for f in verified if f.origin == "rules"]
+            if by_rules:
+                notes.append(f"no agent verdict for {by_rules}; rules decided those")
+            decided = {f.incident_id for f in verified}
+            undecided = [i.id for i in ctx.incidents if i.id not in decided]
+            if undecided:
+                notes.append(f"{undecided} got no verdict and no Tier-1 candidates")
+            if notes:
+                self.last_run["note"] = "; ".join(notes)
+        self.last_run["findings_filed"] = len(verified)
+        return verified
+
+    def _apply_verdict(self, inc, v: dict, cands: list, by_id: dict) -> Finding:
+        confirmed = v["decision"] == "confirmed"
+        status = "confirmed" if confirmed else "dismissed"
+        reviewed = {by_id[i].id for i in v["reviewed_candidates"] if i in by_id}
+        for c in cands + [by_id[i] for i in reviewed]:
+            if self.name not in c.verified_by:
                 c.status = status
                 c.verified_by.append(self.name)
-            verified.append(Finding(
-                agent=self.name, role=self.role, tier=2,
-                title=f"Incident {inc.id} {'CONFIRMED' if confirmed else 'not corroborated'}",
-                severity=_sev_from_score(inc.score()),
-                confidence=round(conf, 2),
-                rationale=(f"Reviewed {len(cands)} Tier-1 candidates across sources "
-                           f"{sorted(sources)}. Cross-source corroboration="
-                           f"{multi_source}, incident score={inc.score()}/100."),
-                incident_id=inc.id, attack=techs,
-                evidence=[eid for c in cands for eid in c.evidence][:30],
-                recommended_action=("Escalate to Incident Responder + specialists."
-                                    if confirmed else "Close as low-priority; monitor."),
-                status="escalated" if confirmed else "dismissed",
-                verified_by=[self.name],
-            ))
-        return verified
+        return Finding(
+            agent=self.name, role=self.role, tier=2,
+            title=f"Incident {inc.id} {'CONFIRMED' if confirmed else 'dismissed'}",
+            severity=v["severity"], confidence=v["confidence"],
+            rationale=v["rationale"], incident_id=inc.id,
+            attack=sorted({t for e in inc.events if e.event_id in set(v["evidence"])
+                           for t in e.attack}),
+            evidence=v["evidence"],
+            recommended_action=("Escalate to Incident Responder + specialists."
+                                if confirmed else "Close; monitor for recurrence."),
+            status="escalated" if confirmed else "dismissed",
+            verified_by=[self.name], origin="agent",
+        )
+
+    def _rule_verdict(self, inc, cands: list) -> Finding:
+        sources = {c.agent.replace("soc1-", "") for c in cands}
+        techs = sorted({t for c in cands for t in c.attack})
+        multi_source = len(sources) >= 2
+        has_attack = bool(techs)
+        # Confirmation rule: corroborated by >=2 sources OR high incident score.
+        confirmed = multi_source or inc.score() >= 50
+        status = "confirmed" if confirmed else "dismissed"
+        conf = 0.9 if (multi_source and has_attack) else 0.7 if confirmed else 0.3
+        for c in cands:
+            c.status = status
+            c.verified_by.append(self.name)
+        return Finding(
+            agent=self.name, role=self.role, tier=2,
+            title=f"Incident {inc.id} {'CONFIRMED' if confirmed else 'not corroborated'}",
+            severity=_sev_from_score(inc.score()),
+            confidence=round(conf, 2),
+            rationale=(f"Reviewed {len(cands)} Tier-1 candidates across sources "
+                       f"{sorted(sources)}. Cross-source corroboration="
+                       f"{multi_source}, incident score={inc.score()}/100."),
+            incident_id=inc.id, attack=techs,
+            evidence=[eid for c in cands for eid in c.evidence][:30],
+            recommended_action=("Escalate to Incident Responder + specialists."
+                                if confirmed else "Close as low-priority; monitor."),
+            status="escalated" if confirmed else "dismissed",
+            verified_by=[self.name],
+        )
 
     def analyze(self, ctx: AgentContext) -> list:  # not used directly
         return []
@@ -105,7 +189,14 @@ class SeniorSocAnalyst(Agent):
 # ---------------------------------------------------------------------------
 # TIER 3 — Specialists
 # ---------------------------------------------------------------------------
-class IncidentResponder(Agent):
+class IncidentResponder(AutonomousAgent):
+    mission = """Mission: own the response. Decide whether this is a real intrusion, how far it
+    has spread, and what must be contained first. Work the scope: every affected
+    host, account, source IP and the attacker's current foothold. Distinguish what
+    is confirmed from what is suspected. Produce a prioritized containment and
+    eradication plan (isolate, revoke, block, reset) where each action is tied to
+    the specific events that justify it, and flag what must be preserved for
+    forensics before anyone acts."""
     role = "Incident Responder"
     tier = 3
 
@@ -140,7 +231,13 @@ class IncidentResponder(Agent):
         return out
 
 
-class DigitalForensicsAnalyst(Agent):
+class DigitalForensicsAnalyst(AutonomousAgent):
+    mission = """Mission: reconstruct exactly what happened, in order. Identify patient zero
+    and the initial access vector, then build a precise timeline from first
+    attacker activity to the last observed action, across every log source.
+    Establish the process lineage and the sequence of attacker actions on each
+    host, call out gaps in the timeline where logs are missing, and state which
+    artifacts (disk, memory, specific logs) should be acquired to prove it."""
     role = "Digital Forensics Analyst"
     tier = 3
 
@@ -168,7 +265,13 @@ class DigitalForensicsAnalyst(Agent):
         return out
 
 
-class ThreatHunter(Agent):
+class ThreatHunter(AutonomousAgent):
+    mission = """Mission: find what the detections missed. Assume the correlated incidents are
+    only part of the story. Form hunt hypotheses from the attacker's observed
+    behaviour and test them against ALL events: the same IPs, hashes, accounts or
+    tooling on other hosts, rare processes and destinations, activity outside the
+    incident windows, and quieter precursor or follow-on activity. Report every
+    confirmed hit, and also report hypotheses you tested that came back clean."""
     role = "Threat Hunter"
     tier = 3
 
@@ -187,7 +290,13 @@ class ThreatHunter(Agent):
         return out
 
 
-class MalwareAnalyst(Agent):
+class MalwareAnalyst(AutonomousAgent):
+    mission = """Mission: characterize the attacker's tooling. Examine every process execution,
+    command line, binary hash, script interpreter and living-off-the-land binary
+    in the evidence. Work out what each executed artifact did (download, execute,
+    persist, encrypt, beacon), how it was delivered, and which hosts it touched.
+    Separate malicious tooling from legitimate admin activity, and say what a
+    sandbox or reverse-engineering pass should confirm."""
     role = "Malware Analyst"
     tier = 3
 
@@ -227,7 +336,13 @@ class MalwareAnalyst(Agent):
         return out
 
 
-class ThreatIntelAnalyst(Agent):
+class ThreatIntelAnalyst(AutonomousAgent):
+    mission = """Mission: put the activity in context. Map the observed behaviour to ATT&CK and
+    to the intel store (CVEs, advisories, known TTPs). Assess the attacker's
+    likely objective and sophistication from the evidence, judge whether the
+    infrastructure (IPs, domains) looks like commodity or targeted tooling, and
+    say which intel entries genuinely match versus merely share a keyword. Never
+    attribute to a named actor unless the evidence directly supports it."""
     role = "Threat Intelligence Analyst"
     tier = 3
 
@@ -253,7 +368,12 @@ class ThreatIntelAnalyst(Agent):
         return out
 
 
-class SecurityEngineer(Agent):
+class SecurityEngineer(AutonomousAgent):
+    mission = """Mission: turn this incident into control improvements. For each stage of the
+    attack you can prove from the logs, identify the control that failed or was
+    missing (authentication, egress filtering, application control, segmentation,
+    backups, logging coverage) and recommend the specific, practical fix. Also
+    identify detection gaps: what should have alerted earlier and on which events."""
     role = "Security Engineer / Architect"
     tier = 3
 
@@ -279,7 +399,12 @@ class SecurityEngineer(Agent):
         )]
 
 
-class VulnerabilityAnalyst(Agent):
+class VulnerabilityAnalyst(AutonomousAgent):
+    mission = """Mission: determine whether a vulnerability or misconfiguration enabled the
+    attack. Examine the initial access path and the exploited services, accounts
+    and software in the evidence, check the intel store for relevant CVEs, and
+    state for each candidate whether the logs show actual exploitation, merely
+    exposure, or nothing. Prioritize remediation by what the evidence proves."""
     role = "Vulnerability Analyst"
     tier = 3
 

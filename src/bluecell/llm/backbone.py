@@ -99,7 +99,6 @@ class LLMBackbone:
 
     def _complete_api(self, prompt: str, system: str | None,
                       max_tokens: int) -> str:
-        key = os.environ["ANTHROPIC_API_KEY"]
         body = {
             "model": self.model,
             "max_tokens": max_tokens,
@@ -107,6 +106,13 @@ class LLMBackbone:
         }
         if system:
             body["system"] = system
+        payload = self.messages(body)
+        parts = payload.get("content", [])
+        return "".join(p.get("text", "") for p in parts if p.get("type") == "text").strip()
+
+    def messages(self, body: dict) -> dict:
+        """Raw Messages API call (used by the tool-using agent loop)."""
+        key = os.environ["ANTHROPIC_API_KEY"]
         data = json.dumps(body).encode("utf-8")
         req = urllib.request.Request(
             _API_URL, data=data, method="POST",
@@ -124,5 +130,4 @@ class LLMBackbone:
             raise BackboneUnavailable(f"API HTTP {exc.code}: {detail}") from exc
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             raise BackboneUnavailable(f"API request failed: {exc}") from exc
-        parts = payload.get("content", [])
-        return "".join(p.get("text", "") for p in parts if p.get("type") == "text").strip()
+        return payload

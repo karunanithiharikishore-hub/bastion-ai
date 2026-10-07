@@ -3,55 +3,82 @@
 # WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
 """Swarm orchestrator — the SOC manager agent.
 
-Flow (true multi-agent):
-  1. Spawn one Tier-1 Junior SOC analyst per log source; each triages.
-  2. Tier-2 Senior SOC analysts verify/confirm or dismiss Tier-1 candidates
-     (cross-source corroboration = confirmation).
-  3. Tier-3 specialists (IR, forensics, hunt, malware, intel, security eng,
-     vuln) run on the confirmed picture.
+Flow:
+  1. Tier-1: one Junior SOC analyst agent per log source triages its source and
+     raises candidates (in parallel).
+  2. Tier-2: the Senior SOC analyst agent re-examines the evidence behind the
+     candidates and confirms or dismisses each incident.
+  3. Tier-3: specialists (IR, forensics, hunt, malware, intel, security eng,
+     vuln) investigate the confirmed incidents (in parallel).
   4. Reconcile into a consensus report with per-incident confidence.
 
-Each agent's deterministic brain always runs; the LLM backbone (local `claude`
-CLI keyless, or API) enriches when available. If ruflo is importable, agents
-are also registered in its swarm for tracking, but execution does not depend
-on it.
+Every agent is an autonomous, tool-using model agent whenever a backbone (local
+`claude` CLI keyless, or API) is available; all tiers share one board, so later
+tiers read earlier tiers' notes. Without a backbone each agent falls back to its
+rules. ``agent_runs`` in the result records which mode every agent ran in.
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 from .base import AgentContext, Finding
 from .roles import JuniorSocAnalyst, SeniorSocAnalyst, SPECIALISTS
+from .runtime import SwarmSession
+
+MAX_PARALLEL_AGENTS = 4
 
 
 class SwarmOrchestrator:
-    def __init__(self, ctx: AgentContext, use_llm: bool = True):
+    def __init__(self, ctx: AgentContext, use_llm: bool = True,
+                 max_parallel: int = MAX_PARALLEL_AGENTS):
         self.ctx = ctx
         self.use_llm = use_llm
+        self.max_parallel = max_parallel
         self.roster = []          # [{name, role, tier}]
         self.tier1 = []
         self.tier2 = []
         self.tier3 = []
+        self.agent_runs = []      # per-agent run record (mode, tools, errors)
 
     def _register(self, agent) -> None:
         self.roster.append({"name": agent.name, "role": agent.role, "tier": agent.tier})
 
     def run(self) -> dict:
         ctx = self.ctx
+        autonomous = self.use_llm and ctx.backbone is not None
+        session = SwarmSession(ctx, seed=[]) if autonomous else None
+        try:
+            return self._run_tiers(ctx, session)
+        finally:
+            if session is not None:
+                session.close()
 
-        # ---- Tier 1: one junior analyst per source present in incidents ----
-        sources = sorted({e.source for inc in ctx.incidents for e in inc.events})
-        if not sources:
-            sources = sorted({e.source for e in ctx.events})
-        for src in sources:
-            agent = JuniorSocAnalyst(src)
+    def _run_all(self, agents: list, ctx: AgentContext, session) -> list:
+        """Run one tier's agents (in parallel when they are model agents)."""
+        for agent in agents:
             self._register(agent)
-            self.tier1.extend(agent.run(ctx, use_llm=self.use_llm))
+        if session is None:
+            results = [a.run(ctx, use_llm=False) for a in agents]
+        else:
+            with ThreadPoolExecutor(max_workers=self.max_parallel) as pool:
+                results = list(pool.map(
+                    lambda a: a.run(ctx, use_llm=True, session=session), agents))
+        self.agent_runs.extend(a.last_run for a in agents)
+        return [f for findings in results for f in findings]
 
-        # ---- Tier 2: senior analysts verify ----
+    def _run_tiers(self, ctx: AgentContext, session) -> dict:
+        # ---- Tier 1: one junior analyst per log source ----
+        sources = sorted({e.source for e in ctx.events})
+        self.tier1 = self._run_all([JuniorSocAnalyst(src) for src in sources], ctx, session)
+
+        # ---- Tier 2: senior analyst confirms or dismisses incidents ----
         senior = SeniorSocAnalyst(name="soc2-lead")
         self._register(senior)
-        self.tier2 = senior.verify(ctx, self.tier1)
-        if self.use_llm:
-            self.tier2 = senior.enrich(ctx, self.tier2)
+        if session is not None:
+            session.stage(ctx, seed=self._seed(self.tier1))
+        self.tier2 = senior.verify(ctx, self.tier1, use_llm=session is not None,
+                                   session=session)
+        self.agent_runs.append(senior.last_run)
 
         # Which incidents did Tier-2 confirm?
         confirmed_ids = {f.incident_id for f in self.tier2
@@ -64,12 +91,21 @@ class SwarmOrchestrator:
             iocs=ctx.iocs, digest=ctx.digest,
             intel_store=ctx.intel_store, backbone=ctx.backbone,
         )
-        for cls in SPECIALISTS:
-            agent = cls()
-            self._register(agent)
-            self.tier3.extend(agent.run(confirmed_ctx, use_llm=self.use_llm))
+        if session is not None:
+            session.stage(confirmed_ctx, seed=self._seed(self.tier1 + self.tier2))
+        self.tier3 = self._run_all([cls() for cls in SPECIALISTS], confirmed_ctx, session)
 
         return self._reconcile(confirmed_ids)
+
+    @staticmethod
+    def _seed(findings: list) -> list:
+        """Earlier tiers' conclusions, handed to the next tier as context."""
+        return [{"id": f.id, "agent": f.agent, "tier": f.tier, "title": f.title,
+                 "status": f.status, "severity": f.severity,
+                 "confidence": f.confidence, "incident_id": f.incident_id,
+                 "attack": f.attack, "evidence": f.evidence[:15],
+                 "rationale": f.rationale[:600]}
+                for f in findings]
 
     def _reconcile(self, confirmed_ids: set) -> dict:
         all_findings = self.tier1 + self.tier2 + self.tier3
@@ -100,7 +136,10 @@ class SwarmOrchestrator:
                 "tier2_findings": len(self.tier2),
                 "tier3_findings": len(self.tier3),
                 "confirmed_incidents": len(confirmed_ids),
+                "autonomous_agents": sum(
+                    1 for r in self.agent_runs if r.get("mode") == "autonomous"),
             },
+            "agent_runs": self.agent_runs,
             "findings": [f.to_dict() for f in all_findings],
             "consensus": list(per_incident.values()),
         }

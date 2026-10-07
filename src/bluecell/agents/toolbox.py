@@ -1,0 +1,483 @@
+# BlueCell - Blue-Team Log Intelligence
+# Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
+# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+"""Investigation tools for the autonomous specialist agents.
+
+These are the agent's hands. The model decides which tool to call, with which
+arguments, and when it has seen enough; Python only executes the call and
+returns the result. Every tool is read-only over the ingested evidence, except:
+
+- ``post_note``      : share a lead with the other agents (shared board),
+- ``submit_finding`` : file a finding, and
+- ``submit_verdict`` : (Tier-2 only) confirm or dismiss an incident.
+Submissions are VALIDATED here: unknown event ids, ATT&CK techniques absent from
+the cited evidence, and indicators that do not appear in the logs are rejected
+with an error the agent must fix.
+
+The same tool registry is served two ways: in-process for the API backbone's
+native tool use, and over MCP (``mcp_server.py``) for the keyless ``claude``
+CLI backbone.
+"""
+from __future__ import annotations
+
+import fcntl
+import json
+import os
+import re
+from collections import Counter
+from datetime import datetime, timezone
+
+from .grounding import evidence_index, check_text, _DOMAIN_RE
+from ..pipeline.attack import ATTACK_TECHNIQUES
+
+_SEVERITIES = ("low", "medium", "high", "critical")
+# Domain-shaped tokens that are really file names ("certutil.exe"), not hosts.
+_FILE_EXTS = {"exe", "dll", "sys", "ps1", "psm1", "bat", "cmd", "vbs", "js", "hta",
+              "msi", "scr", "lnk", "jar", "py", "sh", "log", "txt", "tmp", "dat",
+              "doc", "docx", "docm", "xls", "xlsx", "xlsm", "pdf", "iso", "img"}
+_EVENT_FIELDS = ("source", "category", "action", "host", "user", "process",
+                 "src_ip", "dst_ip", "domain", "file_path", "file_hash")
+
+
+def file_slug(name: str) -> str:
+    """Filesystem-safe form of an agent name ("Security Engineer / Architect")."""
+    return re.sub(r"[^A-Za-z0-9_.-]+", "-", name).strip("-") or "agent"
+
+
+class Blackboard:
+    """Shared, append-only board the agents use to coordinate.
+
+    File-backed (JSONL + flock) so agents running as separate processes see
+    each other's notes and findings while they work.
+    """
+
+    def __init__(self, path: str):
+        self.path = path
+        if not os.path.exists(path):
+            open(path, "a").close()
+
+    def post(self, entry: dict) -> None:
+        entry = dict(entry, ts=datetime.now(timezone.utc).isoformat())
+        with open(self.path, "a", encoding="utf-8") as fh:
+            fcntl.flock(fh, fcntl.LOCK_EX)
+            fh.write(json.dumps(entry) + "\n")
+            fcntl.flock(fh, fcntl.LOCK_UN)
+
+    def read(self) -> list:
+        with open(self.path, "r", encoding="utf-8") as fh:
+            fcntl.flock(fh, fcntl.LOCK_SH)
+            lines = fh.readlines()
+            fcntl.flock(fh, fcntl.LOCK_UN)
+        out = []
+        for line in lines:
+            try:
+                out.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+        return out
+
+
+def _obj(props: dict, required=()) -> dict:
+    return {"type": "object", "properties": props, "required": list(required)}
+
+
+_STR = {"type": "string"}
+_INT = {"type": "integer"}
+
+TOOL_SPECS = [
+    {"name": "case_overview",
+     "description": "Start here. Case summary: event counts per source, time window, "
+                    "correlated incidents (id, score, severity, tactics, hosts, users), "
+                    "IOC counts, and what the Tier-1/Tier-2 analysts concluded.",
+     "input_schema": _obj({})},
+    {"name": "get_incident",
+     "description": "Full detail for one incident: entities, techniques, and its events "
+                    "in time order (one compact line each, prefixed by event_id).",
+     "input_schema": _obj({"incident_id": _STR,
+                           "max_events": dict(_INT, description="default 60")},
+                          ["incident_id"])},
+    {"name": "search_events",
+     "description": "Search ALL ingested events (not just incidents). Every filter is "
+                    "optional and combined with AND. 'text' is a case-insensitive "
+                    "substring match over the message and all fields. Times are ISO-8601.",
+     "input_schema": _obj({"text": _STR, "source": _STR, "host": _STR, "user": _STR,
+                           "ip": dict(_STR, description="matches src_ip or dst_ip"),
+                           "domain": _STR, "process": _STR, "action": _STR,
+                           "technique": dict(_STR, description="ATT&CK id, e.g. T1059"),
+                           "min_severity": dict(_INT, description="0-4"),
+                           "start": _STR, "end": _STR,
+                           "limit": dict(_INT, description="default 40, max 200")})},
+    {"name": "get_event",
+     "description": "Everything known about one event, including the raw source record.",
+     "input_schema": _obj({"event_id": _STR}, ["event_id"])},
+    {"name": "pivot",
+     "description": "Pivot on an entity value (IP, host, user, domain, hash, process) "
+                    "across every field of every event: first/last seen, and counts by "
+                    "source, host, user and action.",
+     "input_schema": _obj({"value": _STR}, ["value"])},
+    {"name": "aggregate",
+     "description": "Count events grouped by one field (e.g. find rare processes or "
+                    "top talkers). Optional source/action filters.",
+     "input_schema": _obj({"group_by": dict(_STR, enum=list(_EVENT_FIELDS)),
+                           "source": _STR, "action": _STR,
+                           "limit": dict(_INT, description="default 25")},
+                          ["group_by"])},
+    {"name": "list_iocs",
+     "description": "Extracted indicators of compromise (ip, domain, hash, process, ...) "
+                    "with counts, hosts, and whether they are tied to flagged activity.",
+     "input_schema": _obj({"kind": _STR, "suspicious_only": {"type": "boolean"}})},
+    {"name": "attack_lookup",
+     "description": "Name and tactic of a MITRE ATT&CK technique, plus the events "
+                    "tagged with it.",
+     "input_schema": _obj({"technique_id": _STR}, ["technique_id"])},
+    {"name": "intel_search",
+     "description": "Search the local threat-intel store (CVEs, advisories, TTPs) by "
+                    "keywords, technique ids, process names, or entities.",
+     "input_schema": _obj({"terms": {"type": "array", "items": _STR}}, ["terms"])},
+    {"name": "read_board",
+     "description": "Read the shared board: notes and findings posted by the other "
+                    "agents working this case.",
+     "input_schema": _obj({})},
+    {"name": "post_note",
+     "description": "Share a lead or question with the other agents on the board "
+                    "(e.g. 'hash X also seen on host Y, malware analyst should look').",
+     "input_schema": _obj({"message": _STR}, ["message"])},
+    {"name": "submit_finding",
+     "description": "File one finding. It is validated against the evidence: evidence "
+                    "must be real event_ids, attack techniques must be tagged on the cited "
+                    "events, and any IP/domain/hash in the text must exist in the logs. "
+                    "If rejected, fix the problem and resubmit.",
+     "input_schema": _obj({
+         "title": _STR,
+         "severity": dict(_STR, enum=list(_SEVERITIES)),
+         "confidence": {"type": "number", "description": "0.0 - 1.0"},
+         "rationale": dict(_STR, description="your reasoning, citing concrete event details"),
+         "evidence": {"type": "array", "items": _STR,
+                      "description": "event_ids that support the finding (at least one)"},
+         "incident_id": _STR,
+         "attack": {"type": "array", "items": _STR},
+         "recommended_action": _STR,
+     }, ["title", "severity", "confidence", "rationale", "evidence"])},
+    {"name": "submit_verdict",
+     "description": "Tier-2 decision on one incident: 'confirmed' (real, escalate to the "
+                    "specialists) or 'dismissed' (not supported by the evidence). Cite the "
+                    "event_ids your decision rests on and list the Tier-1 candidate ids you "
+                    "reviewed. Submitting again for the same incident replaces the verdict.",
+     "input_schema": _obj({
+         "incident_id": _STR,
+         "decision": dict(_STR, enum=["confirmed", "dismissed"]),
+         "confidence": {"type": "number", "description": "0.0 - 1.0"},
+         "severity": dict(_STR, enum=list(_SEVERITIES)),
+         "rationale": _STR,
+         "evidence": {"type": "array", "items": _STR},
+         "reviewed_candidates": {"type": "array", "items": _STR,
+                                 "description": "Tier-1 finding ids (F-...) you reviewed"},
+     }, ["incident_id", "decision", "confidence", "rationale", "evidence"])},
+]
+
+TOOL_NAMES = [t["name"] for t in TOOL_SPECS]
+# Every agent gets these; submit_verdict is granted to Tier-2 only.
+BASE_TOOLS = tuple(n for n in TOOL_NAMES if n != "submit_verdict")
+
+
+def tool_specs(names) -> list:
+    return [t for t in TOOL_SPECS if t["name"] in set(names)]
+
+
+class SecurityToolbox:
+    """Executes tool calls for one agent over the shared AgentContext."""
+
+    def __init__(self, ctx, agent_name: str, role: str, board: Blackboard,
+                 board_seed=None, tools=BASE_TOOLS, source_scope=None):
+        self.ctx = ctx
+        self.agent_name = agent_name
+        self.role = role
+        self.board = board
+        self.board_seed = board_seed or []
+        self.tools = tuple(tools)
+        self.source_scope = source_scope  # Tier-1: findings must cite this source
+        self.findings: list = []          # accepted submit_finding payloads
+        self.verdicts: dict = {}          # incident_id -> accepted submit_verdict
+        self.calls: list = []             # audit trail: (tool, args, ok)
+        self._by_id = {e.event_id: e for e in ctx.events}
+        self._inc = {i.id: i for i in ctx.incidents}
+        techs = {t for e in ctx.events for t in (e.attack or [])}
+        self._index = evidence_index(ctx.events, techs)
+        # Anything domain-shaped that literally occurs in the logs is grounded.
+        for e in ctx.events:
+            self._index["domains"].update(
+                m.lower() for m in _DOMAIN_RE.findall(self._haystack(e)))
+
+    # ---- dispatch -----------------------------------------------------------
+    def call(self, name: str, args: dict | None) -> str:
+        args = args or {}
+        fn = getattr(self, "t_" + name, None)
+        if fn is None or name not in self.tools:
+            self.calls.append({"tool": name, "args": args, "ok": False})
+            return json.dumps({"error": f"unknown tool {name!r}"})
+        try:
+            result = fn(**args)
+            ok = not (isinstance(result, dict) and "error" in result)
+        except TypeError as exc:
+            result, ok = {"error": f"bad arguments: {exc}"}, False
+        except Exception as exc:  # a tool bug must not kill the agent loop
+            result, ok = {"error": f"{type(exc).__name__}: {exc}"}, False
+        self.calls.append({"tool": name, "args": args, "ok": ok})
+        return result if isinstance(result, str) else json.dumps(result, default=str)
+
+    # ---- helpers ------------------------------------------------------------
+    @staticmethod
+    def _line(e) -> str:
+        return f"{e.event_id} sev={e.severity} {e.compact()} | {e.message[:160]}"
+
+    @staticmethod
+    def _ts(value):
+        if not value:
+            return None
+        try:
+            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+
+    def _haystack(self, e) -> str:
+        parts = [e.message or ""] + [str(getattr(e, f) or "") for f in _EVENT_FIELDS]
+        return " ".join(parts).lower()
+
+    def _ungrounded(self, text: str) -> dict:
+        """Indicators in `text` that do not occur in the evidence ({} if none)."""
+        bad = dict(check_text(str(text or ""), self._index)["unverified"])
+        doms = [d for d in bad.pop("domains", [])
+                if d.rsplit(".", 1)[-1] not in _FILE_EXTS]
+        if doms:
+            bad["domains"] = doms
+        return bad
+
+    # ---- read-only investigation tools --------------------------------------
+    def t_case_overview(self):
+        ev = self.ctx.events
+        if not ev:
+            return {"events": 0}
+        return {
+            "events": len(ev),
+            "by_source": dict(Counter(e.source for e in ev)),
+            "window": [min(e.ts for e in ev).isoformat(), max(e.ts for e in ev).isoformat()],
+            "incidents": [{
+                "id": i.id, "score": i.score(), "severity": i.severity_label(),
+                "events": len(i.events), "sources": sorted(i.sources),
+                "tactics": sorted(i.tactics), "techniques": i.techniques,
+                "hosts": sorted(i.hosts), "users": sorted(i.users),
+                "start": i.start.isoformat(), "end": i.end.isoformat(),
+            } for i in self.ctx.incidents],
+            "ioc_counts": {k: len(v) for k, v in (self.ctx.iocs or {}).items()},
+            "earlier_tiers": self.board_seed,
+        }
+
+    def t_get_incident(self, incident_id, max_events=60):
+        inc = self._inc.get(incident_id)
+        if inc is None:
+            return {"error": f"no incident {incident_id!r}; known: {sorted(self._inc)}"}
+        return {
+            "id": inc.id, "score": inc.score(), "severity": inc.severity_label(),
+            "tactics": sorted(inc.tactics), "techniques": inc.techniques,
+            "entities": {k: sorted(map(str, v)) for k, v in inc.entities.items()},
+            "events": [self._line(e) for e in inc.events[:max(1, min(int(max_events), 300))]],
+            "truncated": len(inc.events) > max_events,
+        }
+
+    def t_search_events(self, text=None, source=None, host=None, user=None, ip=None,
+                        domain=None, process=None, action=None, technique=None,
+                        min_severity=None, start=None, end=None, limit=40):
+        lo, hi = self._ts(start), self._ts(end)
+        low = lambda v: str(v).lower() if v is not None else None
+        text, source, host, user, ip, domain, process, action = map(
+            low, (text, source, host, user, ip, domain, process, action))
+        hits = []
+        for e in self.ctx.events:
+            if source and (e.source or "").lower() != source: continue
+            if host and host not in (e.host or "").lower(): continue
+            if user and user not in (e.user or "").lower(): continue
+            if ip and ip not in ((e.src_ip or "") + " " + (e.dst_ip or "")).lower(): continue
+            if domain and domain not in (e.domain or "").lower(): continue
+            if process and process not in (e.process or "").lower(): continue
+            if action and action not in (e.action or "").lower(): continue
+            if technique and technique.upper() not in [t.upper() for t in e.attack]: continue
+            if min_severity is not None and e.severity < int(min_severity): continue
+            if lo and e.ts < lo: continue
+            if hi and e.ts > hi: continue
+            if text and text not in self._haystack(e): continue
+            hits.append(e)
+        limit = max(1, min(int(limit), 200))
+        return {"matches": len(hits), "returned": min(len(hits), limit),
+                "events": [self._line(e) for e in hits[:limit]]}
+
+    def t_get_event(self, event_id):
+        e = self._by_id.get(event_id)
+        if e is None:
+            return {"error": f"no event {event_id!r}"}
+        d = e.to_dict()
+        raw = json.dumps(e.raw, default=str)
+        d["raw"] = raw[:3000] + ("...(truncated)" if len(raw) > 3000 else "")
+        return d
+
+    def t_pivot(self, value):
+        v = str(value).lower()
+        hits = [e for e in self.ctx.events if v in self._haystack(e)]
+        if not hits:
+            return {"value": value, "matches": 0}
+        c = lambda f: dict(Counter(getattr(e, f) or "-" for e in hits).most_common(15))
+        return {"value": value, "matches": len(hits),
+                "first_seen": min(e.ts for e in hits).isoformat(),
+                "last_seen": max(e.ts for e in hits).isoformat(),
+                "by_source": c("source"), "by_host": c("host"),
+                "by_user": c("user"), "by_action": c("action"),
+                "sample": [self._line(e) for e in hits[:15]]}
+
+    def t_aggregate(self, group_by, source=None, action=None, limit=25):
+        if group_by not in _EVENT_FIELDS:
+            return {"error": f"group_by must be one of {list(_EVENT_FIELDS)}"}
+        ev = [e for e in self.ctx.events
+              if (not source or e.source == source) and (not action or e.action == action)]
+        counts = Counter(getattr(e, group_by) or "-" for e in ev)
+        return {"group_by": group_by, "total": len(ev), "distinct": len(counts),
+                "top": counts.most_common(int(limit)),
+                "rarest": sorted(counts.items(), key=lambda kv: kv[1])[:10]}
+
+    def t_list_iocs(self, kind=None, suspicious_only=False):
+        out = {}
+        for k, items in (self.ctx.iocs or {}).items():
+            if kind and k != kind:
+                continue
+            sel = [i for i in items if i.get("suspicious") or not suspicious_only]
+            out[k] = sel[:50]
+        return out
+
+    def t_attack_lookup(self, technique_id):
+        tid = str(technique_id).upper()
+        meta = ATTACK_TECHNIQUES.get(tid)
+        tagged = [e for e in self.ctx.events if tid in [t.upper() for t in e.attack]]
+        return {"id": tid,
+                "name": meta[0] if meta else None,
+                "tactic": meta[1] if meta else None,
+                "in_catalog": bool(meta),
+                "tagged_events": [self._line(e) for e in tagged[:25]]}
+
+    def t_intel_search(self, terms):
+        store = self.ctx.intel_store
+        if store is None:
+            return {"results": [], "note": "no intel store loaded"}
+        if isinstance(terms, str):
+            terms = [terms]
+        return {"results": [{k: r.get(k) for k in
+                             ("id", "title", "summary", "severity", "techniques", "source")}
+                            for r in store.search(terms, limit=8)]}
+
+    def t_read_board(self):
+        return {"entries": self.board.read()}
+
+    def t_post_note(self, message):
+        message = str(message).strip()
+        if not message:
+            return {"error": "empty message"}
+        bad = self._ungrounded(message)
+        if bad:
+            return {"error": "note cites indicators not in the evidence",
+                    "unverified": bad}
+        self.board.post({"kind": "note", "agent": self.agent_name,
+                         "role": self.role, "message": message[:1500]})
+        return {"posted": True}
+
+    def t_submit_finding(self, title, severity, confidence, rationale, evidence,
+                         incident_id=None, attack=None, recommended_action=None):
+        problems = []
+        severity = str(severity).lower()
+        if severity not in _SEVERITIES:
+            problems.append(f"severity must be one of {_SEVERITIES}")
+        try:
+            confidence = float(confidence)
+        except (TypeError, ValueError):
+            confidence = -1
+        if not 0.0 <= confidence <= 1.0:
+            problems.append("confidence must be a number in [0, 1]")
+        if incident_id and incident_id not in self._inc:
+            problems.append(f"unknown incident_id {incident_id!r}")
+        evidence = [str(x) for x in (evidence or [])]
+        cited = [self._by_id[x] for x in evidence if x in self._by_id]
+        unknown = [x for x in evidence if x not in self._by_id]
+        if unknown:
+            problems.append(f"unknown event_ids (not in the logs): {unknown[:10]}")
+        if not cited:
+            problems.append("cite at least one real event_id as evidence")
+        elif self.source_scope and not any(e.source == self.source_scope for e in cited):
+            problems.append(f"you triage the {self.source_scope!r} source: cite at "
+                            f"least one {self.source_scope!r} event")
+        attack = [str(t).upper() for t in (attack or [])]
+        cited_techs = {t.upper() for e in cited for t in e.attack}
+        bad_techs = [t for t in attack if t not in cited_techs]
+        if bad_techs:
+            problems.append(f"techniques {bad_techs} are not tagged on the cited events "
+                            f"(cited events carry {sorted(cited_techs) or 'none'})")
+        for label, text in (("title", title), ("rationale", rationale),
+                            ("recommended_action", recommended_action or "")):
+            bad = self._ungrounded(text)
+            if bad:
+                problems.append(f"{label} cites indicators not in the evidence: {bad}")
+        if problems:
+            return {"error": "finding rejected", "problems": problems}
+        finding = {
+            "title": str(title)[:200], "severity": severity,
+            "confidence": round(confidence, 2), "rationale": str(rationale),
+            "evidence": evidence, "incident_id": incident_id, "attack": attack,
+            "recommended_action": recommended_action,
+        }
+        self.findings.append(finding)
+        self.board.post({"kind": "finding", "agent": self.agent_name, "role": self.role,
+                         "title": finding["title"], "severity": severity,
+                         "incident_id": incident_id})
+        return {"accepted": True, "findings_filed": len(self.findings)}
+
+    def t_submit_verdict(self, incident_id, decision, confidence, rationale, evidence,
+                         severity=None, reviewed_candidates=None):
+        problems = []
+        inc = self._inc.get(incident_id)
+        if inc is None:
+            problems.append(f"unknown incident_id {incident_id!r}; known: {sorted(self._inc)}")
+        decision = str(decision).lower()
+        if decision not in ("confirmed", "dismissed"):
+            problems.append("decision must be 'confirmed' or 'dismissed'")
+        severity = str(severity).lower() if severity else (inc.severity_label() if inc else "low")
+        if severity not in _SEVERITIES:
+            problems.append(f"severity must be one of {_SEVERITIES}")
+        try:
+            confidence = float(confidence)
+        except (TypeError, ValueError):
+            confidence = -1
+        if not 0.0 <= confidence <= 1.0:
+            problems.append("confidence must be a number in [0, 1]")
+        evidence = [str(x) for x in (evidence or [])]
+        unknown = [x for x in evidence if x not in self._by_id]
+        if unknown:
+            problems.append(f"unknown event_ids (not in the logs): {unknown[:10]}")
+        if inc is not None:
+            in_inc = {e.event_id for e in inc.events}
+            if not any(x in in_inc for x in evidence):
+                problems.append(f"cite at least one event_id from {incident_id}")
+        known = {c.get("id") for c in self.board_seed}
+        reviewed = [str(x) for x in (reviewed_candidates or [])]
+        bad = [x for x in reviewed if x not in known]
+        if bad:
+            problems.append(f"unknown candidate ids: {bad[:10]}")
+        ungrounded = self._ungrounded(rationale)
+        if ungrounded:
+            problems.append(f"rationale cites indicators not in the evidence: {ungrounded}")
+        if problems:
+            return {"error": "verdict rejected", "problems": problems}
+        self.verdicts[incident_id] = {
+            "incident_id": incident_id, "decision": decision, "severity": severity,
+            "confidence": round(confidence, 2), "rationale": str(rationale),
+            "evidence": evidence, "reviewed_candidates": reviewed,
+        }
+        self.board.post({"kind": "verdict", "agent": self.agent_name, "role": self.role,
+                         "incident_id": incident_id, "decision": decision,
+                         "confidence": round(confidence, 2)})
+        return {"accepted": True, "verdicts_filed": len(self.verdicts)}
