@@ -34,17 +34,31 @@ CATEGORIES = (
 def _parse_ts(value: Any) -> datetime:
     """Best-effort timestamp parsing -> tz-aware UTC datetime.
 
-    Accepts ISO-8601 (with or without 'Z'), epoch seconds/millis, or falls
-    back to now(). Never raises: a bad timestamp must not crash ingestion.
+    Accepts ISO-8601 (with or without 'Z'), epoch seconds/millis/micros/nanos,
+    compact YYYYMMDDhhmmss, US "1/15/2024 10:22:33 AM", year-less syslog, or
+    falls back to now(). Never raises: a bad timestamp must not crash ingestion.
     """
     if isinstance(value, datetime):
         return _utc(value)
-    if isinstance(value, str) and re.fullmatch(r"\s*\d{9,16}(\.\d+)?\s*", value):
+    if isinstance(value, str) and re.fullmatch(r"\s*\d{14}\s*", value):
+        # Compact "20261003221500" would otherwise be read as epoch millis.
+        try:
+            return datetime.strptime(value.strip(), "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    if isinstance(value, str) and re.fullmatch(r"\s*\d{9,19}(\.\d+)?\s*", value):
         value = float(value)          # epoch stored as text (every CSV value is text)
     if isinstance(value, (int, float)) and not isinstance(value, bool):
-        # Heuristic: values > 1e12 are milliseconds.
+        # Heuristic by magnitude: nanoseconds > 1e17, micros > 1e14, millis > 1e11.
         try:
-            seconds = value / 1000.0 if value > 1_000_000_000_000 else float(value)
+            if value > 1e17:
+                seconds = value / 1e9
+            elif value > 1e14:
+                seconds = value / 1e6
+            elif value > 1e11:
+                seconds = value / 1000.0
+            else:
+                seconds = float(value)
             return datetime.fromtimestamp(seconds, tz=timezone.utc)
         except (OverflowError, OSError, ValueError):
             return datetime.now(timezone.utc)
@@ -56,25 +70,42 @@ def _parse_ts(value: Any) -> datetime:
             except ValueError:
                 continue
         # Common syslog format: "Mmm dd HH:MM:SS" (no year) -> assume current.
-        for fmt in ("%b %d %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+        # Parsed with an explicit year so "Feb 29" works (strptime's default
+        # year 1900 is not a leap year); walk back until it is not in the future.
+        now = datetime.now(timezone.utc)
+        for year in range(now.year, now.year - 8, -1):
             try:
-                dt = datetime.strptime(v, fmt)
+                dt = datetime.strptime(f"{year} {v}", "%Y %b %d %H:%M:%S")
             except ValueError:
                 continue
             dt = dt.replace(tzinfo=timezone.utc)
-            if dt.year == 1900:
-                now = datetime.now(timezone.utc)
-                dt = dt.replace(year=now.year)
-                # "Dec 31" read in January belongs to last year, not this one.
-                if dt > now + timedelta(days=2):
-                    dt = dt.replace(year=now.year - 1)
-            return dt
+            # "Dec 31" read in January belongs to last year, not this one.
+            if dt <= now + timedelta(days=2):
+                return dt
+        # US-style Export-Csv dates (PowerShell / Exchange message trace).
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %H:%M:%S"):
+            try:
+                return datetime.strptime(v, fmt).replace(tzinfo=timezone.utc)
+            except ValueError:
+                continue
     return datetime.now(timezone.utc)
 
 
 def _utc(dt: datetime) -> datetime:
     """Tz-aware UTC; naive values are taken to be UTC already."""
     return dt.astimezone(timezone.utc) if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _raw_digest(raw: Any) -> str:
+    """Deterministic digest of the raw record, so rows differing only in fields
+    the schema does not keep (e.g. dst_port) are not deduplicated together."""
+    if not raw:
+        return ""
+    try:
+        blob = json.dumps(raw, sort_keys=True, default=str)
+    except (TypeError, ValueError):   # mixed-type keys, circular refs
+        blob = repr(raw)
+    return hashlib.sha1(blob.encode("utf-8", "replace")).hexdigest()[:12]
 
 
 # Entity fields that must be strings (JSON may hold numbers, lists or objects).
@@ -127,7 +158,8 @@ class Event:
         """Stable id derived from content — used for dedup and evidence refs."""
         basis = (f"{self.ts.isoformat()}|{self.source}|{self.action}|{self.host}|{self.user}|"
                  f"{self.src_ip}|{self.dst_ip}|{self.domain}|{self.process}|{self.file_hash}|"
-                 f"{self.file_path}|{self.message}")
+                 f"{self.file_path}|{self.message}|{self.category}|{self.severity}|"
+                 f"{_raw_digest(self.raw)}")
         return hashlib.sha1(basis.encode("utf-8", "replace")).hexdigest()[:12]
 
     def entities(self) -> dict:
