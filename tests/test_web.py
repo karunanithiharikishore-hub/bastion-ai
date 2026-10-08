@@ -23,7 +23,7 @@ def server():
     t = threading.Thread(target=httpd.serve_forever, daemon=True)
     t.start()
     yield f"http://127.0.0.1:{port}"
-    httpd.shutdown(); httpd.server_close()
+    httpd.shutdown(); httpd.server_close(); state.close()
 
 
 def _get(url):

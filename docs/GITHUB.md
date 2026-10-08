@@ -84,4 +84,4 @@ Highlights
   kill-chain, agent swarm view) + downloadable Markdown **IR report**.
 - Honest limitations documented; validated against an independent forensic RCA.
 
-76 tests. MIT. Built by Harikishore Karunanithi.
+Covered by a pytest suite. MIT. Built by Harikishore Karunanithi.

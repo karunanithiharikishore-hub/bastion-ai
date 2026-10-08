@@ -36,7 +36,11 @@ const toast = (m) => { const t = $("toast"); t.innerHTML = m; t.classList.remove
 
 /* ================= file intake (drag & drop) ================= */
 const pending = new Map();   // name -> {name, content, size}
-const MAX_FILE = 256 * 1024 * 1024;   // per-file cap (matches server default)
+// The server caps each upload *request* (--max-upload-mb, read from /api/meta);
+// one file per request, JSON-escaped, so leave headroom for the encoding.
+let MAX_UPLOAD_MB = 256;
+const maxFile = () => Math.floor(MAX_UPLOAD_MB * 1024 * 1024 * 0.9);
+let resultId = null;   // id of the analysis on screen (for the IR report download)
 
 function humanSize(n) { return n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB"; }
 
@@ -61,8 +65,8 @@ function addFiles(fileList) {
   let done = 0;
   if (!arr.length) return;
   arr.forEach((file) => {
-    if (file.size > MAX_FILE) {
-      toast(`${esc(file.name)} is ${humanSize(file.size)}, over the ${MAX_FILE / (1024*1024)} MB per-file limit`);
+    if (file.size > maxFile()) {
+      toast(`${esc(file.name)} is ${humanSize(file.size)}, over the ~${humanSize(maxFile())} upload limit (server --max-upload-mb ${MAX_UPLOAD_MB})`);
       done++; if (done === arr.length) renderFileList(); return;
     }
     const reader = new FileReader();
@@ -109,15 +113,16 @@ async function analyzeUploads() {
   const files = Array.from(pending.values());
   try {
     // Staged upload: one file per request, so total batch size never matters.
-    await postJSON("/api/stage/reset", {});
+    // The token keeps this tab's staged files separate from other tabs/clients.
+    const { token } = await postJSON("/api/stage/reset", {});
     let i = 0;
     for (const f of files) {
       i++;
       $("status").innerHTML = `<span class="spinner"></span> uploading ${i}/${files.length}: ${esc(f.name)}`;
-      await postJSON("/api/stage/add", { name: f.name, content: f.content });
+      await postJSON("/api/stage/add", { token, name: f.name, content: f.content });
     }
     $("status").innerHTML = '<span class="spinner"></span> analyzing ' + files.length + ' file(s)…';
-    const data = await postJSON("/api/stage/run", { window: win });
+    const data = await postJSON("/api/stage/run", { token, window: win });
     await mergeMetaAndRender(data);
     $("status").textContent = "analysis complete";
     toast("Analyzed " + files.length + " file(s)");
@@ -181,7 +186,8 @@ function renderPinpointer(r) {
 function renderVerdict(r) {
   const host = $("verdict");
   const inc = (r.incidents || [])[0];
-  if (!inc || !inc.verdict) { host.style.display = "none"; return; }
+  if (!inc || !inc.verdict) { host.style.display = "none";
+    delete document.body.dataset.threat; $("hc-verdict").textContent = "no incidents"; return; }
   host.style.display = "block";
   const v = inc.verdict;
   const cls = v.level === "likely-malicious" ? "malicious"
@@ -414,18 +420,23 @@ function renderIntel(r) {
 function renderAll(r) {
   if (r.error) { toast("" + esc(r.error)); return; }
   $("results").classList.add("show");
+  resultId = (r.meta || {}).result_id || null;
   renderVerdict(r); renderHero(r); renderPinpointer(r); renderSummary(r); renderStage(r); renderSwarm(r);
   renderIncidents(r); renderIocs(r); renderHunt(r); renderIntel(r);
 }
 async function mergeMetaAndRender(data) {
-  try { const m = await (await fetch("/api/meta")).json(); data.meta = Object.assign({}, m, data.meta); } catch (e) {}
+  try { const m = await (await fetch("/api/meta")).json(); data.meta = Object.assign({}, m, data.meta);
+    if (m.max_upload_mb) MAX_UPLOAD_MB = m.max_upload_mb; } catch (e) {}
   renderAll(data); return data;
 }
 async function load(url) {
-  try { const data = await (await fetch(url)).json(); await mergeMetaAndRender(data);
+  try { const res = await fetch(url), data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) throw new Error(data.error || ("HTTP " + res.status));
+    await mergeMetaAndRender(data);
     if ($("status").textContent.includes("loading")) $("status").textContent = "sample loaded";
     return data;
-  } catch (e) { toast("Load failed: " + esc(e)); }
+  } catch (e) { toast("Load failed: " + esc(e.message || e));
+    if ($("status").textContent.includes("loading")) $("status").textContent = "error: " + (e.message || e); }
 }
 
 /* ================= download IR report ================= */
@@ -433,7 +444,7 @@ async function downloadIR() {
   const btn = $("download-ir"); if (!btn) return;
   btn.disabled = true; toast("Building IR report…");
   try {
-    const res = await fetch("/api/report.md");
+    const res = await fetch("/api/report.md" + (resultId ? "?id=" + encodeURIComponent(resultId) : ""));
     if (!res.ok) throw new Error("HTTP " + res.status);
     const blob = await res.blob();
     let fname = "bluecell_IR_report.md";

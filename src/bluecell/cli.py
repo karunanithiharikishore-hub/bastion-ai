@@ -50,6 +50,10 @@ def cmd_analyze(args) -> int:
         if not os.path.exists(p):
             print(f"[bluecell] path not found: {p}", file=sys.stderr)
             return 2
+    out_dir = os.path.dirname(os.path.abspath(args.output)) if args.output else ""
+    if out_dir and not os.path.isdir(out_dir):
+        print(f"[bluecell] output directory not found: {out_dir}", file=sys.stderr)
+        return 2
     backbone = _make_backbone(args.llm, args.model)
     intel = IntelStore(args.intel_db) if args.intel_db else IntelStore()
     result = analyze(
@@ -64,8 +68,12 @@ def cmd_analyze(args) -> int:
     )
     output = render_json(result) if args.format == "json" else render_markdown(result)
     if args.output:
-        with open(args.output, "w", encoding="utf-8") as fh:
-            fh.write(output)
+        try:
+            with open(args.output, "w", encoding="utf-8") as fh:
+                fh.write(output)
+        except OSError as exc:
+            print(f"[bluecell] cannot write report: {exc}", file=sys.stderr)
+            return 2
         print(f"[bluecell] wrote {args.format} report -> {args.output}")
         print(f"[bluecell] {len(result['incidents'])} incident(s), "
               f"{result['meta']['events_ingested']} events, "
@@ -118,9 +126,18 @@ def cmd_intel(args) -> int:
         if not os.path.exists(args.file):
             print(f"[bluecell] file not found: {args.file}", file=sys.stderr)
             return 2
-        with open(args.file, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-        records = data if isinstance(data, list) else data.get("entries", data.get("vulnerabilities", []))
+        try:
+            with open(args.file, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError) as exc:
+            print(f"[bluecell] not a valid JSON feed: {args.file} ({exc})", file=sys.stderr)
+            return 2
+        records = data if isinstance(data, list) else (
+            data.get("entries", data.get("vulnerabilities", [])) if isinstance(data, dict) else None)
+        if not isinstance(records, list):
+            print(f"[bluecell] expected a JSON list or an object with an \"entries\" / "
+                  f"\"vulnerabilities\" list: {args.file}", file=sys.stderr)
+            return 2
         n = store.ingest_cve_feed(records)
         print(f"imported {n} new intel entries (total {len(store.entries)})")
     elif args.intel_cmd == "search":
@@ -138,10 +155,10 @@ def cmd_serve(args) -> int:
             print(f"[bluecell] path not found: {p}", file=sys.stderr)
             return 2
     from .web import serve
-    serve(args.paths, host=args.host, port=args.port, window=args.window,
+    httpd = serve(args.paths, host=args.host, port=args.port, window=args.window,
           llm_mode=args.llm, model=args.model, intel_db=args.intel_db,
           open_browser=args.open, max_upload_mb=args.max_upload_mb)
-    return 0
+    return 0 if httpd is not None else 2
 
 
 def cmd_roster(args) -> int:
@@ -250,8 +267,9 @@ def build_parser() -> argparse.ArgumentParser:
     sv.add_argument("--intel-db", dest="intel_db", help="Path to intel JSON store")
     sv.add_argument("--open", action="store_true", help="Open the browser automatically")
     sv.add_argument("--max-upload-mb", dest="max_upload_mb", type=int, default=256,
-                    help="Per-file upload cap in MB (default 256). Files are uploaded "
-                         "one at a time, so total batch size is limited only by disk.")
+                    help="Upload request-body cap in MB (default 256). The dashboard "
+                         "sends one file per request, JSON-encoded, so this is roughly "
+                         "the largest single file; total batch size is limited only by disk.")
     sv.set_defaults(func=cmd_serve)
 
     ro = sub.add_parser("roster", help="Show the blue-team agent swarm roster")

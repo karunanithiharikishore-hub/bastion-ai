@@ -141,7 +141,7 @@ bluecell serve samples --window 120 --port 8787 --open
 # add --llm auto  to run every swarm agent as an autonomous Claude agent
 ```
 
-A dependency-free local dashboard (binds to `127.0.0.1`, read-only): a futuristic
+A dependency-free local dashboard (binds to `127.0.0.1`; analysis is read-only): a futuristic
 "command deck" with a glassmorphism + neon theme and an animated particle
 background.
 
@@ -159,7 +159,13 @@ with tier-ringed orbiting agents), incidents, IOC tables, a prioritized
 threat-hunt checklist, and matched threat intel.
 
 JSON/HTTP API: `GET /api/report`, `GET /api/refresh`, `GET /api/meta`,
-`POST /api/upload` (`{files:[{name,content}], window}`, 40 MB cap).
+`GET /api/report.md[?id=<meta.result_id>]` (Markdown IR report),
+`POST /api/stage/reset` (returns a `token`) -> `POST /api/stage/add`
+(`{token,name,content}`, one file per request) -> `POST /api/stage/run`
+(`{token,window}`), and the one-shot `POST /api/upload`
+(`{files:[{name,content}], window}`). Each POST body is capped by
+`--max-upload-mb` (default 256 MB, measured on the JSON-encoded body).
+Cross-site requests are refused.
 
 Output is a full incident report: risk-scored incidents, RCA storyline, ATT&CK
 phases, IOCs, and a prioritized hunt checklist. Use `--format json` for machine
@@ -259,7 +265,8 @@ reasoning itself. Its main current weakness is that the evidence brief is
 
 ## Scope & limitations (read this)
 
-- **Deterministic mode vs AI mode.** With `--llm off` (default), the verdict/RCA
+- **Deterministic mode vs AI mode.** With `--llm off` (the `serve` default;
+  `analyze` defaults to `--llm auto`), the verdict/RCA
   come from **rule-based Python** — fast and offline, but shallow: it will miss
   attack patterns it has no rule for. With `--llm auto`, model-driven agents
   (Lead DFIR + Tier-2 reviewer) reason over the evidence and are far stronger,
