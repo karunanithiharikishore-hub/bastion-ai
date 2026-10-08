@@ -133,11 +133,15 @@ def hunt_checklist(incidents: list, iocs: dict) -> list:
                 "why": f"Score {inc.score()}/100 across tactics: {sorted(inc.tactics) or ['n/a']}.",
             })
 
-    if any("T1110" in inc.techniques for inc in incidents):
+    # Only the accounts on the brute-force events themselves, not every user
+    # that happens to share an incident with them.
+    bf_users = sorted({e.user for inc in incidents for e in inc.events
+                       if e.user and "T1110" in e.attack})
+    if bf_users:
         checks.append({
             "priority": "medium",
             "action": "Review accounts targeted by brute force; force password reset + enable MFA",
-            "targets": sorted({u for inc in incidents for u in inc.users}),
+            "targets": bf_users,
             "why": "Brute-force (T1110) detected.",
         })
 

@@ -42,7 +42,9 @@ def analyze(paths, *, source_override=None, window_minutes=60,
     map_attack(events)
 
     digest = compress(events, max_lines=max_digest_lines)
-    incidents = correlate(events, window_minutes=window_minutes)[:max_incidents]
+    incidents = correlate(events, window_minutes=window_minutes)
+    incidents_total = len(incidents)
+    incidents = incidents[:max_incidents]
 
     if intel_store is None:
         try:
@@ -120,6 +122,7 @@ def analyze(paths, *, source_override=None, window_minutes=60,
             "generated": datetime.now(timezone.utc).isoformat(),
             "events_ingested": ingested,
             "events_normalized": len(events),
+            "incidents_total": incidents_total,
             "sources": sorted({e.source for e in events}),
             "backbone": (backbone.resolved if backbone else "none (deterministic)"),
             "digest_tokens": token_estimate(digest),

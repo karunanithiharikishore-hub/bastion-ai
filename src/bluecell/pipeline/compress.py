@@ -23,8 +23,11 @@ def _dedup_with_counts(events: list) -> list:
     representative: dict = {}
     for ev in events:
         # Signature ignores the exact timestamp so bursts collapse, but keeps
-        # the first occurrence's line (with its time) as representative.
-        sig = f"{ev.source}|{ev.action}|{ev.host}|{ev.user}|{ev.dst_ip}|{ev.domain}|{','.join(ev.attack)}"
+        # the first occurrence's line (with its time) as representative. It
+        # covers every field compact() prints, so a collapsed line never hides
+        # a different IP/process/hash behind the representative's value.
+        sig = (f"{ev.source}|{ev.action}|{ev.host}|{ev.user}|{ev.src_ip}|{ev.dst_ip}|"
+               f"{ev.domain}|{ev.process}|{ev.file_hash}|{','.join(ev.attack)}")
         counts[sig] = counts.get(sig, 0) + 1
         representative.setdefault(sig, ev)
     out = []
@@ -39,6 +42,7 @@ def compress(events: list, max_lines: int = 400) -> str:
         return "(no events)"
 
     collapsed = _dedup_with_counts(sorted(events, key=lambda e: e.ts))
+    total_sigs = len(collapsed)
 
     # If over budget, keep the most relevant lines: ATT&CK-tagged and high
     # severity first, but preserve chronological order in the output.
@@ -58,7 +62,10 @@ def compress(events: list, max_lines: int = 400) -> str:
             line += f"  x{n}"
         lines.append(line)
 
-    header = f"# {len(events)} raw events -> {len(lines)} distinct signatures\n"
+    header = f"# {len(events)} raw events -> {total_sigs} distinct signatures"
+    if total_sigs > len(lines):
+        header += f", {total_sigs - len(lines)} omitted (budget)"
+    header += "\n"
     return header + "\n".join(lines)
 
 

@@ -24,6 +24,20 @@ DEFAULT_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.dirname(__file__)))), "data", "intel.json")
 
 
+def _feed_record(rec: dict) -> dict:
+    """Map one CVE-feed record onto the add() entry shape."""
+    return {
+        "id": rec.get("id") or rec.get("cve"),
+        "title": rec.get("title") or rec.get("id") or rec.get("cve"),
+        "summary": rec.get("description") or rec.get("summary", ""),
+        "severity": rec.get("cvss") or rec.get("severity", ""),
+        "keywords": rec.get("keywords", []),
+        "techniques": rec.get("techniques", []),
+        "published": rec.get("published", ""),
+        "source": rec.get("source", "cve-feed"),
+    }
+
+
 class IntelStore:
     def __init__(self, path: str = DEFAULT_PATH):
         self.path = path
@@ -35,8 +49,19 @@ class IntelStore:
         if os.path.exists(self.path):
             try:
                 with open(self.path, "r", encoding="utf-8") as fh:
-                    self.entries = json.load(fh).get("entries", [])
-            except (json.JSONDecodeError, OSError):
+                    data = json.load(fh)
+                # A store file ({"entries": [...]}); a bare feed list (e.g.
+                # feeds/intel_feed.json) is normalized like an import, unsaved.
+                if isinstance(data, dict):
+                    self.entries = [e for e in data.get("entries", []) if isinstance(e, dict)]
+                elif isinstance(data, list):
+                    self.entries = []
+                    for rec in data:
+                        if isinstance(rec, dict):
+                            self.add(_feed_record(rec))
+                else:
+                    self.entries = []
+            except (json.JSONDecodeError, OSError, AttributeError, TypeError, UnicodeDecodeError):
                 self.entries = []
 
     def save(self) -> None:
@@ -57,11 +82,13 @@ class IntelStore:
             return False
         norm = {
             "id": eid,
-            "title": entry.get("title") or entry.get("summary", "")[:120],
-            "summary": entry.get("summary", ""),
+            # Feeds send explicit nulls; coerce them so one record cannot
+            # crash the whole import.
+            "title": str(entry.get("title") or str(entry.get("summary") or "")[:120]),
+            "summary": str(entry.get("summary") or ""),
             "severity": entry.get("severity", entry.get("cvss", "")),
-            "techniques": entry.get("techniques", []),
-            "keywords": [k.lower() for k in entry.get("keywords", [])],
+            "techniques": list(entry.get("techniques") or []),
+            "keywords": [str(k).lower() for k in (entry.get("keywords") or [])],
             "published": entry.get("published", ""),
             "source": entry.get("source", "manual"),
             "added": datetime.now(timezone.utc).isoformat(),
@@ -80,16 +107,7 @@ class IntelStore:
         """Ingest a list of CVE-like dicts. Returns count of new entries."""
         added = 0
         for rec in records:
-            if self.add({
-                "id": rec.get("id") or rec.get("cve"),
-                "title": rec.get("title") or rec.get("id"),
-                "summary": rec.get("description") or rec.get("summary", ""),
-                "severity": rec.get("cvss") or rec.get("severity", ""),
-                "keywords": rec.get("keywords", []),
-                "techniques": rec.get("techniques", []),
-                "published": rec.get("published", ""),
-                "source": rec.get("source", "cve-feed"),
-            }):
+            if self.add(_feed_record(rec)):
                 added += 1
         if added:
             self.save()

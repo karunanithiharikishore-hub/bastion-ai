@@ -47,10 +47,34 @@ _SUS_TLDS = (".xyz", ".top", ".tk", ".gq", ".ml", ".cf", ".ru", ".su", ".info", 
 _LOLBINS = ("powershell", "cmd.exe", "wscript", "cscript", "mshta", "rundll32",
             "regsvr32", "certutil", "bitsadmin", "wmic", "psexec")
 _RANSOM_EXT = (".locked", ".encrypted", ".crypt", ".enc", ".ryk", ".lockbit")
+# CDN / cloud parents whose machine-generated hostnames look random by design.
+_CDN_PARENTS = ("cloudfront.net", "akamaiedge.net", "akamai.net", "azureedge.net",
+                "fastly.net", "edgekey.net", "googleusercontent.com", "amazonaws.com")
+
+# Whole-word rules, so "rdp" in wordpress.com, "smb" in SMBIOS or "at.exe" in
+# chat.exe do not fire.
+_SCHED_RE = re.compile(r"scheduled task|schtasks|crontab|(?:^|[\\/\s\"'])at\.exe\b"
+                       r"|new cron job|cron job created")
+_REMOTE_RE = re.compile(r"psexec|\bwmic\s|\brdp|\bsmb(?!ios)|\bwinrm\b")
+_SEC_TOOL = (r"(?:defender|windefend|mpssvc|antivirus|anti-virus|antimalware|"
+             r"firewall\w*|edr|sysmon|real-?time (?:protection|monitoring)|"
+             r"tamper protection|security (?:service|product|agent|center|software|tool))")
+_DISABLE_VERB = r"(?:disabled?|disabling|stop(?:ped|ping|s)?|uninstall(?:ed|ing)?|turned off)"
+# The verb must act on the tool: "sc stop WinDefend", "stopped Windows Defender
+# service", "Defender real-time protection was disabled", "Set-MpPreference
+# -DisableRealtimeMonitoring" — not "firewall session stop" or "account was disabled".
+_IMPAIR_RE = re.compile(
+    rf"\b{_DISABLE_VERB}\b(?:\s+[\w-]+){{0,2}}?\s+{_SEC_TOOL}\b"
+    rf"|\b{_SEC_TOOL}(?:\s+(?:service|agent|protection))?\s+{_DISABLE_VERB}\b"
+    rf"|\b{_SEC_TOOL}(?:\s+(?!session|connection|flow|traffic)[\w-]+){{0,3}}?"
+    rf"\s+(?:was|is|has been|got|were)\s+{_DISABLE_VERB}\b"
+    r"|set-mppreference\b.*\s-disable\w+")
 
 
 def _looks_dga(domain: str) -> bool:
     """Very rough DGA heuristic: long label, high consonant ratio, digits mixed."""
+    if any(domain == p or domain.endswith("." + p) for p in _CDN_PARENTS):
+        return False
     label = domain.split(".")[0]
     if len(label) < 12:
         return False
@@ -73,10 +97,13 @@ def map_attack(events: list) -> list:
         act = (ev.action or "").lower()
         proc = (ev.process or "").lower()
 
-        # Credential access — failed logins.
-        if ev.category == "authentication" and ("fail" in act or "fail" in msg):
+        # Credential access — failed logins. A success that merely mentions an
+        # earlier failure ("accepted ... after 1 failed attempt") is not one.
+        success = ev.category == "authentication" and (
+            "success" in act or "accepted" in msg or "login_success" in act)
+        if ev.category == "authentication" and not success and ("fail" in act or "fail" in msg):
             _tag(ev, "T1110", "auth-failure")
-        if ev.category == "authentication" and ("success" in act or "accepted" in msg or "login_success" in act):
+        if success:
             ev.tags.append("auth:success")
 
         # DNS-based C2 / DGA / suspicious TLD.
@@ -112,8 +139,7 @@ def map_attack(events: list) -> list:
         # Persistence.
         # Creating/changing a scheduled job, not the scheduler running one
         # ("CRON[123]: (root) CMD (run-parts /etc/cron.hourly)" is routine).
-        if any(t in msg or t in act for t in ("scheduled task", "schtasks", "crontab",
-                                              "at.exe", "new cron job", "cron job created")):
+        if _SCHED_RE.search(msg) or _SCHED_RE.search(act):
             _tag(ev, "T1053", "scheduled-task")
         if any(t in msg or t in act for t in ("new service", "sc create", "systemctl enable")):
             _tag(ev, "T1543", "new-service")
@@ -121,12 +147,12 @@ def map_attack(events: list) -> list:
             _tag(ev, "T1136", "account-created")
 
         # Lateral movement.
-        if any(t in msg or t in proc for t in ("psexec", "wmic ", "rdp", "smb", "winrm")):
+        if _REMOTE_RE.search(msg) or _REMOTE_RE.search(proc):
             _tag(ev, "T1021", "remote-service")
 
-        # Defense evasion — disabling security tooling.
-        if any(t in msg for t in ("disable", "stop", "uninstall")) and any(
-            t in msg for t in ("defender", "antivirus", "firewall", "edr", "security")):
+        # Defense evasion — disabling/stopping a security product or service
+        # (not "account was disabled" from Microsoft-Windows-Security-Auditing).
+        if _IMPAIR_RE.search(msg):
             _tag(ev, "T1562", "impair-defenses")
 
         # Cloud account manipulation.

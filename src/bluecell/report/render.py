@@ -44,6 +44,13 @@ def _override_note(v: dict) -> str:
             f"{_verdict_badge(rv.get('level'))} ({round((rv.get('confidence') or 0) * 100)}%).")
 
 
+def _incident_count(result: dict) -> str:
+    """"15 (showing top 10)" when the report was capped at max_incidents."""
+    shown = len(result["incidents"])
+    total = result["meta"].get("incidents_total", shown)
+    return f"{total} (showing top {shown})" if total > shown else str(total)
+
+
 def render_markdown(result: dict) -> str:
     meta = result["meta"]
     lines = [
@@ -56,7 +63,7 @@ def render_markdown(result: dict) -> str:
         f"- Events ingested: **{meta['events_ingested']}** "
         f"(distinct after normalize: {meta['events_normalized']})",
         f"- Sources: {', '.join(meta['sources']) or 'n/a'}",
-        f"- Incidents found: **{len(result['incidents'])}**",
+        f"- Incidents found: **{_incident_count(result)}**",
         f"- LLM backbone: {meta['backbone']}  |  digest ≈ {meta['digest_tokens']} tokens",
         "",
     ]

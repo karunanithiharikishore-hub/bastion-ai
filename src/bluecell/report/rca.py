@@ -42,7 +42,16 @@ def assess_incident(inc) -> dict:
     has_success = any(_is_success(e) for e in events)
     fail_ct = sum(1 for e in events if _is_fail(e))
     single_source = len(sources) <= 1
-    only_cred = bool(tactics) and tactics.issubset({"credential-access", "authentication"})
+    # Valid Accounts (T1078) on a sign-in is the credential story itself, not
+    # separate defense-evasion/persistence activity.
+    cred_tactics = set()
+    for e in events:
+        for tid in e.attack:
+            if tid == "T1078" and e.category == "authentication":
+                cred_tactics.add("credential-access")
+            elif tid in ATTACK_TECHNIQUES:
+                cred_tactics.update(_split_tactic(ATTACK_TECHNIQUES[tid][1]))
+    only_cred = bool(cred_tactics) and cred_tactics.issubset({"credential-access", "authentication"})
     serious = bool(tactics & {"impact", "exfiltration", "command-and-control", "lateral-movement"})
 
     # Distinct external IPs seen (rough breadth signal).
@@ -62,13 +71,13 @@ def assess_incident(inc) -> dict:
                     f"({inc.score()}/100). That progression is not normal noise."),
             "recommended_checks": list(_ATTACK_CHECKS),
         }
-    if only_cred and not has_success:
+    if only_cred and not has_success and single_source:
         return {
             "level": "likely-benign",
             "confidence": 0.7,
             "headline": "Likely benign failed-login noise, not a confirmed breach.",
             "why": (f"{fail_ct} failed sign-in(s) with NO successful compromise, "
-                    f"single source ({', '.join(sorted(sources)) or 'n/a'}), and no "
+                    f"a single source ({', '.join(sorted(sources)) or 'n/a'}), and no "
                     f"follow-on activity (no lateral movement, C2, or impact). "
                     f"Most common cause: an expired password or a stale cached "
                     f"credential on a device (e.g. a mail client) retrying and "
@@ -161,7 +170,17 @@ def reframe_benign(inc, structured: dict) -> None:
     structured["likely_objective"] = objective
     structured["attack_summary"] = _attack_summary(
         inc, structured.get("patient_zero"), structured.get("phases") or [],
-        objective, framing="benign")
+        objective, framing="benign", tagged=structured.get("patient_zero_tagged", True))
+
+
+def _split_tactic(tactic: str) -> list:
+    """Compound catalog tactics ("defense-evasion/persistence") -> parts."""
+    return [t for t in tactic.split("/") if t] or ["other"]
+
+
+def _patient_zero(events):
+    """First ATT&CK-tagged event, else None (no suspicious starting point)."""
+    return next((e for e in events if e.attack), None)
 
 
 def _tactic_rank(tactic: str) -> int:
@@ -174,15 +193,16 @@ def _tactic_rank(tactic: str) -> int:
 def deterministic_storyline(inc) -> dict:
     """Build a structured, LLM-free storyline for one incident."""
     events = inc.events
-    patient_zero = events[0] if events else None
+    patient_zero = _patient_zero(events)
+    earliest = patient_zero or (events[0] if events else None)
 
     # Group ATT&CK-tagged events into phases by tactic.
     phases = {}
     for ev in events:
         for tid in ev.attack:
             meta = ATTACK_TECHNIQUES.get(tid)
-            tactic = meta[1] if meta else "other"
-            phases.setdefault(tactic, []).append((ev, tid))
+            for tactic in _split_tactic(meta[1] if meta else "other"):
+                phases.setdefault(tactic, []).append((ev, tid))
 
     ordered_phases = []
     # Chronological: the storyline must start with what happened first (the
@@ -205,7 +225,7 @@ def deterministic_storyline(inc) -> dict:
             "techniques": [{"id": t, "name": ATTACK_TECHNIQUES.get(t, ("?",))[0]} for t in tids],
             "first_seen": min(e.ts for e, _t in evs).isoformat(),
             "last_seen": max(e.ts for e, _t in evs).isoformat(),
-            "count": len(evs),
+            "count": len({id(e) for e, _t in evs}),   # events, not (event, technique) pairs
             "example": evs[0][0].compact(),
             "events": samples,
             "hosts": sorted({e.host for e, _t in evs if e.host}),
@@ -233,11 +253,13 @@ def deterministic_storyline(inc) -> dict:
         "affected_hosts": sorted(inc.hosts),
         "affected_users": sorted(inc.users),
         "sources_involved": sorted(inc.sources),
-        "patient_zero": patient_zero.compact() if patient_zero else None,
+        "patient_zero": earliest.compact() if earliest else None,
+        "patient_zero_tagged": patient_zero is not None,
         "phases": ordered_phases,
         "likely_objective": objective,
         "event_count": len(events),
-        "attack_summary": _attack_summary(inc, patient_zero, ordered_phases, objective),
+        "attack_summary": _attack_summary(inc, earliest, ordered_phases, objective,
+                                          tagged=patient_zero is not None),
     }
 
 
@@ -260,7 +282,7 @@ _TACTIC_VERB = {
 
 
 def _attack_summary(inc, patient_zero, ordered_phases, objective,
-                    framing: str = "attack") -> dict:
+                    framing: str = "attack", tagged: bool = True) -> dict:
     """Plain-English 'how they got in and what they did' for non-experts.
 
     ``framing="benign"`` describes the same facts without presuming an attacker,
@@ -272,7 +294,10 @@ def _attack_summary(inc, patient_zero, ordered_phases, objective,
     entry_bits = []
     if patient_zero is not None:
         pz = patient_zero.compact() if hasattr(patient_zero, "compact") else str(patient_zero)
-        entry_bits.append(f"{'Earliest activity' if benign else 'Earliest suspicious activity'}: {pz}.")
+        # Only an ATT&CK-tagged event is called "suspicious".
+        label = ("Earliest activity" if benign else
+                 "Earliest suspicious activity" if tagged else "Earliest related activity")
+        entry_bits.append(f"{label}: {pz}.")
     if entry_phase:
         techs = ", ".join(f"{t['id']} ({t['name']})" for t in entry_phase["techniques"])
         entry_bits.append(
