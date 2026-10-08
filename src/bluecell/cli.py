@@ -8,6 +8,7 @@ Commands:
   serve     Launch the local web dashboard.
   intel     Manage the threat-intel knowledge base (add / import / stats / search).
   roster    Show the blue-team agent swarm roster.
+  plan      Offline cost plan (processes, turn budget) for analyzing some logs.
   info      Show environment + backbone availability + authorship.
 """
 from __future__ import annotations
@@ -61,6 +62,10 @@ def cmd_analyze(args) -> int:
         intel_store=intel,
         run_agents=not args.no_agents,
         use_llm=(args.llm != "off"),
+        cache=("off" if args.no_cache else "refresh" if args.refresh else "use"),
+        votes=args.votes,
+        tier1_model=args.model_tier1,
+        skip_idle_tier1=not args.all_tier1,
     )
     output = render_json(result) if args.format == "json" else render_markdown(result)
     if args.output:
@@ -70,6 +75,7 @@ def cmd_analyze(args) -> int:
         print(f"[bluecell] {len(result['incidents'])} incident(s), "
               f"{result['meta']['events_ingested']} events, "
               f"backbone={result['meta']['backbone']}")
+        _print_cache(result)
         _print_verdicts(result)
         _print_ai(result)
     else:
@@ -100,6 +106,36 @@ def _print_verdicts(result) -> None:
             rule_icon = _VERDICT_ICON.get(rv.get("level"), (rv.get("level") or "?").upper())
             print(f"[bluecell]   (overruled the rule-based score: {rule_icon} "
                   f"{round((rv.get('confidence') or 0) * 100)}%)")
+
+
+def _print_cache(result) -> None:
+    meta = result.get("meta") or {}
+    status = meta.get("cache")
+    if not status or status.startswith("n/a"):
+        return
+    if status == "hit":
+        orig = (meta.get("original_timing_ms") or {}).get("total")
+        print(f"[bluecell] cache: hit (stored {meta.get('cached_at')}; original run "
+              f"{round((orig or 0) / 1000, 1)} s). Use --refresh to re-run.")
+    else:
+        print(f"[bluecell] cache: {status}")
+
+
+def cmd_plan(args) -> int:
+    """Offline: how many claude processes / model turns a run would use."""
+    from .ingest import ingest_paths
+    from .pipeline import normalize, map_attack, correlate
+    from .agents.budget import plan_before_after
+    for p in args.paths:
+        if not os.path.exists(p):
+            print(f"[bluecell] path not found: {p}", file=sys.stderr)
+            return 2
+    events = normalize(ingest_paths(args.paths, args.source))
+    map_attack(events)
+    incidents = correlate(events, window_minutes=args.window)[:args.max_incidents]
+    plan = plan_before_after(events, incidents, votes=args.votes)
+    print(json.dumps(plan, indent=2))
+    return 0
 
 
 def cmd_intel(args) -> int:
@@ -220,6 +256,20 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--format", choices=["markdown", "json"], default="markdown")
     a.add_argument("--output", "-o", help="Write report to file instead of stdout")
     a.add_argument("--intel-db", dest="intel_db", help="Path to intel JSON store")
+    a.add_argument("--model-tier1", dest="model_tier1", default=None,
+                   help="Cheaper model for Tier-1 triage agents, e.g. claude-haiku-4-5 "
+                        "(default: same as --model)")
+    a.add_argument("--votes", type=_positive_int, default=1,
+                   help="Run the Tier-2 verdict K times and majority-vote each incident "
+                        "(default 1; 3 recommended for stable verdicts, ~K x Tier-2 cost)")
+    a.add_argument("--all-tier1", action="store_true", dest="all_tier1",
+                   help="Run a Tier-1 model agent for every source, even sources with "
+                        "no events in any incident (default: rules cover those)")
+    c = a.add_mutually_exclusive_group()
+    c.add_argument("--no-cache", action="store_true", dest="no_cache",
+                   help="Do not read or write the run cache")
+    c.add_argument("--refresh", action="store_true",
+                   help="Re-run even if cached, and overwrite the cached result")
     a.set_defaults(func=cmd_analyze)
 
     it = sub.add_parser("intel", help="Manage threat-intel knowledge base")
@@ -253,6 +303,14 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Per-file upload cap in MB (default 256). Files are uploaded "
                          "one at a time, so total batch size is limited only by disk.")
     sv.set_defaults(func=cmd_serve)
+
+    pl = sub.add_parser("plan", help="Offline cost plan for analyzing some logs")
+    pl.add_argument("paths", nargs="+", help="Log files or directories")
+    pl.add_argument("--source", help="Override source type for all inputs")
+    pl.add_argument("--window", type=_positive_int, default=60)
+    pl.add_argument("--max-incidents", type=_positive_int, default=10, dest="max_incidents")
+    pl.add_argument("--votes", type=_positive_int, default=1)
+    pl.set_defaults(func=cmd_plan)
 
     ro = sub.add_parser("roster", help="Show the blue-team agent swarm roster")
     ro.set_defaults(func=cmd_roster)

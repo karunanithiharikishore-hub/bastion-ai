@@ -24,16 +24,21 @@ from concurrent.futures import ThreadPoolExecutor
 from .base import AgentContext, Finding
 from .roles import JuniorSocAnalyst, SeniorSocAnalyst, SPECIALISTS
 from .runtime import SwarmSession
+from .budget import active_tier1_sources
 
 MAX_PARALLEL_AGENTS = 4
 
 
 class SwarmOrchestrator:
     def __init__(self, ctx: AgentContext, use_llm: bool = True,
-                 max_parallel: int = MAX_PARALLEL_AGENTS):
+                 max_parallel: int = MAX_PARALLEL_AGENTS, votes: int = 1,
+                 tier1_model: str | None = None, skip_idle_tier1: bool = True):
         self.ctx = ctx
         self.use_llm = use_llm
         self.max_parallel = max_parallel
+        self.votes = max(1, int(votes or 1))   # Tier-2 self-consistency runs
+        self.tier1_model = tier1_model         # cheaper model for triage (None = main)
+        self.skip_idle_tier1 = skip_idle_tier1
         self.roster = []          # [{name, role, tier}]
         self.tier1 = []
         self.tier2 = []
@@ -69,11 +74,20 @@ class SwarmOrchestrator:
 
     def _run_tiers(self, ctx: AgentContext, session) -> dict:
         # ---- Tier 1: one junior analyst per log source ----
-        sources = sorted({e.source for e in ctx.events})
-        self.tier1 = self._run_all([JuniorSocAnalyst(src) for src in sources], ctx, session)
+        # Sources with no event in any incident are left to the rules (whose
+        # Tier-1 logic only looks at incident events), saving a model agent each.
+        run, idle = active_tier1_sources(ctx.events, ctx.incidents,
+                                         self.skip_idle_tier1 and session is not None)
+        self.tier1 = self._run_all([JuniorSocAnalyst(src, llm_model=self.tier1_model)
+                                    for src in run], ctx, session)
+        for src in idle:
+            agent = JuniorSocAnalyst(src, llm_model=self.tier1_model)
+            self._register(agent)
+            self.tier1 += agent.skip(ctx, "no incident events")
+            self.agent_runs.append(agent.last_run)
 
         # ---- Tier 2: senior analyst confirms or dismisses incidents ----
-        senior = SeniorSocAnalyst(name="soc2-lead")
+        senior = SeniorSocAnalyst(name="soc2-lead", votes=self.votes)
         if ctx.incidents:
             self._register(senior)
         if session is not None:
@@ -158,13 +172,16 @@ class SwarmOrchestrator:
             },
             "agent_runs": self.agent_runs,
             "tier3_skipped": self.tier3_skipped,
+            "settings": {"votes": self.votes, "tier1_model": self.tier1_model,
+                         "skip_idle_tier1": self.skip_idle_tier1},
             "findings": [f.to_dict() for f in all_findings],
             "consensus": list(per_incident.values()),
         }
 
 
 def run_swarm(events, incidents, iocs, digest, intel_store=None,
-              backbone=None, use_llm: bool = True) -> dict:
+              backbone=None, use_llm: bool = True, **options) -> dict:
+    """``options``: votes, tier1_model, skip_idle_tier1 (see SwarmOrchestrator)."""
     ctx = AgentContext(events=events, incidents=incidents, iocs=iocs,
                        digest=digest, intel_store=intel_store, backbone=backbone)
-    return SwarmOrchestrator(ctx, use_llm=use_llm).run()
+    return SwarmOrchestrator(ctx, use_llm=use_llm, **options).run()

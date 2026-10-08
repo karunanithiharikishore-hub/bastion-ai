@@ -144,6 +144,7 @@ def apply_tier2_verdict(rule_verdict: dict, tier2: dict) -> dict:
         "why": tier2.get("rationale", ""),
         "recommended_checks": checks,
         "decided_by": "tier2-agent",
+        **({"votes": tier2["votes"]} if tier2.get("votes") else {}),
         "overrides_rules": level != rule_verdict.get("level"),
         "rule_verdict": {k: rule_verdict.get(k) for k in ("level", "confidence", "headline")},
     }

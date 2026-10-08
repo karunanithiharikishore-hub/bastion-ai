@@ -19,6 +19,7 @@ from ..pipeline.attack import ATTACK_TECHNIQUES
 from ..pipeline.ioc import hunt_checklist
 from .runtime import AutonomousAgent
 from .toolbox import BASE_TOOLS
+from .voting import tally
 
 
 # ---------------------------------------------------------------------------
@@ -28,7 +29,6 @@ class JuniorSocAnalyst(AutonomousAgent):
     """Triages one log source and raises candidates for Tier-2."""
     role = "Tier-1 SOC Analyst"
     tier = 1
-    default_max_turns = 16
     mission = """Mission: you are the Tier-1 analyst who owns the {source!r} log source.
     Triage it: go through the {source} events (search_events with source={source!r},
     aggregate by action/host/user/process), separate the malicious or suspicious
@@ -91,6 +91,13 @@ class SeniorSocAnalyst(AutonomousAgent):
     not. List the candidate ids you reviewed. Confirmed incidents go to the
     Tier-3 specialists, so be decisive and explain the deciding evidence."""
 
+    # A split vote leaves the rule verdict in place at no more than this confidence.
+    SPLIT_VOTE_MAX_CONFIDENCE = 0.5
+
+    def __init__(self, *a, votes: int = 1, **kw):
+        super().__init__(*a, **kw)
+        self.votes = max(1, int(votes or 1))
+
     def verify(self, ctx: AgentContext, tier1: list, use_llm: bool = False,
                session=None) -> list:
         """Return Tier-2 verdict findings, and mark the Tier-1 candidates."""
@@ -104,7 +111,10 @@ class SeniorSocAnalyst(AutonomousAgent):
                              "mode": "not run (no incidents)", "error": None,
                              "findings_filed": 0}
             return []
-        if use_llm and ctx.backbone is not None and session is not None:
+        tallied = {}
+        if use_llm and ctx.backbone is not None and session is not None and self.votes > 1:
+            agent_verdicts, tallied = self._vote(ctx, session)
+        elif use_llm and ctx.backbone is not None and session is not None:
             try:
                 self.investigate(ctx, session)
                 agent_verdicts = {v["incident_id"]: v for v in self.verdicts}
@@ -120,10 +130,20 @@ class SeniorSocAnalyst(AutonomousAgent):
         for inc in ctx.incidents:
             cands = by_incident.get(inc.id, [])
             v = agent_verdicts.get(inc.id)
+            record = (tallied.get(inc.id) or {}).get("votes")
             if v is not None:
-                verified.append(self._apply_verdict(inc, v, cands, by_id))
+                f = self._apply_verdict(inc, v, cands, by_id)
+                f.votes = record or {}
+                verified.append(f)
             elif cands:
-                verified.append(self._rule_verdict(inc, cands))
+                f = self._rule_verdict(inc, cands)
+                if record and (record["confirmed"] or record["dismissed"]):
+                    # Split vote: the model runs disagreed, so the rules decide
+                    # and the verdict is flagged low-confidence for review.
+                    f.votes = dict(record, needs_review=True)
+                    f.confidence = min(f.confidence, self.SPLIT_VOTE_MAX_CONFIDENCE)
+                    f.title += " (split Tier-2 vote; needs review)"
+                verified.append(f)
         if self.last_run.get("mode") == "autonomous":
             notes = []
             by_rules = [f.incident_id for f in verified if f.origin == "rules"]
@@ -137,6 +157,58 @@ class SeniorSocAnalyst(AutonomousAgent):
                 self.last_run["note"] = "; ".join(notes)
         self.last_run["findings_filed"] = len(verified)
         return verified
+
+    def _vote(self, ctx: AgentContext, session):
+        """Run the Tier-2 agent ``self.votes`` times from the same starting board
+        and majority-vote each incident (see voting.py)."""
+        snapshot = session.board_snapshot()
+        ballots, runs = [], []
+        for i in range(self.votes):
+            session.board_restore(snapshot)   # no run sees another run's verdicts
+            self.last_run = {}
+            try:
+                self.investigate(ctx, session)
+                ballots.append({v["incident_id"]: v for v in self.verdicts})
+            except Exception as exc:
+                ballots.append(None)
+                self.last_run = dict(self.last_run or {}, error=str(exc))
+            runs.append(dict(self.last_run, vote=i + 1))
+        session.board_restore(snapshot)
+        tallied = tally(ballots, [inc.id for inc in ctx.incidents])
+        for iid, res in tallied.items():
+            if res["verdict"] is not None:
+                session.board.post({"kind": "verdict", "agent": self.name, "role": self.role,
+                                    "incident_id": iid, "decision": res["decision"],
+                                    "confidence": res["verdict"]["confidence"],
+                                    "votes": res["votes"]})
+        completed = [r for r, b in zip(runs, ballots) if b is not None]
+        errors = [f"vote {r['vote']}: {r['error']}" for r in runs if r.get("error")]
+        costs = [r["cost_usd"] for r in runs if r.get("cost_usd") is not None]
+        self.last_run = {
+            "agent": self.name, "role": self.role, "tier": self.tier,
+            "mode": "autonomous" if completed else "fallback (rules)",
+            "backbone": ctx.backbone.resolved,
+            "model": self.llm_model or ctx.backbone.model,
+            "max_turns": self.max_turns,
+            "truncated": any(r.get("truncated") for r in runs),
+            "turns": sum(r.get("turns") or 0 for r in runs),
+            "tool_calls": sum(r.get("tool_calls") or 0 for r in runs),
+            "tools_used": sorted({t for r in runs for t in r.get("tools_used", [])}),
+            "rejected_submissions": sum(r.get("rejected_submissions") or 0 for r in runs),
+            "summary": "\n---\n".join(f"[vote {r['vote']}] {r.get('summary', '')}"
+                                      for r in completed),
+            "cost_usd": round(sum(costs), 6) if costs else None,
+            "error": "; ".join(errors) or None,
+            "trace": [dict(c, vote=r["vote"]) for r in runs for c in r.get("trace", [])],
+            "votes": {"k": self.votes, "completed": len(completed),
+                      "per_incident": {iid: res["votes"] for iid, res in tallied.items()}},
+            "vote_runs": [{k: r.get(k) for k in ("vote", "turns", "tool_calls",
+                                                  "truncated", "error")}
+                          for r in runs],
+        }
+        verdicts = {iid: res["verdict"] for iid, res in tallied.items()
+                    if res["verdict"] is not None}
+        return verdicts, tallied
 
     def _apply_verdict(self, inc, v: dict, cands: list, by_id: dict) -> Finding:
         confirmed = v["decision"] == "confirmed"

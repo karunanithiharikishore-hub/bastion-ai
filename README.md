@@ -88,6 +88,86 @@ takes well under a second.
 The orchestrator reconciles all tiers into a per-incident **consensus**. See the
 roster any time: `bluecell roster`.
 
+## Repeatability & cost
+
+LLM output is **not bit-identical** from run to run, and the same logs can get
+a different Tier-2 verdict on a borderline case. BlueCell does four things
+about that. None of them makes the model deterministic.
+
+**1. Deterministic decoding where the backbone allows it.** On the API path
+every call (agent tool loops, the AI analyst, the RCA narrative) is sent with
+`temperature: 0`. That narrows the variation but does not remove it: the API
+does not promise identical output at temperature 0, and agent runs branch on
+tool results. The `claude` CLI has **no temperature, seed or sampling option**
+(checked against `claude --help`, Claude Code 2.1.x), so CLI runs use the
+CLI's default sampling. The report's `meta.repeatability.sampling` says which
+applied. The deterministic pipeline (parsing, correlation, ATT&CK tags, IOCs,
+scores, rule verdicts) is fully deterministic on every path.
+
+**2. Run cache: the same input gives the same result.** The first complete LLM run is
+stored under `~/.bluecell/cache/<key>.json` (or `$BLUECELL_CACHE_DIR`). The key
+is a sha256 over every normalized event (id and content), the model and Tier-1
+model, the backbone path and temperature, the BlueCell version, the
+prompt/mission texts, the tool schemas, the source of the LLM code path, the
+threat-intel store, and the orchestration settings (window, incident cap,
+votes, budgets). If any of these changes, the key changes. When you run it
+again on the same logs with the same configuration, you get the stored result
+instantly (`meta.cache = "hit"`, with `original_timing_ms` and
+`original_generated`). `--refresh` re-runs and overwrites the stored result, and
+`--no-cache` neither reads nor writes it.
+A run is **never stored** if any agent errored or fell back to rules, an agent
+hit its turn budget, the AI analyst/reviewer call failed, or an LLM narrative
+failed. `meta.cache` then says `miss (not stored: <reason>)`. Runs
+without an LLM (`--llm off`) are not cached: they are already deterministic
+and take under a second, and caching them would only risk serving stale
+output. The cache guarantees that you get the same result back. It does not
+guarantee that the stored result is correct, and a `--refresh` can produce a
+different one.
+
+**3. Stable verdicts by self-consistency voting.** The Tier-2 confirm/dismiss
+decision drives the headline. `--votes K` runs the Tier-2 agent K times. Each
+run starts from the same board, so no run sees another run's verdicts. Each
+incident is then decided by a strict majority of the completed runs. The
+Tier-2 finding and the run record carry the tally (`votes`: confirmed,
+dismissed, abstained, failed, agreement). Confidence is the mean winning
+confidence times the agreement, so a 2-1 vote reads lower than a 3-0. A split
+(1-1, or no majority because runs abstained) uses no agent verdict: the
+rule verdict stands at confidence ≤ 0.5 and is marked
+`needs_review` / "split Tier-2 vote". The default is `--votes 1`, so cost does
+not change. **We recommend `--votes 3`**: it costs about 3x the Tier-2 agent (one of
+13 agents, run one vote after another), and it turns a coin-flip verdict into a
+2-1 vote with lower confidence instead of a confident flip.
+
+**4. Lower cost per run.**
+- `--llm auto` now **prefers the API when `ANTHROPIC_API_KEY` is set**. Every
+  agent then runs as an in-process tool loop, with no `claude` process and no MCP
+  server per agent. Without a key it uses the keyless CLI. `--llm cli` forces
+  the CLI.
+- Per-tier turn caps: Tier-1 10, Tier-2 20, Tier-3 18. The old caps were 16/24/24.
+- Tool results are capped at 12,000 characters, and `read_board` returns the
+  newest 60 entries, so one broad query cannot bloat every later turn.
+- `--model-tier1 claude-haiku-4-5` runs the Tier-1 triage agents on a smaller
+  model. Tier-2 verdicts and the specialists keep `--model`.
+- Tier-1 agents are skipped for sources with no event in any incident (run
+  record: `skipped (no incident events)`). Rules cover those sources. Tier-3's
+  Threat Hunter still searches all events. `--all-tier1` turns this off.
+- `bluecell plan <logs> [--votes K]` prints an offline before/after estimate.
+  On both bundled sample sets (5 sources, 1 incident, every source is in the
+  incident, so nothing is skipped): **before** 16 `claude` processes
+  (13 agents + 1 narrative + 2 analyst calls), 13 MCP servers, and at most 272
+  agent turns. **After** with `--votes 1`, the same 16 processes and at most 196 turns
+  (-28%). With `--votes 3`, 18 processes and at most 236 turns. On the API driver
+  the same work starts 0 processes. On a cache hit it makes 0 model calls.
+
+**Why not one long-lived `claude` process for all agents?** A CLI session
+fixes its system prompt, MCP servers and tool allow-list at launch. BlueCell's
+MCP server is bound to one agent's name, tools and source scope. A multi-turn
+`--input-format stream-json` session also carries the whole earlier
+conversation into every later turn. Sharing a process would leak one agent's
+reasoning into the next, which breaks independent votes and the per-agent
+grounding scope, and would grow every later agent's context. So each agent
+keeps its own process. The API driver is the way to avoid per-agent processes.
+
 ## Authorship & integrity
 
 Built by **Harikishore Karunanithi**. Licensed MIT — you may use and share it,
@@ -178,7 +258,7 @@ lead/reviewer verdict, and the **RCA narrative**, via one of two paths
 | `api` | Anthropic API via `ANTHROPIC_API_KEY` | Headless / scheduled runs |
 
 ```bash
-bluecell analyze samples --llm auto      # prefer CLI, then API, then deterministic
+bluecell analyze samples --llm auto      # prefer API (if ANTHROPIC_API_KEY), then CLI, then deterministic
 bluecell analyze samples --llm off       # fully deterministic (no model)
 bluecell analyze samples --llm api --model claude-sonnet-5
 ```
@@ -215,6 +295,7 @@ src/bluecell/
   llm/                 Hybrid Claude backbone (cli | api)
   report/              RCA storyline + Markdown/JSON renderers
   analyzer.py          End-to-end orchestrator
+  cache.py             Run cache (repeatable results for identical inputs + config)
   cli.py               Command-line interface
 scripts/update_intel.py  Scheduled NVD CVE ingester
 samples/                 Example multi-source attack chain
