@@ -25,7 +25,7 @@ import json
 import os
 import re
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from .grounding import evidence_index, check_text, _DOMAIN_RE
 from ..pipeline.attack import ATTACK_TECHNIQUES
@@ -52,6 +52,13 @@ def _as_int(value, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _as_bool(value) -> bool:
+    """Model-supplied boolean; "false"/"0"/"no" strings are False."""
+    if isinstance(value, str):
+        return value.strip().lower() not in ("", "false", "0", "no", "off", "none", "null")
+    return bool(value)
 
 
 def file_slug(name: str) -> str:
@@ -246,14 +253,17 @@ class SecurityToolbox:
         return f"{e.event_id} sev={e.severity} {e.compact()} | {e.message[:160]}"
 
     @staticmethod
-    def _ts(value):
+    def _ts(value, end_of_day=False):
         if not value:
             return None
         try:
             dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
         except ValueError:
             return None
+        if end_of_day and re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(value).strip()):
+            # A date-only end bound covers that whole day, not just its midnight.
+            dt += timedelta(days=1, microseconds=-1)
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
     def _haystack(self, e) -> str:
         parts = [e.message or ""] + [str(getattr(e, f) or "") for f in _EVENT_FIELDS]
@@ -299,7 +309,7 @@ class SecurityToolbox:
     def t_search_events(self, text=None, source=None, host=None, user=None, ip=None,
                         domain=None, process=None, action=None, technique=None,
                         min_severity=None, start=None, end=None, limit=40):
-        lo, hi = self._ts(start), self._ts(end)
+        lo, hi = self._ts(start), self._ts(end, end_of_day=True)
         if min_severity is not None:
             sev = _SEV_NAMES.get(str(min_severity).lower())
             min_severity = sev if sev is not None else _as_int(min_severity, None)
@@ -360,6 +370,7 @@ class SecurityToolbox:
                 "rarest": sorted(counts.items(), key=lambda kv: kv[1])[:10]}
 
     def t_list_iocs(self, kind=None, suspicious_only=False):
+        suspicious_only = _as_bool(suspicious_only)
         out = {}
         for k, items in (self.ctx.iocs or {}).items():
             if kind and k != kind:
@@ -392,7 +403,7 @@ class SecurityToolbox:
         return {"entries": self.board.read()}
 
     def t_post_note(self, message):
-        message = str(message).strip()
+        message = str(message or "").strip()
         if not message:
             return {"error": "empty message"}
         bad = self._ungrounded(message)

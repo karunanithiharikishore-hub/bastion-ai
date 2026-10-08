@@ -14,6 +14,7 @@ This is deterministic, offline, and cheap.
 """
 from __future__ import annotations
 
+import json
 import re
 
 _IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
@@ -67,6 +68,16 @@ def evidence_index(events, valid_techniques) -> dict:
             hashes.add(h.lower())
         for d in _DOMAIN_RE.findall(msg):
             domains.add(d.lower())
+        # ...and the raw source record, which agents can read via get_event.
+        raw = getattr(e, "raw", None)
+        if raw:
+            raw = raw if isinstance(raw, str) else json.dumps(raw, default=str)
+            for ip in _IP_RE.findall(raw):
+                ips.add(ip.lower())
+            for h in _HASH_RE.findall(raw):
+                hashes.add(h.lower())
+            for d in _DOMAIN_RE.findall(raw):
+                domains.add(d.lower())
     return {"ips": ips, "domains": domains, "hashes": hashes,
             "hosts": hosts, "users": users,
             "techniques": {t.upper() for t in (valid_techniques or [])}}
@@ -87,11 +98,13 @@ def check_text(text: str, index: dict) -> dict:
     unverified = {}
     bad_ips = sorted(found_ips - index["ips"])
     bad_hashes = sorted(found_hashes - index["hashes"])
-    # A domain counts as grounded if it (or a parent) appears in evidence domains.
+    # A domain counts as grounded if it appears in the evidence (as a domain or
+    # an FQDN host) or is a parent of an evidence domain. A subdomain of an
+    # evidence domain is NOT grounded: "stage2.evil.top" is not "evil.top".
+    known = index["domains"] | index.get("hosts", set())
     bad_domains = sorted(d for d in found_domains
-                         if d not in index["domains"]
-                         and not any(d.endswith("." + kd) or kd.endswith("." + d)
-                                     for kd in index["domains"]))
+                         if d not in known
+                         and not any(kd.endswith("." + d) for kd in known))
     bad_tech = sorted(found_tech - index["techniques"])
 
     if bad_ips:

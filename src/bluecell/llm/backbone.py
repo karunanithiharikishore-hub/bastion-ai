@@ -20,6 +20,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import urllib.request
 import urllib.error
 
@@ -83,21 +84,28 @@ class LLMBackbone:
         return self._complete_api(prompt, system, max_tokens)
 
     def _complete_cli(self, prompt: str, system: str | None) -> str:
-        cmd = ["claude", "-p"]
+        # Same isolation as the agent runtime: the prompt carries log-controlled
+        # text, so no built-in tools, no user MCP servers/hooks/settings, and an
+        # empty cwd (no project CLAUDE.md, nothing local to read).
+        cmd = ["claude", "-p", "--tools", "", "--strict-mcp-config",
+               "--setting-sources", "project", "--no-session-persistence"]
         if self.model:
             cmd += ["--model", self.model]
         if system:
             cmd += ["--append-system-prompt", system]
         try:
-            proc = subprocess.run(
-                cmd, input=prompt, capture_output=True, text=True,
-                timeout=self.timeout,
-            )
+            with tempfile.TemporaryDirectory(prefix="bluecell-llm-") as cwd:
+                proc = subprocess.run(
+                    cmd, input=prompt, capture_output=True, text=True,
+                    timeout=self.timeout, cwd=cwd,
+                )
         except (subprocess.TimeoutExpired, OSError) as exc:
             raise BackboneUnavailable(f"claude CLI failed: {exc}") from exc
         if proc.returncode != 0:
+            # The CLI prints some failures (e.g. usage limits) on stdout.
+            reason = (proc.stderr or "").strip() or (proc.stdout or "").strip()
             raise BackboneUnavailable(
-                f"claude CLI exited {proc.returncode}: {proc.stderr.strip()[:200]}")
+                f"claude CLI exited {proc.returncode}: {reason[:200]}")
         return proc.stdout.strip()
 
     def _complete_api(self, prompt: str, system: str | None,

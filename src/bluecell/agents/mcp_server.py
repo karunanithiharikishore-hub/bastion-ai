@@ -45,8 +45,14 @@ def _flush(box: SecurityToolbox, out_path: str) -> None:
     os.replace(tmp, out_path)
 
 
+def _error(mid, code: int, message: str) -> dict:
+    return {"jsonrpc": "2.0", "id": mid, "error": {"code": code, "message": message}}
+
+
 def handle(msg: dict, box: SecurityToolbox, out_path: str):
     """Return the JSON-RPC response for one message, or None for notifications."""
+    if not isinstance(msg, dict):
+        return _error(None, -32600, "invalid request: expected a JSON object")
     method, mid = msg.get("method"), msg.get("id")
     if mid is None:
         return None
@@ -61,13 +67,17 @@ def handle(msg: dict, box: SecurityToolbox, out_path: str):
         result = {"tools": _tools_for_mcp(box.tools)}
     elif method == "tools/call":
         params = msg.get("params") or {}
-        text = box.call(params.get("name", ""), params.get("arguments") or {})
+        if not isinstance(params, dict) or not isinstance(params.get("name"), str):
+            return _error(mid, -32602, "invalid params: 'name' must be a string")
+        args = params.get("arguments") or {}
+        if not isinstance(args, dict):
+            return _error(mid, -32602, "invalid params: 'arguments' must be an object")
+        text = box.call(params["name"], args)
         _flush(box, out_path)
         is_error = text.startswith('{"error"')
         result = {"content": [{"type": "text", "text": text}], "isError": is_error}
     else:
-        return {"jsonrpc": "2.0", "id": mid,
-                "error": {"code": -32601, "message": f"method not found: {method}"}}
+        return _error(mid, -32601, f"method not found: {method}")
     return {"jsonrpc": "2.0", "id": mid, "result": result}
 
 
@@ -98,7 +108,11 @@ def main(argv=None) -> int:
             msg = json.loads(line)
         except json.JSONDecodeError:
             continue
-        resp = handle(msg, box, out_path)
+        try:
+            resp = handle(msg, box, out_path)
+        except Exception as exc:  # one bad message must not kill the server
+            mid = msg.get("id") if isinstance(msg, dict) else None
+            resp = _error(mid, -32603, f"internal error: {type(exc).__name__}: {exc}")
         if resp is not None:
             sys.stdout.write(json.dumps(resp) + "\n")
             sys.stdout.flush()

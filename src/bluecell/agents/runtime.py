@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import os
 import pickle
+import re
 import shutil
 import subprocess
 import sys
@@ -35,6 +36,9 @@ from .toolbox import Blackboard, SecurityToolbox, BASE_TOOLS, file_slug, tool_sp
 MCP_SERVER = "bluecell"
 DEFAULT_MAX_TURNS = 24
 DEFAULT_TIMEOUT = 900   # seconds per agent
+
+# Agent errors that will hit every later agent too (account usage/session limits).
+_LIMIT_RE = re.compile(r"\b(?:usage|session|rate)[ _-]?limit|limit reached", re.I)
 
 _SRC_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -83,6 +87,9 @@ class SwarmSession:
     def __init__(self, ctx: AgentContext, seed: list):
         self.dir = tempfile.mkdtemp(prefix="bluecell-swarm-")
         self.board = Blackboard(os.path.join(self.dir, "board.jsonl"))
+        # Set once an agent hits a usage/session limit: later agents skip the
+        # model and fall back to rules instead of launching doomed processes.
+        self.halted: str | None = None
         self.stage(ctx, seed)
 
     def stage(self, ctx: AgentContext, seed: list) -> None:
@@ -141,13 +148,19 @@ def _run_cli(agent, session: SwarmSession, backbone, max_turns: int,
             except json.JSONDecodeError:
                 continue
             if msg.get("type") == "result":
-                summary = msg.get("result") or ""
+                text = msg.get("result") or ""
                 turns = msg.get("num_turns")
                 cost = msg.get("total_cost_usd")
-                if msg.get("is_error") and msg.get("subtype") != "error_max_turns":
-                    error = f"agent ended with {msg.get('subtype')}: {summary[:200]}"
-        if proc.returncode != 0 and not summary:
-            error = f"claude exited {proc.returncode}: {proc.stderr.strip()[:300]}"
+                subtype = msg.get("subtype")
+                if msg.get("is_error") and subtype != "error_max_turns":
+                    kind = f" ({subtype})" if subtype and subtype != "success" else ""
+                    error = f"agent error{kind}: {text[:200]}"
+                else:
+                    summary = text
+        if proc.returncode != 0 and not summary and error is None:
+            # The CLI prints some failures (e.g. usage limits) on stdout.
+            reason = (proc.stderr or "").strip() or (proc.stdout or "").strip()
+            error = f"claude exited {proc.returncode}: {reason[:300]}"
     except (subprocess.TimeoutExpired, OSError) as exc:
         error = f"{type(exc).__name__}: {exc}"
 
@@ -225,9 +238,13 @@ class AutonomousAgent(Agent):
         return self.mission
 
     def investigate(self, ctx: AgentContext, session: SwarmSession) -> list:
+        if session.halted:
+            raise RuntimeError(f"skipped: {session.halted}")
         backbone = ctx.backbone
         driver = _run_cli if backbone.resolved == "cli" else _run_api
         run = driver(self, session, backbone, self.max_turns, self.timeout)
+        if run["error"] and _LIMIT_RE.search(run["error"]):
+            session.halted = f"model limit hit by {self.name} ({run['error'][:200]})"
         findings = [Finding(agent=self.name, role=self.role, tier=self.tier,
                             title=f["title"], severity=f["severity"],
                             confidence=f["confidence"], rationale=f["rationale"],

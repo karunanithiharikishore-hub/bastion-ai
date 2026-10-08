@@ -46,12 +46,15 @@ def test_hallucinated_technique_flagged():
     assert "T1486" in res["unverified"]["techniques"]
 
 
-def test_domain_subdomain_is_grounded():
+def test_domain_subdomain_is_not_grounded():
     idx = evidence_index(_events(), ["T1071.004"])
-    # a subdomain of an evidence domain should count as grounded
-    txt = "Beacon to sub.evil.top observed."
-    res = check_text(txt, idx)
-    assert "domains" not in res["unverified"]
+    # a fabricated subdomain of an evidence domain is NOT grounded...
+    res = check_text("Beacon to sub.evil.top observed.", idx)
+    assert res["unverified"] == {"domains": ["sub.evil.top"]}
+    # ...but a parent of an evidence domain still is.
+    idx = evidence_index(_events(), ["T1071.004"])
+    idx["domains"] = {"cdn.evil.top"}
+    assert check_text("Beacon to evil.top observed.", idx)["ok"]
 
 
 def test_file_names_are_not_treated_as_domains():

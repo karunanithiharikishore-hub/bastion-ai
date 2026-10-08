@@ -141,7 +141,10 @@ class SeniorSocAnalyst(AutonomousAgent):
     def _apply_verdict(self, inc, v: dict, cands: list, by_id: dict) -> Finding:
         confirmed = v["decision"] == "confirmed"
         status = "confirmed" if confirmed else "dismissed"
-        reviewed = {by_id[i].id for i in v["reviewed_candidates"] if i in by_id}
+        # A verdict only decides candidates of its own incident (or unattached
+        # ones): agents often list every candidate they read as "reviewed".
+        reviewed = {by_id[i].id for i in v["reviewed_candidates"] if i in by_id
+                    and by_id[i].incident_id in (None, inc.id)}
         for c in cands + [by_id[i] for i in reviewed]:
             if self.name not in c.verified_by:
                 c.status = status
@@ -171,7 +174,8 @@ class SeniorSocAnalyst(AutonomousAgent):
         conf = 0.9 if (multi_source and has_attack) else 0.7 if confirmed else 0.3
         for c in cands:
             c.status = status
-            c.verified_by.append(self.name)
+            if self.name not in c.verified_by:
+                c.verified_by.append(self.name)
         return Finding(
             agent=self.name, role=self.role, tier=2,
             title=f"Incident {inc.id} {'CONFIRMED' if confirmed else 'not corroborated'}",
