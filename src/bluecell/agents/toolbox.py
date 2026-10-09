@@ -223,6 +223,10 @@ class SecurityToolbox:
             self._index["domains"].update(
                 m.lower() for m in _DOMAIN_RE.findall(self._haystack(e)))
 
+    def specs(self) -> list:
+        """Tool specs (name, description, input_schema) this agent is offered."""
+        return tool_specs(self.tools)
+
     # ---- dispatch -----------------------------------------------------------
     def call(self, name: str, args: dict | None) -> str:
         args = args or {}

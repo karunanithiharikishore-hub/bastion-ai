@@ -33,10 +33,12 @@ _CTYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset
 
 class _State:
     """Holds launch config + the most recent analysis result (thread-safe)."""
-    def __init__(self, paths, window, llm_mode, model, intel_db, max_upload_mb=256):
+    def __init__(self, paths, window, llm_mode, model, intel_db, max_upload_mb=256,
+                 orchestration="auto"):
         self.paths = paths
         self.window = window
         self.llm_mode = llm_mode
+        self.orchestration = orchestration
         self.model = model
         self.intel_db = intel_db
         self.max_upload = max(1, int(max_upload_mb)) * 1024 * 1024  # per-request cap
@@ -60,6 +62,7 @@ class _State:
             paths, window_minutes=window,
             backbone=self._backbone(), intel_store=intel,
             run_agents=True, use_llm=(self.llm_mode != "off"),
+            orchestration=self.orchestration,
         )
 
     def run_analysis(self) -> dict:
@@ -339,10 +342,11 @@ def _make_handler(state: _State):
 
 def serve(paths, host="127.0.0.1", port=8787, window=60, llm_mode="off",
           model="claude-sonnet-5", intel_db=None, open_browser=False,
-          max_upload_mb=256):
+          max_upload_mb=256, orchestration="auto"):
     """Start the dashboard server (blocking). Returns the httpd if non-blocking use is needed."""
     provenance.enforce(strict=True)
-    state = _State(paths, window, llm_mode, model, intel_db, max_upload_mb=max_upload_mb)
+    state = _State(paths, window, llm_mode, model, intel_db, max_upload_mb=max_upload_mb,
+                   orchestration=orchestration)
     state.run_analysis()  # warm the cache at startup
     httpd = ThreadingHTTPServer((host, port), _make_handler(state))
     url = f"http://{host}:{port}"

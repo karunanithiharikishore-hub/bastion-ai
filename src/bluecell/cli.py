@@ -61,6 +61,7 @@ def cmd_analyze(args) -> int:
         intel_store=intel,
         run_agents=not args.no_agents,
         use_llm=(args.llm != "off"),
+        orchestration=args.orchestration,
     )
     output = render_json(result) if args.format == "json" else render_markdown(result)
     if args.output:
@@ -140,7 +141,8 @@ def cmd_serve(args) -> int:
     from .web import serve
     serve(args.paths, host=args.host, port=args.port, window=args.window,
           llm_mode=args.llm, model=args.model, intel_db=args.intel_db,
-          open_browser=args.open, max_upload_mb=args.max_upload_mb)
+          open_browser=args.open, max_upload_mb=args.max_upload_mb,
+          orchestration=args.orchestration)
     return 0
 
 
@@ -148,6 +150,8 @@ def cmd_roster(args) -> int:
     # Build a static roster preview from the role classes.
     from .agents.roles import SPECIALISTS
     rows = [
+        ("0", "soc-lead", "SOC Lead / Incident Commander (plans + deploys the "
+                          "agents below; --orchestration commander)"),
         ("1", "soc1-<source>", "Tier-1 SOC Analyst (one per log source)"),
         ("2", "soc2-lead", "Tier-2 SOC Analyst (verification/confirmation)"),
     ]
@@ -198,6 +202,12 @@ def cmd_info(args) -> int:
     return 0
 
 
+ORCH_HELP = ("How the agent swarm is organised: 'commander' = an LLM Incident "
+             "Commander decides which agents to deploy; 'fixed' = Tier-1 -> Tier-2 "
+             "-> Tier-3; 'auto' (default) = commander when a model backbone is "
+             "available, fixed otherwise.")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="bluecell",
@@ -220,6 +230,8 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--format", choices=["markdown", "json"], default="markdown")
     a.add_argument("--output", "-o", help="Write report to file instead of stdout")
     a.add_argument("--intel-db", dest="intel_db", help="Path to intel JSON store")
+    a.add_argument("--orchestration", choices=["auto", "commander", "fixed"],
+                   default="auto", help=ORCH_HELP)
     a.set_defaults(func=cmd_analyze)
 
     it = sub.add_parser("intel", help="Manage threat-intel knowledge base")
@@ -252,6 +264,8 @@ def build_parser() -> argparse.ArgumentParser:
     sv.add_argument("--max-upload-mb", dest="max_upload_mb", type=int, default=256,
                     help="Per-file upload cap in MB (default 256). Files are uploaded "
                          "one at a time, so total batch size is limited only by disk.")
+    sv.add_argument("--orchestration", choices=["auto", "commander", "fixed"],
+                    default="auto", help=ORCH_HELP)
     sv.set_defaults(func=cmd_serve)
 
     ro = sub.add_parser("roster", help="Show the blue-team agent swarm roster")

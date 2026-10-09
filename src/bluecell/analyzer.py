@@ -31,7 +31,8 @@ _VERDICT_RANK = {"likely-malicious": 0, "needs-review": 1, "likely-benign": 2}
 
 def analyze(paths, *, source_override=None, window_minutes=60,
             max_incidents=10, backbone=None, intel_store=None,
-            max_digest_lines=400, run_agents=True, use_llm=True):
+            max_digest_lines=400, run_agents=True, use_llm=True,
+            orchestration="auto"):
     """Run the pipeline (and, by default, the agent swarm). Returns a result dict."""
     import time
     _t0 = time.perf_counter()
@@ -77,7 +78,7 @@ def analyze(paths, *, source_override=None, window_minutes=60,
     if run_agents:
         swarm = run_swarm(events, incidents, iocs, digest,
                           intel_store=intel_store, backbone=backbone,
-                          use_llm=use_llm)
+                          use_llm=use_llm, orchestration=orchestration)
     swarm_ms = int((time.perf_counter() - _t_swarm0) * 1000)
 
     # The headline follows the Tier-2 agent's confirm/dismiss decision when there
@@ -132,6 +133,7 @@ def analyze(paths, *, source_override=None, window_minutes=60,
                 "total": total_ms,
             },
             "agents_deployed": (swarm["agent_count"] if swarm else 0),
+            "orchestration": (swarm.get("orchestration") if swarm else None),
         },
         "incidents": incident_blocks,
         "iocs": iocs,
