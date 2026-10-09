@@ -40,14 +40,24 @@ def active_tier1_sources(events, incidents, skip_idle: bool = True):
 
 def plan_swarm(events, incidents, *, votes: int = 1, skip_idle_tier1: bool = True,
                tier_turns: dict | None = None, n_specialists: int = 7,
-               analyst_calls: int = 2) -> dict:
+               analyst_calls: int = 2, orchestration: str | None = None,
+               commander_limits: dict | None = None) -> dict:
     """Offline estimate for one LLM run (CLI driver).
 
     processes  : ``claude`` processes started (agents + narrative + analyst calls)
     mcp_servers: BlueCell MCP server processes (one per CLI agent run)
     max_turns  : upper bound on model turns across all agent runs
     In API mode the same turns run in-process: processes and mcp_servers are 0.
+
+    ``orchestration="commander"``: the Incident Commander decides the workers, so
+    the plan is a ceiling from its guardrails (``commander_limits``: max_agents,
+    max_commander_turns), assuming every deploy is the most expensive worker and
+    every Tier-2 verifier deploy runs ``votes`` times. The fixed-flow estimate is
+    included for comparison under ``fixed_flow``.
     """
+    if orchestration == "commander":
+        return plan_commander(events, incidents, votes=votes, tier_turns=tier_turns,
+                              analyst_calls=analyst_calls, **(commander_limits or {}))
     turns = dict(tier_turns or TIER_MAX_TURNS)
     run, skipped = active_tier1_sources(events, incidents, skip_idle_tier1)
     t2_runs = max(1, votes) if incidents else 0
@@ -65,10 +75,38 @@ def plan_swarm(events, incidents, *, votes: int = 1, skip_idle_tier1: bool = Tru
     }
 
 
-def plan_before_after(events, incidents, votes: int = 1) -> dict:
-    """The plan for the legacy configuration next to the current one."""
+def plan_commander(events, incidents, *, votes: int = 1, tier_turns: dict | None = None,
+                   analyst_calls: int = 2, max_agents: int = 15,
+                   max_commander_turns: int = 30, budget_seconds: float = 3600) -> dict:
+    """Ceiling for a commander-led run (see ``plan_swarm``)."""
+    turns = dict(tier_turns or TIER_MAX_TURNS)
+    votes = max(1, votes)
+    # Worst case per deploy: a Tier-2 verifier voting K times, else a Tier-3 run.
+    per_deploy = max(turns[2] * votes, turns[3], turns[1])
+    runs_per_deploy = votes if incidents else 1
+    agent_runs = 1 + max_agents * runs_per_deploy
+    narrative = len(incidents)
+    return {
+        "orchestration": "commander",
+        "commander_turns": max_commander_turns,
+        "max_agents": max_agents, "budget_seconds": budget_seconds,
+        "agent_runs_max": agent_runs,
+        "processes_max": agent_runs + narrative + (analyst_calls if events else 0),
+        "mcp_servers_max": agent_runs,
+        "max_turns": max_commander_turns + max_agents * per_deploy,
+        "turn_caps": dict(turns, commander=max_commander_turns),
+        "fixed_flow": plan_swarm(events, incidents, votes=votes, tier_turns=tier_turns,
+                                 analyst_calls=analyst_calls),
+    }
+
+
+def plan_before_after(events, incidents, votes: int = 1, commander_limits: dict | None = None) -> dict:
+    """The plan for the legacy configuration next to the current one, plus the
+    Incident Commander's ceiling (``--orchestration commander``/``auto``)."""
     return {
         "before": plan_swarm(events, incidents, votes=1, skip_idle_tier1=False,
                              tier_turns=LEGACY_TIER_MAX_TURNS),
         "after": plan_swarm(events, incidents, votes=votes),
+        "commander_ceiling": plan_commander(events, incidents, votes=votes,
+                                            **(commander_limits or {})),
     }

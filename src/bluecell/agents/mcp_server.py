@@ -11,6 +11,11 @@ delimited JSON-RPC 2.0, implementing initialize, tools/list and tools/call.
     python -m bluecell.agents.mcp_server --session DIR --agent NAME --role ROLE \
         [--tools a,b,c] [--source-scope SOURCE]
 
+With ``--commander`` the server also offers the Incident Commander's dispatch
+tools (deploy_agent, ...); it cannot run agents itself, so those calls are
+relayed to the parent orchestrator through files in ``DIR/dispatch/`` (see
+``dispatch.py``) and the tool call blocks until the workers finish.
+
 ``DIR`` holds ``ctx.pkl`` (the pickled AgentContext written by the runtime) and
 ``board.jsonl`` (the shared board). ``--tools`` limits which tools this agent
 is offered (default: every tool except Tier-2's submit_verdict). Accepted
@@ -26,15 +31,16 @@ import os
 import pickle
 import sys
 
-from .toolbox import Blackboard, SecurityToolbox, BASE_TOOLS, file_slug, tool_specs
+from .dispatch import CommanderToolbox, FileDispatchClient
+from .toolbox import Blackboard, SecurityToolbox, BASE_TOOLS, file_slug
 
 SERVER_NAME = "bluecell"
 DEFAULT_PROTOCOL = "2025-06-18"
 
 
-def _tools_for_mcp(names) -> list:
+def _tools_for_mcp(box: SecurityToolbox) -> list:
     return [{"name": t["name"], "description": t["description"],
-             "inputSchema": t["input_schema"]} for t in tool_specs(names)]
+             "inputSchema": t["input_schema"]} for t in box.specs()]
 
 
 def _flush(box: SecurityToolbox, out_path: str) -> None:
@@ -64,7 +70,7 @@ def handle(msg: dict, box: SecurityToolbox, out_path: str):
     elif method == "ping":
         result = {}
     elif method == "tools/list":
-        result = {"tools": _tools_for_mcp(box.tools)}
+        result = {"tools": _tools_for_mcp(box)}
     elif method == "tools/call":
         params = msg.get("params") or {}
         if not isinstance(params, dict) or not isinstance(params.get("name"), str):
@@ -88,15 +94,24 @@ def main(argv=None) -> int:
     ap.add_argument("--role", required=True)
     ap.add_argument("--tools", default=",".join(BASE_TOOLS))
     ap.add_argument("--source-scope", default=None)
+    ap.add_argument("--commander", action="store_true",
+                    help="serve the Incident Commander's dispatch tools; dispatch "
+                         "calls are forwarded to the parent via DIR/dispatch/")
+    ap.add_argument("--dispatch-timeout", type=float, default=3900.0)
     args = ap.parse_args(argv)
 
     with open(os.path.join(args.session, "ctx.pkl"), "rb") as fh:
         state = pickle.load(fh)
     board = Blackboard(os.path.join(args.session, "board.jsonl"))
-    box = SecurityToolbox(state["ctx"], args.agent, args.role, board,
-                          board_seed=state.get("seed"),
-                          tools=[t for t in args.tools.split(",") if t],
-                          source_scope=args.source_scope)
+    kw = dict(board_seed=state.get("seed"),
+              tools=[t for t in args.tools.split(",") if t],
+              source_scope=args.source_scope)
+    if args.commander:
+        box = CommanderToolbox(state["ctx"], args.agent, args.role, board,
+                               dispatch=FileDispatchClient(args.session,
+                                                           args.dispatch_timeout), **kw)
+    else:
+        box = SecurityToolbox(state["ctx"], args.agent, args.role, board, **kw)
     out_path = os.path.join(args.session, f"{file_slug(args.agent)}.out.json")
     _flush(box, out_path)
 

@@ -46,6 +46,23 @@ def _override_note(v: dict) -> str:
             f"{_verdict_badge(rv.get('level'))} ({round((rv.get('confidence') or 0) * 100)}%).")
 
 
+def _votes_note(v: dict) -> str:
+    """"Tier-2 vote: 2 confirmed / 1 dismissed (agreement 67%)" or ''."""
+    votes = v.get("votes") or {}
+    if not votes:
+        return ""
+    out = (f"Tier-2 vote: {votes.get('confirmed', 0)} confirmed / "
+           f"{votes.get('dismissed', 0)} dismissed")
+    extra = [f"{votes[k]} {k}" for k in ("abstained", "failed") if votes.get(k)]
+    if extra:
+        out += f" ({', '.join(extra)})"
+    if votes.get("agreement") is not None:
+        out += f", agreement {round(votes['agreement'] * 100)}%"
+    if votes.get("needs_review"):
+        out += "; split vote, the rule verdict stands and needs review"
+    return out + "."
+
+
 def _incident_count(result: dict) -> str:
     """"15 (showing top 10)" when the report was capped at max_incidents."""
     shown = len(result["incidents"])
@@ -85,6 +102,8 @@ def render_markdown(result: dict) -> str:
 
     if not result["incidents"]:
         lines.append("_No correlated incidents crossed the reporting threshold._")
+        if (result.get("prompt_injection") or {}).get("count"):
+            lines += ["", _render_injection(result.get("prompt_injection"))]
         if swarm:
             lines += ["", _render_swarm(swarm)]
         lines += ["", _render_trace(meta), "---", _footer()]
@@ -104,6 +123,8 @@ def render_markdown(result: dict) -> str:
     ]
     if _override_note(tv):
         lines += [f"_{_override_note(tv)}_", ""]
+    if _votes_note(tv):
+        lines += [f"_{_votes_note(tv)}_", ""]
     benign = asum.get("framing") == "benign"
     lines += [
         f"**{'How it started' if benign else 'How they got in'}:** "
@@ -144,6 +165,8 @@ def render_markdown(result: dict) -> str:
             ]
             if _override_note(v):
                 lines.append(f"> _{_override_note(v)}_  ")
+            if _votes_note(v):
+                lines.append(f"> _{_votes_note(v)}_  ")
             lines += [
                 f"> {v['why']}",
                 "",
@@ -276,8 +299,44 @@ def _footer() -> str:
             f"{provenance.COPYRIGHT}_")
 
 
+def _render_commander(swarm: dict) -> list:
+    """Who decided the plan, and (for the Incident Commander) every decision."""
+    cmd = swarm.get("commander")
+    orch = swarm.get("orchestration") or "fixed"
+    if orch != "commander" and not (cmd and cmd.get("fallback_reason")):
+        return []
+    out = [f"**Orchestration:** {orch}"
+           + (" (the Incident Commander agent decided which agents to deploy)"
+              if orch == "commander" else " (fixed Tier-1 -> Tier-2 -> Tier-3 flow)")]
+    if cmd and cmd.get("fallback_reason"):
+        out.append(f"- Commander not used: {cmd['fallback_reason']}; "
+                   "fell back to the fixed tiered flow.")
+    plan = (cmd or {}).get("plan") or []
+    if plan:
+        out.append("")
+        out.append("**Incident Commander decisions:**")
+        for i, step in enumerate(plan, 1):
+            if step["action"] == "deploy":
+                target = step.get("incident_id") or step.get("source")
+                line = (f"{i}. deploy `{step['agent']}` ({step['role']}"
+                        + (f", {target}" if target else "") + f"): {step.get('reason') or ''}")
+                if step.get("objective"):
+                    line += f" · objective: {step['objective']}"
+                line += f" → {step.get('outcome', '')}"
+            elif step["action"] == "refused":
+                line = f"{i}. deploy refused: {step.get('error')}"
+            else:
+                line = f"{i}. {step['action']}"
+            out.append(line)
+    if cmd and cmd.get("summary") and orch == "commander":
+        out += ["", f"**Incident Commander summary:** {cmd['summary']}"]
+    out.append("")
+    return out
+
+
 def _render_swarm(swarm: dict) -> str:
     out = ["## Agent Swarm - findings & consensus\n"]
+    out += _render_commander(swarm)
     out.append(f"**Roster ({swarm['agent_count']} agents):**")
     for a in swarm["roster"]:
         out.append(f"- T{a['tier']} `{a['name']}` - {a['role']}")

@@ -23,7 +23,8 @@ from .report.rca import (
 )
 from .intel import IntelStore
 from .agents import run_swarm, ai_analyze
-from .agents import budget
+from .agents import budget, commander
+from .agents.orchestrator import ORCHESTRATIONS
 from .agents import injection
 from . import provenance
 from . import cache as run_cache
@@ -46,7 +47,8 @@ def analyze(paths, *, trace=None, **kwargs):
         paths, persist=trace,
         backbone=(backbone.resolved if backbone else "none"),
         model=getattr(backbone, "model", None),
-        use_llm=kwargs.get("use_llm", True), run_agents=kwargs.get("run_agents", True))
+        use_llm=kwargs.get("use_llm", True), run_agents=kwargs.get("run_agents", True),
+        orchestration=kwargs.get("orchestration", "auto"))
     try:
         result = _analyze(paths, **kwargs)
     except BaseException as exc:
@@ -59,13 +61,21 @@ def analyze(paths, *, trace=None, **kwargs):
 def _analyze(paths, *, source_override=None, window_minutes=60,
              max_incidents=10, backbone=None, intel_store=None,
              max_digest_lines=400, run_agents=True, use_llm=True,
-             cache=None, votes=1, tier1_model=None, skip_idle_tier1=True):
+             cache=None, votes=1, tier1_model=None, skip_idle_tier1=True,
+             orchestration="auto", max_agents=None, max_commander_turns=None,
+             budget_seconds=None):
     """cache: None/"off" (no cache), "use" (return a stored result for the same
     inputs + config, store complete new runs) or "refresh" (always run, then
     overwrite). Only LLM runs are cached; see cache.py.
-    votes: Tier-2 self-consistency runs (majority vote per incident).
+    votes: Tier-2 self-consistency runs (majority vote per incident); with the
+    Incident Commander it applies to every tier2-verifier it deploys.
     tier1_model: model for Tier-1 triage agents (None = the backbone's model).
-    skip_idle_tier1: no Tier-1 model agent for sources with no incident events.
+    skip_idle_tier1: no Tier-1 model agent for sources with no incident events
+    (fixed flow; the commander chooses its own Tier-1 deploys).
+    orchestration: "auto" (Incident Commander when a model backbone is
+    available, else fixed), "commander" or "fixed". max_agents /
+    max_commander_turns / budget_seconds: the commander's guardrails (None =
+    the defaults in agents/commander.py).
     """
     import time
     _t0 = time.perf_counter()
@@ -98,8 +108,17 @@ def _analyze(paths, *, source_override=None, window_minutes=60,
     checklist = hunt_checklist(incidents, iocs)
 
     llm_on = use_llm and backbone is not None
+    if orchestration not in ORCHESTRATIONS:
+        raise ValueError(f"orchestration must be one of {ORCHESTRATIONS}, got {orchestration!r}")
+    commander_limits = {
+        "max_agents": int(max_agents or commander.DEFAULT_MAX_AGENTS),
+        "max_commander_turns": int(max_commander_turns or commander.DEFAULT_COMMANDER_TURNS),
+        "budget_seconds": float(budget_seconds or commander.DEFAULT_BUDGET_SECONDS),
+    }
+    # Everything that shapes the swarm goes into the run-cache key below.
     swarm_options = {"votes": max(1, int(votes or 1)), "tier1_model": tier1_model,
-                     "skip_idle_tier1": skip_idle_tier1}
+                     "skip_idle_tier1": skip_idle_tier1, "orchestration": orchestration,
+                     **commander_limits}
     cache_mode = cache if cache in run_cache.MODES else "off"
     cache_key = material = None
     cache_note = "n/a (deterministic run)" if not llm_on else cache_mode
@@ -152,7 +171,13 @@ def _analyze(paths, *, source_override=None, window_minutes=60,
     if swarm:
         tier2 = {f["incident_id"]: f for f in swarm["findings"]
                  if f["tier"] == 2 and f.get("origin") == "agent"}
+        # A split Tier-2 vote leaves the rule verdict in place; show the tally.
+        split = {f["incident_id"]: f["votes"] for f in swarm["findings"]
+                 if f["tier"] == 2 and f.get("origin") != "agent"
+                 and (f.get("votes") or {}).get("needs_review")}
         for block in incident_blocks:
+            if block["id"] in split:
+                block["verdict"] = dict(block["verdict"], votes=split[block["id"]])
             if block["id"] in tier2:
                 inj = [e["event_id"] for e in block["events"]
                        if injection.INJECTION_TAG in (e.get("tags") or [])]
@@ -203,6 +228,7 @@ def _analyze(paths, *, source_override=None, window_minutes=60,
                 "total": total_ms,
             },
             "agents_deployed": (swarm["agent_count"] if swarm else 0),
+            "orchestration": (swarm.get("orchestration") if swarm else None),
             "repeatability": {
                 "sampling": getattr(backbone, "sampling", None) if llm_on else "n/a (no LLM)",
                 "votes": swarm_options["votes"],
@@ -211,7 +237,9 @@ def _analyze(paths, *, source_override=None, window_minutes=60,
             },
             "cost_plan": (budget.plan_swarm(events, incidents,
                                             votes=swarm_options["votes"],
-                                            skip_idle_tier1=skip_idle_tier1)
+                                            skip_idle_tier1=skip_idle_tier1,
+                                            orchestration=(swarm or {}).get("orchestration"),
+                                            commander_limits=commander_limits)
                           if run_agents and llm_on else None),
             "cache": cache_note,
         },

@@ -243,7 +243,11 @@ def aggregate(cases: list) -> dict:
 # Runner
 # ---------------------------------------------------------------------------
 def run_case(case: dict, *, repeat: int = 1, analyze_fn=None, backbone=None,
-             use_llm: bool = False, trace=None) -> dict:
+             use_llm: bool = False, trace=None, options: dict | None = None) -> dict:
+    """Analyze one case ``repeat`` times. Only the case's log files are passed
+    (never expected.json); the run cache is off so every repetition is a real
+    run. ``options`` are extra analyze() keyword arguments (orchestration,
+    votes, tier1_model, commander limits)."""
     if analyze_fn is None:
         from .analyzer import analyze as analyze_fn
     runs = []
@@ -257,7 +261,7 @@ def run_case(case: dict, *, repeat: int = 1, analyze_fn=None, backbone=None,
             t0 = time.perf_counter()
             try:
                 result = analyze_fn(case["files"], backbone=backbone, use_llm=use_llm,
-                                    trace=trace)
+                                    trace=trace, **dict(options or {}, cache="off"))
                 obs = observe(result)
             except Exception as exc:
                 rec.update(error=f"{type(exc).__name__}: {exc}")
@@ -288,14 +292,14 @@ def run_case(case: dict, *, repeat: int = 1, analyze_fn=None, backbone=None,
 
 def run_eval(cases_dir: str = DEFAULT_CASES, *, names=None, repeat: int = 1,
              llm: str = "off", backbone=None, analyze_fn=None, trace=None,
-             progress=None) -> dict:
+             progress=None, options: dict | None = None) -> dict:
     """Run every case and return the report dict (schema ``bluecell.eval/1``)."""
     cases = load_cases(cases_dir, names)
     use_llm = llm != "off" and backbone is not None
     results = []
     for c in cases:
         r = run_case(c, repeat=repeat, analyze_fn=analyze_fn, backbone=backbone,
-                     use_llm=use_llm, trace=trace)
+                     use_llm=use_llm, trace=trace, options=options)
         results.append(r)
         if progress:
             progress(r)
@@ -304,7 +308,8 @@ def run_eval(cases_dir: str = DEFAULT_CASES, *, names=None, repeat: int = 1,
         "generated": datetime.now(timezone.utc).isoformat(),
         "config": {"cases_dir": cases_dir, "llm": llm,
                    "backbone": (backbone.resolved if backbone else "none (rules)"),
-                   "model": getattr(backbone, "model", None), "repeat": repeat},
+                   "model": getattr(backbone, "model", None), "repeat": repeat,
+                   "options": {k: v for k, v in (options or {}).items() if v is not None}},
         "summary": aggregate(results),
         "cases": results,
     }

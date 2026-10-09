@@ -43,10 +43,14 @@ class _State:
     _KEEP_RESULTS = 8    # recent results kept so /api/report.md?id= matches the screen
     _MAX_STAGES = 32     # concurrent staging slots (oldest is dropped beyond this)
 
-    def __init__(self, paths, window, llm_mode, model, intel_db, max_upload_mb=256):
+    def __init__(self, paths, window, llm_mode, model, intel_db, max_upload_mb=256,
+                 orchestration="auto", votes=1, tier1_model=None):
         self.paths = paths
         self.window = window
         self.llm_mode = llm_mode
+        self.orchestration = orchestration   # auto | commander | fixed
+        self.votes = max(1, int(votes or 1))  # Tier-2 self-consistency runs
+        self.tier1_model = tier1_model
         self.model = model
         self.intel_db = intel_db
         self.max_upload_mb = max(1, int(max_upload_mb))
@@ -71,6 +75,8 @@ class _State:
             paths, window_minutes=window,
             backbone=self._backbone(), intel_store=intel,
             run_agents=True, use_llm=(self.llm_mode != "off"),
+            orchestration=self.orchestration, votes=self.votes,
+            tier1_model=self.tier1_model,
         )
 
     def _run(self, paths, window):
@@ -308,6 +314,8 @@ def _make_handler(state: _State):
                     "paths": state.paths, "window": state.window,
                     "llm_mode": state.llm_mode,
                     "max_upload_mb": state.max_upload_mb,
+                    "orchestration": state.orchestration, "votes": state.votes,
+                    "tier1_model": state.tier1_model,
                 })
             elif path == "/api/runs":
                 try:
@@ -409,11 +417,12 @@ def _make_server(host, port, handler):
 
 def serve(paths, host="127.0.0.1", port=8787, window=60, llm_mode="off",
           model="claude-sonnet-5", intel_db=None, open_browser=False,
-          max_upload_mb=256):
+          max_upload_mb=256, orchestration="auto", votes=1, tier1_model=None):
     """Start the dashboard server (blocking). Returns the httpd, or None if the
     address could not be bound."""
     provenance.enforce(strict=True)
-    state = _State(paths, window, llm_mode, model, intel_db, max_upload_mb=max_upload_mb)
+    state = _State(paths, window, llm_mode, model, intel_db, max_upload_mb=max_upload_mb,
+                   orchestration=orchestration, votes=votes, tier1_model=tier1_model)
     try:
         httpd = _make_server(host, port, _make_handler(state))
     except OSError as exc:

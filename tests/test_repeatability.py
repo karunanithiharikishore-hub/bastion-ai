@@ -120,6 +120,9 @@ def cache_dir(tmp_path, monkeypatch):
 
 
 def _analyze(backbone, **kw):
+    # These fakes model the fixed tiered flow; with orchestration "auto" a
+    # model backbone would first get the Incident Commander (see test_integration).
+    kw.setdefault("orchestration", "fixed")
     return analyzer.analyze([BENIGN_SAMPLES], backbone=backbone, intel_store=None, **kw)
 
 

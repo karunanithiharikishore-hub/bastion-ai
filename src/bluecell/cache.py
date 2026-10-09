@@ -19,10 +19,12 @@ Key = sha256 over:
   detector) and the tool schemas (separate hashes), plus a hash of the
   LLM-path source code so a code change never serves a stale result,
 - the threat-intel store contents (agents and the narrative read it),
-- orchestration settings (window, incident cap, votes, budgets, ...).
+- orchestration settings (window, incident cap, votes, Tier-1 model,
+  orchestration mode and the commander's agent/turn/time limits, budgets, ...).
 
 Never stored: runs where an agent errored or fell back to rules, a run that
-hit its turn budget, a failed analyst call or LLM narrative, and runs without
+hit its turn budget, a failed analyst call or LLM narrative, an Incident
+Commander run that errored or fell back to the fixed flow, and runs without
 an LLM (those are already deterministic and fast, so caching them would only
 add a way to serve stale output).
 
@@ -68,9 +70,15 @@ def events_fingerprint(events) -> str:
 
 def prompt_texts() -> dict:
     """Every system prompt / mission / prompt template a model sees."""
-    from .agents import runtime, analyst, roles, injection, toolbox
+    from .agents import runtime, analyst, roles, injection, toolbox, commander, dispatch
     from .report import rca
     texts = {
+        # Incident Commander: its protocol, the worker roles it is offered and
+        # its dispatch tool schemas.
+        "commander_protocol": commander.COMMANDER_PROTOCOL,
+        "commander_roles": {k: d for k, (_, d) in commander.WORKER_ROLES.items()},
+        "commander_tools": dispatch.COMMAND_TOOL_SPECS,
+        "investigator": commander.Investigator.mission,
         # Prompt-injection defenses: the boundary instruction every prompt
         # carries, the tool-output warning, and the detector itself (its
         # patterns decide which events are flagged and how verdicts are guarded).
@@ -188,7 +196,16 @@ def uncacheable_reason(result: dict, backbone) -> str | None:
     if backbone is None:
         return "no LLM (deterministic run)"
     swarm = result.get("swarm") or {}
+    cmd = swarm.get("commander") or {}
+    if cmd.get("fallback_reason"):
+        # Not a run of the requested orchestration (and the commander's wasted
+        # work is not in agent_runs, so the checks below would not see it).
+        return f"Incident Commander fell back to the fixed flow ({cmd['fallback_reason']})"
+    if cmd.get("error"):
+        return f"Incident Commander errored ({cmd['error']})"
     for r in swarm.get("agent_runs") or []:
+        if r.get("dispatch_warning"):
+            return f"agent {r.get('agent')}: {r['dispatch_warning']}"
         name = r.get("agent")
         if r.get("error"):
             return f"agent {name} errored"

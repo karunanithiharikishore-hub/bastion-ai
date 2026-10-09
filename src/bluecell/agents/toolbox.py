@@ -242,6 +242,10 @@ class SecurityToolbox:
             self._index["domains"].update(
                 m.lower() for m in _DOMAIN_RE.findall(self._haystack(e)))
 
+    def specs(self) -> list:
+        """Tool specs (name, description, input_schema) this agent is offered."""
+        return tool_specs(self.tools)
+
     # ---- dispatch -----------------------------------------------------------
     def call(self, name: str, args: dict | None) -> str:
         args = args or {}
@@ -260,12 +264,16 @@ class SecurityToolbox:
         self.calls.append({"tool": name, "args": args, "ok": ok, "t0": t0,
                            "ms": round((time.time() - t0) * 1000, 1)})
         text = result if isinstance(result, str) else json.dumps(result, default=str)
-        if len(text) > MAX_TOOL_RESULT_CHARS:
+        cap = self.result_cap(name)
+        if len(text) > cap:
             # Oversized results cost tokens on every later turn; narrow the query.
-            text = (text[:MAX_TOOL_RESULT_CHARS]
-                    + f" ...(truncated {len(text) - MAX_TOOL_RESULT_CHARS} chars; "
-                      "use filters or a smaller limit)")
+            text = (text[:cap] + f" ...(truncated {len(text) - cap} chars; "
+                                 "use filters or a smaller limit)")
         return text
+
+    def result_cap(self, name: str) -> int:
+        """Max characters of one tool result handed back to the model."""
+        return MAX_TOOL_RESULT_CHARS
 
     # ---- helpers ------------------------------------------------------------
     def _line(self, e) -> str:

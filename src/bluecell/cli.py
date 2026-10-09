@@ -73,6 +73,10 @@ def cmd_analyze(args) -> int:
         tier1_model=args.model_tier1,
         skip_idle_tier1=not args.all_tier1,
         trace=(False if args.no_trace else None),
+        orchestration=args.orchestration,
+        max_agents=args.max_agents,
+        max_commander_turns=args.max_commander_turns,
+        budget_seconds=args.budget_seconds,
     )
     output = render_json(result) if args.format == "json" else render_markdown(result)
     if args.output:
@@ -141,10 +145,14 @@ def cmd_plan(args) -> int:
         if not os.path.exists(p):
             print(f"[bluecell] path not found: {p}", file=sys.stderr)
             return 2
+    from .agents import injection
     events = normalize(ingest_paths(args.paths, args.source))
     map_attack(events)
+    injection.tag_events(events)      # as analyze() does: it can change incidents
     incidents = correlate(events, window_minutes=args.window)[:args.max_incidents]
-    plan = plan_before_after(events, incidents, votes=args.votes)
+    plan = plan_before_after(events, incidents, votes=args.votes, commander_limits={
+        "max_agents": args.max_agents, "max_commander_turns": args.max_commander_turns,
+        "budget_seconds": args.budget_seconds})
     print(json.dumps(plan, indent=2))
     return 0
 
@@ -196,7 +204,9 @@ def cmd_serve(args) -> int:
     from .web import serve
     httpd = serve(args.paths, host=args.host, port=args.port, window=args.window,
           llm_mode=args.llm, model=args.model, intel_db=args.intel_db,
-          open_browser=args.open, max_upload_mb=args.max_upload_mb)
+          open_browser=args.open, max_upload_mb=args.max_upload_mb,
+          orchestration=args.orchestration, votes=args.votes,
+          tier1_model=args.model_tier1)
     return 0 if httpd is not None else 2
 
 
@@ -204,6 +214,8 @@ def cmd_roster(args) -> int:
     # Build a static roster preview from the role classes.
     from .agents.roles import SPECIALISTS
     rows = [
+        ("0", "soc-lead", "SOC Lead / Incident Commander (plans + deploys the "
+                          "agents below; --orchestration commander)"),
         ("1", "soc1-<source>", "Tier-1 SOC Analyst (one per log source)"),
         ("2", "soc2-lead", "Tier-2 SOC Analyst (verification/confirmation)"),
     ]
@@ -267,7 +279,13 @@ def cmd_eval(args) -> int:
     try:
         report = evals.run_eval(args.cases, names=args.case or None, repeat=args.repeat,
                                 llm=args.llm, backbone=backbone,
-                                trace=(False if args.no_trace else None), progress=progress)
+                                trace=(False if args.no_trace else None), progress=progress,
+                                options={"votes": args.votes,
+                                         "tier1_model": args.model_tier1,
+                                         "orchestration": args.orchestration,
+                                         "max_agents": args.max_agents,
+                                         "max_commander_turns": args.max_commander_turns,
+                                         "budget_seconds": args.budget_seconds})
     except FileNotFoundError as exc:
         print(f"[bluecell] {exc}", file=sys.stderr)
         return 2
@@ -321,6 +339,33 @@ def cmd_runs(args) -> int:
     return 0
 
 
+ORCHESTRATIONS = ("auto", "commander", "fixed")
+ORCH_HELP = ("How the agent swarm is organised: 'commander' = an LLM Incident "
+             "Commander decides which agents to deploy; 'fixed' = Tier-1 -> Tier-2 "
+             "-> Tier-3; 'auto' (default) = commander when a model backbone is "
+             "available, fixed otherwise.")
+
+
+def _add_commander_limits(p) -> None:
+    from .agents.commander import (DEFAULT_MAX_AGENTS, DEFAULT_COMMANDER_TURNS,
+                                   DEFAULT_BUDGET_SECONDS)
+    p.add_argument("--max-agents", dest="max_agents", type=_positive_int,
+                   default=DEFAULT_MAX_AGENTS,
+                   help=f"Incident Commander: worker agents per run (default {DEFAULT_MAX_AGENTS})")
+    p.add_argument("--max-commander-turns", dest="max_commander_turns", type=_positive_int,
+                   default=DEFAULT_COMMANDER_TURNS,
+                   help=f"Incident Commander: its own turn cap (default {DEFAULT_COMMANDER_TURNS})")
+    p.add_argument("--budget-seconds", dest="budget_seconds", type=_positive_int,
+                   default=DEFAULT_BUDGET_SECONDS,
+                   help=f"Incident Commander: wall-clock budget (default {DEFAULT_BUDGET_SECONDS})")
+
+
+def _add_swarm_args(p) -> None:
+    """Orchestration flags shared by analyze and eval."""
+    p.add_argument("--orchestration", choices=ORCHESTRATIONS, default="auto", help=ORCH_HELP)
+    _add_commander_limits(p)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="bluecell",
@@ -359,6 +404,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Re-run even if cached, and overwrite the cached result")
     a.add_argument("--no-trace", action="store_true", dest="no_trace",
                    help="Do not save this run's trace under the runs dir")
+    _add_swarm_args(a)
     a.set_defaults(func=cmd_analyze)
 
     ev = sub.add_parser("eval", help="Run the labelled eval suite")
@@ -372,6 +418,11 @@ def build_parser() -> argparse.ArgumentParser:
     ev.add_argument("--json", help="Write the full eval report as JSON")
     ev.add_argument("--no-trace", action="store_true", dest="no_trace",
                     help="Do not save run traces")
+    ev.add_argument("--votes", type=_positive_int, default=1,
+                    help="Tier-2 self-consistency runs per verdict (default 1)")
+    ev.add_argument("--model-tier1", dest="model_tier1", default=None,
+                    help="Cheaper model for Tier-1 triage agents (default: --model)")
+    _add_swarm_args(ev)
     ev.set_defaults(func=cmd_eval)
 
     rn = sub.add_parser("runs", help="List traced runs, or show one run's span tree")
@@ -412,6 +463,12 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Upload request-body cap in MB (default 256). The dashboard "
                          "sends one file per request, JSON-encoded, so this is roughly "
                          "the largest single file; total batch size is limited only by disk.")
+    sv.add_argument("--orchestration", choices=ORCHESTRATIONS,
+                    default="auto", help=ORCH_HELP)
+    sv.add_argument("--votes", type=_positive_int, default=1,
+                    help="Tier-2 self-consistency runs per verdict (default 1)")
+    sv.add_argument("--model-tier1", dest="model_tier1", default=None,
+                    help="Cheaper model for Tier-1 triage agents (default: --model)")
     sv.set_defaults(func=cmd_serve)
 
     pl = sub.add_parser("plan", help="Offline cost plan for analyzing some logs")
@@ -420,6 +477,7 @@ def build_parser() -> argparse.ArgumentParser:
     pl.add_argument("--window", type=_positive_int, default=60)
     pl.add_argument("--max-incidents", type=_positive_int, default=10, dest="max_incidents")
     pl.add_argument("--votes", type=_positive_int, default=1)
+    _add_commander_limits(pl)
     pl.set_defaults(func=cmd_plan)
 
     ro = sub.add_parser("roster", help="Show the blue-team agent swarm roster")

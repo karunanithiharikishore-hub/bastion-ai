@@ -41,7 +41,7 @@ import tempfile
 
 from .. import tracing
 from .base import Agent, AgentContext, Finding
-from .toolbox import Blackboard, SecurityToolbox, BASE_TOOLS, file_slug, tool_specs
+from .toolbox import Blackboard, SecurityToolbox, BASE_TOOLS, file_slug
 from .budget import TIER_MAX_TURNS
 from .injection import BOUNDARY_INSTRUCTION
 
@@ -114,8 +114,12 @@ class SwarmSession:
         shared = AgentContext(events=ctx.events, incidents=ctx.incidents,
                               iocs=ctx.iocs, digest=ctx.digest,
                               intel_store=ctx.intel_store, backbone=None)
-        with open(os.path.join(self.dir, "ctx.pkl"), "wb") as fh:
+        # Atomic: an MCP server starting right now reads the old or the new
+        # context, never a half-written pickle.
+        path = os.path.join(self.dir, "ctx.pkl")
+        with open(path + ".tmp", "wb") as fh:
             pickle.dump({"ctx": shared, "seed": seed}, fh)
+        os.replace(path + ".tmp", path)
 
     def board_snapshot(self) -> bytes:
         with open(self.board.path, "rb") as fh:
@@ -143,7 +147,8 @@ def _run_cli(agent, session: SwarmSession, backbone, max_turns: int,
         "args": ["-m", "bluecell.agents.mcp_server", "--session", session.dir,
                  "--agent", agent.name, "--role", agent.role,
                  "--tools", ",".join(agent.tools)]
-                + (["--source-scope", agent.source_scope] if agent.source_scope else []),
+                + (["--source-scope", agent.source_scope] if agent.source_scope else [])
+                + list(agent.mcp_args),
         "env": {"PYTHONPATH": _SRC_ROOT},
     }}}
     cfg_path = os.path.join(session.dir, f"{file_slug(agent.name)}.mcp.json")
@@ -153,7 +158,7 @@ def _run_cli(agent, session: SwarmSession, backbone, max_turns: int,
     allowed = ",".join(f"mcp__{MCP_SERVER}__{n}" for n in agent.tools)
     cmd = ["claude", "-p",
            "--model", model or backbone.model,
-           "--system-prompt", build_system_prompt(agent.role, agent.brief()),
+           "--system-prompt", agent.system_prompt(),
            "--mcp-config", cfg_path, "--strict-mcp-config",
            "--tools", "",
            "--allowedTools", allowed,
@@ -168,9 +173,10 @@ def _run_cli(agent, session: SwarmSession, backbone, max_turns: int,
     summary, turns, cost, truncated = "", None, None, False
     try:
         # cwd = session dir: no project settings/hooks/CLAUDE.md leak into the agent.
-        proc = subprocess.run(cmd, input=task_prompt(agent.name, agent.role),
+        proc = subprocess.run(cmd, input=agent.task(),
                               capture_output=True, text=True, timeout=timeout,
-                              cwd=session.dir)
+                              cwd=session.dir,
+                              env=dict(os.environ, **agent.cli_env) if agent.cli_env else None)
         for line in proc.stdout.splitlines():
             try:
                 msg = json.loads(line)
@@ -217,13 +223,11 @@ def _run_cli(agent, session: SwarmSession, backbone, max_turns: int,
 
 def _run_api(agent, session: SwarmSession, backbone, max_turns: int,
              timeout: int, model: str | None = None) -> dict:
-    box = SecurityToolbox(session.ctx, agent.name, agent.role, session.board,
-                          board_seed=session.seed, tools=agent.tools,
-                          source_scope=agent.source_scope)
+    box = agent.make_toolbox(session)
     tools = [{"name": t["name"], "description": t["description"],
-              "input_schema": t["input_schema"]} for t in tool_specs(agent.tools)]
-    system = build_system_prompt(agent.role, agent.brief())
-    messages = [{"role": "user", "content": task_prompt(agent.name, agent.role)}]
+              "input_schema": t["input_schema"]} for t in box.specs()]
+    system = agent.system_prompt()
+    messages = [{"role": "user", "content": agent.task()}]
     summary, error, turns, finished = "", None, 0, False
     temperature = getattr(backbone, "temperature", 0.0)
     try:
@@ -272,6 +276,9 @@ class AutonomousAgent(Agent):
     tools = BASE_TOOLS
     source_scope = None
     default_max_turns = None        # None = the tier's cap (budget.TIER_MAX_TURNS)
+    directive = ""          # extra instructions (e.g. from the Incident Commander)
+    mcp_args = ()           # extra mcp_server arguments (CLI driver)
+    cli_env = None          # extra environment for the `claude` process (CLI driver)
 
     def __init__(self, *a, max_turns: int | None = None,
                  timeout: int = DEFAULT_TIMEOUT, llm_model: str | None = None, **kw):
@@ -285,6 +292,21 @@ class AutonomousAgent(Agent):
 
     def brief(self) -> str:
         return self.mission
+
+    def system_prompt(self) -> str:
+        mission = self.brief()
+        if self.directive:
+            mission = f"{mission.rstrip()}\n\n{self.directive.strip()}"
+        return build_system_prompt(self.role, mission)
+
+    def task(self) -> str:
+        return task_prompt(self.name, self.role)
+
+    def make_toolbox(self, session: SwarmSession) -> SecurityToolbox:
+        """The in-process toolbox the API driver executes this agent's calls on."""
+        return SecurityToolbox(session.ctx, self.name, self.role, session.board,
+                               board_seed=session.seed, tools=self.tools,
+                               source_scope=self.source_scope)
 
     def investigate(self, ctx: AgentContext, session: SwarmSession) -> list:
         if session.halted:

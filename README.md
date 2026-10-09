@@ -38,7 +38,9 @@ firewall/router/switch, cloud audit trails, and **Microsoft 365 / Entra**
 ## The agent swarm
 
 BlueCell runs three tiers of blue-team agents. **Every one of them is an
-autonomous, tool-using Claude agent** when a model backbone is available:
+autonomous, tool-using Claude agent** when a model backbone is available. Which
+agents run, and in what order, is decided either by an Incident Commander agent
+(below) or by the fixed tiered flow described here:
 
 - **Tier 1 — Junior SOC Analysts:** one per log source, run in parallel. Each
   triages its own source and raises candidates. A candidate must cite at least
@@ -54,6 +56,78 @@ autonomous, tool-using Claude agent** when a model backbone is available:
   incidents.
 
 All tiers share one board, so later tiers read the notes earlier tiers left.
+
+### Who decides the plan: the Incident Commander
+
+By default (`--orchestration auto`, on `analyze` and `serve`) the swarm is
+**self-organising** whenever a model backbone is available. A **SOC Lead /
+Incident Commander** agent runs first, following Anthropic's
+"orchestrator-workers" pattern. It reads the case with the same read-only tools
+the workers use, then directs the investigation with four dispatch tools:
+
+- `list_roles`: the deployable roles (one Tier-1 analyst per log source, the
+  Tier-2 verifier, the seven specialists, and a generic `investigator` that
+  takes a custom objective), plus the budget left.
+- `deploy_agent(role, reason, objective?, incident_id?, source?)`: runs one
+  worker and returns its summary and the findings/verdicts it filed.
+- `deploy_agents([...])`: runs a batch in parallel and returns every result.
+- `finish(summary)`: closes the case.
+
+The commander decides which agents to deploy, in what order, and when the case
+is done. It reads each result before its next move, so it can send follow-ups:
+for example, a Threat Hunter told to chase an IP that a Tier-1 analyst flagged.
+Workers keep their missions, read-only toolboxes and grounding checks. The
+commander can add direction to a worker's brief but cannot give it extra tools.
+Incidents are still confirmed or dismissed only by a `tier2-verifier` agent the
+commander deploys. The commander itself files nothing.
+
+Python enforces the guardrails, and a deploy over budget is refused with a tool
+error the commander can read. Defaults (arguments of `SwarmOrchestrator` /
+`run_swarm`; there are no CLI flags for them yet):
+
+- at most **15 worker agents** per run,
+- at most **30 commander turns**,
+- at most **4 agents running at once** (`MAX_PARALLEL_AGENTS`),
+- a **wall-clock budget of 3600 s**. Each worker's timeout is capped by the
+  time left when it starts; a worker still queued behind the parallel cap when
+  the time runs out is skipped (shown as `skipped` in the report),
+- at most one `tier2-verifier` per batch, and no deploys after `finish`.
+
+Invalid requests (unknown role, a Tier-1 analyst without a valid `source`, an
+`investigator` without an `objective`, an unknown incident) are refused the
+same way, and every refusal is recorded in the decision log.
+
+**Fallback:** the run switches to the fixed tiered flow (Tier-1 → Tier-2 →
+Tier-3, exactly as described above) when the commander deploys nothing, crashes
+before any agent verdict exists, or ends without a Tier-2 agent verdict on a
+case that has incidents. The fixed flow re-runs every tier from scratch, and
+`swarm.commander.fallback_reason` records why it was used. `--orchestration
+fixed` always runs the fixed flow. Without a backbone, `auto` runs the fixed
+flow with rule-based agents.
+
+The report's swarm section shows the orchestration that ran. For a commander
+run it also lists each decision: who was deployed, the commander's reason, and
+the outcome. Refused deploys and the commander's final summary appear there
+too. In JSON, these are under `swarm.orchestration` and `swarm.commander`
+(`plan`, `summary`, `limits`, `fallback_reason`).
+
+With `--llm cli` the commander is a `claude -p` process like every other agent,
+and its tools are served by the MCP server. That server can't launch agents
+itself, so for each dispatch call it writes a request file into the run's
+private session directory (`dispatch/<id>.req.json`) and blocks. A polling
+thread in the parent BlueCell process picks up the request, runs the workers,
+and writes `<id>.res.json`. The MCP call then returns to the commander. No
+sockets or ports are used. `MCP_TOOL_TIMEOUT` is raised for the commander's
+process so a long deploy is not cut off. Every file is written to a temp name
+and renamed, and the parent claims a request by renaming it, so neither side
+reads a half-written file and no request runs twice. A request the MCP server
+gave up on (timeout) is withdrawn if it has not been claimed. When the commander
+process exits, the parent stops accepting deploys, answers anything still
+queued with an error, and discards the results of a deploy that was still
+running rather than merging them into a finished report. The commander's
+`claude` process keeps the same hardening flags as every other agent
+(`--strict-mcp-config`, built-in tools disabled, `--no-session-persistence`,
+private session directory as its working directory).
 
 Each agent gets a mission brief for its role and a
 toolbox (`case_overview`, `search_events`, `get_incident`, `get_event`, `pivot`,
@@ -82,11 +156,12 @@ The report's **"How each agent ran"** section shows, for every agent,
 whether it ran autonomously or fell back to rules (and why), how many tool calls
 it made, and how many submissions were rejected by grounding. Every finding and
 verdict is labelled `AI agent` or `rule`. On the bundled samples a full
-autonomous run takes roughly 10-15 minutes (three rounds of agents); `--llm off`
-takes well under a second.
+autonomous fixed-flow run takes roughly 10-15 minutes (three rounds of agents;
+a commander run depends on what it deploys); `--llm off` takes well under a
+second.
 
-The orchestrator reconciles all tiers into a per-incident **consensus**. See the
-roster any time: `bluecell roster`.
+The orchestrator reconciles all tiers into a per-incident **consensus**. To see
+the roster at any time, run `bluecell roster`.
 
 ## Repeatability & cost
 
