@@ -119,7 +119,7 @@ def render_markdown(result: dict) -> str:
             f"(T1:{c['tier1_findings']} findings, T2:{c['tier2_findings']} verifications, "
             f"T3:{c['tier3_findings']} specialist findings, "
             f"{c['confirmed_incidents']} confirmed, "
-            f"{c.get('autonomous_agents', 0)} of {swarm.get('worker_count', swarm['agent_count'])} ran as autonomous AI agents)",
+            f"{c.get('autonomous_agents', 0)} of {swarm['agent_count']} ran as autonomous AI agents)",
             "",
         ]
 
