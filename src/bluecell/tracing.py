@@ -25,11 +25,13 @@ thread that started the run (normally the "swarm" pipeline stage).
 """
 from __future__ import annotations
 
+import contextlib
 import contextvars
 import json
 import os
 import random
 import re
+import shutil
 import string
 import threading
 import time
@@ -78,15 +80,17 @@ def price_for(model: str | None):
     m = (model or "").lower()
     if m.startswith("anthropic."):
         m = m[len("anthropic."):]
-    best = None
-    for key in PRICES:
-        if m.startswith(key) and (best is None or len(key) > len(best)):
-            best = key
-    if best:
-        return PRICES[best]
-    for fam, key in _FAMILY_DEFAULT.items():
-        if fam in m:
-            return PRICES[key]
+    for key, price in PRICES.items():
+        # Exact id, optionally with a date stamp or Bedrock "-v1:0" suffix.
+        if re.fullmatch(re.escape(key) + r"(?:-\d{8})?(?:-v\d+(?::\d+)?)?", m):
+            return price
+    # Version-less alias (e.g. "claude-opus") -> newest listed model of that family.
+    # Ids with a version number that are not listed get no price (shortcut: family
+    # aliases only, add new versions to PRICES when they ship).
+    if not re.search(r"\d", m):
+        for fam, key in _FAMILY_DEFAULT.items():
+            if fam in m:
+                return PRICES[key]
     return None
 
 
@@ -210,7 +214,7 @@ class Tracer:
         self._stacks: dict = {}
         self._seq = 0
         self._stage = None
-        self.inputs = [str(p) for p in (inputs or [])]
+        self.inputs = _input_names.get() or [str(p) for p in (inputs or [])]
         self.finished = False
         self.root = self.open("analyze", "run", **(attrs or {}))
 
@@ -290,16 +294,18 @@ class Tracer:
 
     # ---- summary ------------------------------------------------------------
     def _descendants(self, sid) -> set:
+        # Stops at nested agent spans: each agent owns only its own calls, so
+        # per-agent rows add up to the run total (no double count up the tree).
         kids = {}
         for s in self.spans:
-            kids.setdefault(s.parent, []).append(s.id)
+            kids.setdefault(s.parent, []).append(s)
         out, todo = set(), [sid]
         while todo:
             cur = todo.pop()
             if cur in out:
                 continue
             out.add(cur)
-            todo.extend(kids.get(cur, []))
+            todo.extend(k.id for k in kids.get(cur, []) if k.kind != "agent")
         return out
 
     def _rollup(self, ids: set) -> dict:
@@ -309,8 +315,12 @@ class Tracer:
             for k in tok:
                 tok[k] += u["tokens"].get(k, 0)
         costs = [u["cost_usd"] for u in recs if u["cost_usd"] is not None]
+        # None = cost unknown (calls were made but none had a cost); a partial
+        # sum is paired with unknown_calls so callers can show ">= x".
+        unknown = sum(u.get("calls", 1) for u in recs if u["cost_usd"] is None)
         return {"tokens": tok, "llm_calls": sum(u.get("calls", 1) for u in recs),
                 "cost_usd": round(sum(costs), 6) if costs else (0.0 if not recs else None),
+                "unknown_calls": unknown,
                 "cost_basis": sorted({u["cost_basis"] for u in recs}),
                 "tool_calls": sum(1 for s in self.spans
                                   if s.kind == "tool" and s.id in ids)}
@@ -331,7 +341,7 @@ class Tracer:
                     "duration_ms": s.duration_ms,
                     "tool_calls": r["tool_calls"], "llm_calls": r["llm_calls"],
                     "tokens": r["tokens"], "cost_usd": r["cost_usd"],
-                    "cost_basis": r["cost_basis"],
+                    "cost_unknown_calls": r["unknown_calls"], "cost_basis": r["cost_basis"],
                 })
             end = self.root.end or _now()
             basis = total["cost_basis"]
@@ -339,7 +349,8 @@ class Tracer:
                 "run_id": self.run_id,
                 "started": _iso(self.root.start),
                 "duration_ms": round((end - self.root.start) * 1000, 1),
-                "total_cost_usd": total["cost_usd"] if total["cost_usd"] is not None else 0.0,
+                "total_cost_usd": total["cost_usd"],   # None = unknown, never a fake 0
+                "cost_unknown_calls": total["unknown_calls"],
                 "cost_estimated": "estimated" in basis,
                 "cost_basis": basis,
                 "cost_note": _cost_note(basis),
@@ -386,8 +397,41 @@ class Tracer:
                 record.update(_result_facts(result))
             with open(os.path.join(base, "summary.json"), "w", encoding="utf-8") as fh:
                 json.dump(record, fh, indent=2, default=str)
+            _prune_runs(os.path.dirname(base), self.run_id)
         except Exception:
             pass   # tracing must never break analysis
+
+
+RUNS_KEEP_DEFAULT = 200
+_TMP_STALE_S = 300   # interrupted writes older than this are orphans
+
+
+def _prune_runs(base: str, keep_id: str) -> None:
+    """Keep the newest BLUECELL_RUNS_KEEP run dirs and sweep stale *.tmp files.
+    Ordered by dir mtime: run ids only resolve to the second. Only RUN_ID_RE
+    named dirs are ever removed."""
+    try:
+        keep = max(1, int(os.environ.get("BLUECELL_RUNS_KEEP") or RUNS_KEEP_DEFAULT))
+    except ValueError:
+        keep = RUNS_KEEP_DEFAULT
+    now = _now()
+
+    def mtime(n):
+        try:
+            return os.path.getmtime(os.path.join(base, n))
+        except OSError:
+            return 0.0
+    names = sorted((n for n in os.listdir(base) if RUN_ID_RE.match(n)), key=mtime)
+    for n in names[:-keep]:
+        if n != keep_id:
+            shutil.rmtree(os.path.join(base, n), ignore_errors=True)
+    for n in os.listdir(base):
+        p = os.path.join(base, n)
+        try:
+            if n.endswith(".tmp") and now - os.path.getmtime(p) > _TMP_STALE_S:
+                os.remove(p)
+        except OSError:
+            pass
 
 
 def _cost_note(basis) -> str:
@@ -423,6 +467,20 @@ def _result_facts(result: dict) -> dict:
 # Active-tracer registry + module-level helpers (no-ops without a run)
 # ---------------------------------------------------------------------------
 _current: contextvars.ContextVar = contextvars.ContextVar("bluecell_tracer", default=None)
+_input_names: contextvars.ContextVar = contextvars.ContextVar("bluecell_input_names", default=None)
+
+
+@contextlib.contextmanager
+def input_names(names):
+    """Record these names as the inputs of runs started inside the block (e.g. an upload's
+    file names instead of its temp dir, which is gone once the run is listed)."""
+    token = _input_names.set([str(n) for n in names or []])
+    try:
+        yield
+    finally:
+        _input_names.reset(token)
+
+
 _active: list = []
 _active_lock = threading.Lock()
 
@@ -570,9 +628,11 @@ def list_runs(limit: int = 50, directory: str | None = None) -> list:
     for n in names[:limit * 2 + 20]:
         try:
             with open(os.path.join(base, n, "summary.json"), encoding="utf-8") as fh:
-                out.append(json.load(fh))
+                summ = json.load(fh)
         except (OSError, ValueError):
             continue
+        if isinstance(summ, dict):
+            out.append(summ)
     out.sort(key=lambda s: str(s.get("started") or ""), reverse=True)
     return out[:limit]
 
@@ -585,8 +645,9 @@ def input_label(inputs) -> str:
     if len(inputs) == 1:
         return os.path.basename(inputs[0]) or inputs[0]
     parents = {os.path.dirname(p) for p in inputs}
-    if len(parents) == 1:
-        return f"{os.path.basename(parents.pop())}/ ({len(inputs)} files)"
+    parent = os.path.basename(parents.pop()) if len(parents) == 1 else ""
+    if parent:  # relative files share parent "" -> fall through to "a.log +1"
+        return f"{parent}/ ({len(inputs)} files)"
     return f"{os.path.basename(inputs[0])} +{len(inputs) - 1}"
 
 
@@ -600,6 +661,8 @@ def load_run(run_id: str, directory: str | None = None):
             summ = json.load(fh)
     except (OSError, ValueError):
         return None
+    if not isinstance(summ, dict):
+        return None
     spans, usage = [], []
     try:
         with open(os.path.join(base, "trace.jsonl"), encoding="utf-8") as fh:
@@ -607,6 +670,8 @@ def load_run(run_id: str, directory: str | None = None):
                 try:
                     rec = json.loads(line)
                 except ValueError:
+                    continue
+                if not isinstance(rec, dict):
                     continue
                 (spans if rec.get("type") == "span" else usage).append(rec)
     except OSError:

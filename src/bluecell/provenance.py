@@ -10,11 +10,10 @@ Authorship + attribution integrity.
 
 This module is the single source of truth for who built BlueCell. Every entry
 point verifies it at startup. If the author attribution is removed or altered,
-:func:`enforce` HALTS the program and points to where the watermark lives so
-the rightful owner can restore it.
+:func:`enforce` prints a warning to stderr and carries on; it never exits.
 
 HONEST LIMITATIONS (stated plainly, by design):
-- This detects casual removal/rebranding and refuses to run when tampered.
+- This detects casual removal/rebranding and warns about it; it never stops the program.
 - It is NOT unbreakable DRM. Anyone with the source can edit files; a
   determined actor could patch this check too. The real, enforceable
   protection is the MIT license + copyright below: you may use and share this
@@ -25,7 +24,7 @@ from __future__ import annotations
 import hashlib
 import os
 
-# --- Immutable authorship facts (do not remove; removal halts the program) ---
+# --- Authorship facts checked by verify_integrity() (do not alter) ---
 AUTHOR = "Harikishore Karunanithi"
 PROJECT = "BlueCell"
 PROVENANCE_ID = "bluecell-provenance-v1"
@@ -106,8 +105,12 @@ def enforce(strict: bool = True) -> None:
     Earlier versions hard-halted the program if the author attribution was
     removed. That was attribution-as-kill-switch, which is both trivially
     bypassed and inappropriate for MIT-licensed software — the enforceable
-    protection is the LICENSE, not a runtime gate. This now only prints a
-    non-fatal warning if the attribution looks altered, and never exits.
+    protection is the LICENSE, not a runtime gate. This only prints a
+    non-fatal warning to stderr if the attribution looks altered, and never
+    exits.
+
+    ``strict`` is accepted for backward compatibility (cli.py passes it) and
+    is ignored: there is no strict mode.
     """
     import sys
     ok, reason = verify_integrity()

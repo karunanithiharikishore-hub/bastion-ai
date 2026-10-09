@@ -21,9 +21,10 @@ function inputLabel(inputs) {
   return base(inputs[0]) + " +" + (inputs.length - 1);
 }
 
-function costCell(s) {
-  return esc(num(s.total_cost_usd).toFixed(4) + (s.cost_estimated ? "~" : ""));
-}
+// null cost = unknown (never shown as 0); unknown calls in a run make the sum a lower bound.
+const costText = (c, unknownCalls, est) =>
+  c == null ? "n/a" : (num(unknownCalls) ? ">= " : "") + num(c).toFixed(4) + (est ? "~" : "");
+const costCell = (s) => esc(costText(s.total_cost_usd, s.cost_unknown_calls, s.cost_estimated));
 
 let RUNS = [];
 
@@ -44,7 +45,9 @@ async function load() {
 
 function renderKpis() {
   const n = RUNS.length;
-  const cost = RUNS.reduce((a, s) => a + num(s.total_cost_usd), 0);
+  const known = RUNS.filter((s) => s.total_cost_usd != null);
+  const cost = known.reduce((a, s) => a + num(s.total_cost_usd), 0);
+  const unk = RUNS.filter((s) => s.total_cost_usd == null || num(s.cost_unknown_calls)).length;
   const tokens = RUNS.reduce((a, s) => a + tokTotal(s), 0);
   const tools = RUNS.reduce((a, s) => a + num(s.tool_calls), 0);
   const meanMs = n ? RUNS.reduce((a, s) => a + num(s.duration_ms), 0) / n : 0;
@@ -54,7 +57,8 @@ function renderKpis() {
     (note ? `<div class="n">${esc(note)}</div>` : "") + `</div>`;
   $("kpis").innerHTML =
     k("Runs", String(n), "most recent 200") +
-    k("Total cost", money(cost), est ? "includes estimates (~)" : "reported / none") +
+    k("Total cost", known.length ? (unk ? ">= " : "") + money(cost) : "n/a",
+      unk ? `${unk} run(s) with unknown cost` : est ? "includes estimates (~)" : "reported / none") +
     k("Tokens", tokens.toLocaleString(), "input + output + cache") +
     k("Tool calls", tools.toLocaleString(), "by agents") +
     k("Mean duration", secs(meanMs) + " s", "per run");
@@ -81,7 +85,8 @@ function renderChart() {
     const x = L + i * bw + bw * 0.15;
     svg += `<rect class="bar${c > 0 ? "" : " zero"}" x="${x.toFixed(1)}" y="${(H - B - h).toFixed(1)}" ` +
       `width="${Math.max(1, bw * 0.7).toFixed(1)}" height="${h.toFixed(1)}">` +
-      `<title>${esc((s.started || "").slice(0, 19) + " · " + money(c) + (s.cost_estimated ? " (estimated)" : "") + " · " + inputLabel(s.inputs))}</title></rect>`;
+      `<title>${esc((s.started || "").slice(0, 19) + " · " + (s.total_cost_usd == null ? "cost unknown" :
+        (num(s.cost_unknown_calls) ? ">= " : "") + money(c) + (s.cost_estimated ? " (estimated)" : "")) + " · " + inputLabel(s.inputs))}</title></rect>`;
   });
   const first = (runs[0].started || "").slice(0, 10), last = (runs[runs.length - 1].started || "").slice(0, 10);
   svg += `<text x="${L}" y="${H - 8}">${esc(first)}</text>`;
@@ -131,12 +136,12 @@ async function select(id) {
     `<tr><td>T${esc(a.tier)}</td><td>${esc(a.agent)}</td><td>${esc(a.mode || "-")}</td>` +
     `<td class="num">${esc(num(a.tool_calls))}</td><td class="num">${esc(num(a.llm_calls))}</td>` +
     `<td class="num">${esc(num((a.tokens || {}).total).toLocaleString())}</td>` +
-    `<td class="num">${esc(num(a.cost_usd).toFixed(4))}</td>` +
+    `<td class="num">${esc(costText(a.cost_usd, a.cost_unknown_calls, false))}</td>` +
     `<td class="num">${esc(secs(a.duration_ms))}</td></tr>`).join("");
   host.innerHTML =
     `<div class="detail-grid"><div>` +
     `<p>${esc(inputLabel(s.inputs))} · verdict <span class="vd ${esc(s.verdict || "")}">${esc(s.verdict || "-")}</span> · ` +
-    `${esc(secs(s.duration_ms))} s · ${esc(tokTotal(s).toLocaleString())} tokens · ${costCell(s)} USD</p>` +
+    `${esc(secs(s.duration_ms))} s · ${esc(tokTotal(s).toLocaleString())} tokens · ${costCell(s)}${s.total_cost_usd == null ? "" : " USD"}</p>` +
     `<div class="tbl-wrap"><table class="runs"><thead><tr><th>Tier</th><th>Agent</th><th>Mode</th>` +
     `<th class="num">Tools</th><th class="num">LLM</th><th class="num">Tokens</th><th class="num">Cost $</th>` +
     `<th class="num">Secs</th></tr></thead><tbody>${agents || '<tr><td colspan="8" class="empty">no agents</td></tr>'}</tbody></table></div>` +
@@ -158,8 +163,10 @@ function renderTree(run, host) {
       let extra = "";
       if (us.length) {
         const tok = us.reduce((x, u) => x + num((u.tokens || {}).total), 0);
-        const cost = us.reduce((x, u) => x + num(u.cost_usd), 0);
-        extra = ` · ${tok} tok · ${money(cost)}`;
+        const known = us.filter((u) => u.cost_usd != null);
+        const cost = known.reduce((x, u) => x + num(u.cost_usd), 0);
+        extra = ` · ${tok} tok · ` +
+          (known.length ? (known.length < us.length ? ">= " : "") + money(cost) : "cost n/a");
       }
       const dur = sp.duration_ms == null ? "" : ` ${Math.round(sp.duration_ms)}ms`;
       const mode = a.mode ? ` mode=${a.mode}` : "";

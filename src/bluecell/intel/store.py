@@ -17,8 +17,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import sys
 import time
 from datetime import datetime, timezone
+
+_TOKEN_RE = re.compile(r"[a-z0-9_.\-]+")
+_GENERIC_TERMS = frozenset({"system", "admin", "administrator", "root", "user", "service"})
 
 DEFAULT_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.dirname(__file__)))), "data", "intel.json")
@@ -38,10 +43,20 @@ def _feed_record(rec: dict) -> dict:
     }
 
 
+def _as_list(v) -> list:
+    """A string is one item (never split into characters); list items become str."""
+    if isinstance(v, str):
+        return [v.strip()] if v.strip() else []
+    if isinstance(v, (list, tuple)):
+        return [str(x) for x in v if x is not None]
+    return []
+
+
 class IntelStore:
     def __init__(self, path: str = DEFAULT_PATH):
         self.path = path
         self.entries: list = []
+        self.load_error: str | None = None
         self._load()
 
     # ---- persistence --------------------------------------------------------
@@ -60,12 +75,20 @@ class IntelStore:
                         if isinstance(rec, dict):
                             self.add(_feed_record(rec))
                 else:
-                    self.entries = []
-            except (json.JSONDecodeError, OSError, AttributeError, TypeError, UnicodeDecodeError):
+                    raise TypeError(f"top level is {type(data).__name__}, not an object or list")
+            except (json.JSONDecodeError, OSError, AttributeError, TypeError, UnicodeDecodeError) as exc:
+                # Keep the file on disk untouched: save() refuses to overwrite it.
                 self.entries = []
+                self.load_error = str(exc) or type(exc).__name__
+                print(f"[bluecell] WARNING: intel store {self.path} is unreadable "
+                      f"({self.load_error}); treating it as empty. Saving is disabled "
+                      f"so the file is not overwritten.", file=sys.stderr)
 
     def save(self) -> None:
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        if self.load_error:
+            raise RuntimeError(f"refusing to overwrite {self.path}: it could not be loaded "
+                               f"({self.load_error}). Repair or move the file, then retry.")
+        os.makedirs(os.path.dirname(os.path.abspath(self.path)), exist_ok=True)
         tmp = self.path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump({"updated": datetime.now(timezone.utc).isoformat(),
@@ -87,8 +110,8 @@ class IntelStore:
             "title": str(entry.get("title") or str(entry.get("summary") or "")[:120]),
             "summary": str(entry.get("summary") or ""),
             "severity": entry.get("severity", entry.get("cvss", "")),
-            "techniques": list(entry.get("techniques") or []),
-            "keywords": [str(k).lower() for k in (entry.get("keywords") or [])],
+            "techniques": _as_list(entry.get("techniques")),
+            "keywords": [k.lower() for k in _as_list(entry.get("keywords"))],
             "published": entry.get("published", ""),
             "source": entry.get("source", "manual"),
             "added": datetime.now(timezone.utc).isoformat(),
@@ -116,7 +139,8 @@ class IntelStore:
     # ---- retrieval (RAG) ----------------------------------------------------
     def search(self, terms, limit: int = 5) -> list:
         """Return intel entries matching any of the given terms, ranked."""
-        wanted = {str(t).lower() for t in terms if t}
+        # Generic account/word terms ("SYSTEM", "admin") match too much free text.
+        wanted = {str(t).lower() for t in terms if t} - _GENERIC_TERMS
         if not wanted:
             return []
         scored = []
@@ -125,9 +149,9 @@ class IntelStore:
             hay.update(str(e.get("title", "")).lower().split())
             hay.update(t.lower() for t in e.get("techniques", []))
             overlap = len(wanted & hay)
-            # Also count substring hits in summary for recall.
-            summary = str(e.get("summary", "")).lower()
-            substr = sum(1 for t in wanted if t in summary)
+            # Whole-token hits in the summary (not substrings: "db" must not match "database").
+            tokens = {t.strip(".-_") for t in _TOKEN_RE.findall(str(e.get("summary", "")).lower())}
+            substr = sum(1 for t in wanted if len(t) >= 4 and t in tokens)
             score = overlap * 2 + substr
             if score > 0:
                 scored.append((score, e))

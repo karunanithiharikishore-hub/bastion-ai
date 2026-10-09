@@ -72,6 +72,30 @@ class FakeBackbone:
         return {"content": [{"type": "text", "text": "done"}]}
 
 
+class VerdictBackbone(FakeBackbone):
+    """FakeBackbone whose Tier-2 agent files a dismissal on every incident of
+    ``path``, citing a real event. A Tier-2 run with no verdict is not cached."""
+
+    def __init__(self, path, model="fake-main"):
+        super().__init__(model)
+        from bluecell.agents import injection
+        events = _events(path)
+        injection.tag_events(events)
+        self.incidents = correlate(events, window_minutes=60)
+
+    def messages(self, body):
+        if _role(body) == "Tier-2 SOC Analyst" and len(body["messages"]) == 1:
+            self.calls += 1
+            self.bodies.append(body)
+            return {"content": [
+                {"type": "tool_use", "id": f"v{i}", "name": "submit_verdict",
+                 "input": {"incident_id": inc.id, "decision": "dismissed",
+                           "confidence": 0.9, "rationale": "approved maintenance",
+                           "evidence": [inc.events[0].event_id]}}
+                for i, inc in enumerate(self.incidents)]}
+        return super().messages(body)
+
+
 # ---------------------------------------------------------------------------
 # Cache key
 # ---------------------------------------------------------------------------
@@ -127,7 +151,7 @@ def _analyze(backbone, **kw):
 
 
 def test_cache_miss_then_hit_returns_identical_result_without_model_calls(cache_dir):
-    bb = FakeBackbone()
+    bb = VerdictBackbone(BENIGN_SAMPLES)
     first = _analyze(bb, cache="use")
     assert first["meta"]["cache"] == "miss (stored)"
     assert len(list(cache_dir.glob("*.json"))) == 1
@@ -143,7 +167,7 @@ def test_cache_miss_then_hit_returns_identical_result_without_model_calls(cache_
 
 
 def test_cache_refresh_reruns_and_overwrites(cache_dir):
-    bb = FakeBackbone()
+    bb = VerdictBackbone(BENIGN_SAMPLES)
     first = _analyze(bb, cache="use")
     calls = bb.calls
     again = _analyze(bb, cache="refresh")

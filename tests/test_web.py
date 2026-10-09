@@ -108,10 +108,10 @@ def test_upload_analyzes_dropped_logs(server):
 
 
 def test_upload_rejects_empty(server):
-    # No usable files -> server responds 500 with an error (urlopen raises on 5xx).
+    # No usable files -> client error 400 (urlopen raises on 4xx).
     with pytest.raises(urllib.error.HTTPError) as exc:
         _post(server + "/api/upload", {"files": []})
-    assert exc.value.code == 500
+    assert exc.value.code == 400
 
 
 def test_staged_upload_flow(server):
@@ -136,7 +136,7 @@ def test_stage_run_without_files_errors(server):
     _post(server + "/api/stage/reset", {})
     with pytest.raises(urllib.error.HTTPError) as exc:
         _post(server + "/api/stage/run", {"window": 60})
-    assert exc.value.code == 500
+    assert exc.value.code == 400
 
 
 def _raw(server, method, path, headers=None, body=None):

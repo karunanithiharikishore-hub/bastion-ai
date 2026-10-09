@@ -16,8 +16,8 @@ Key = sha256 over:
 - model, Tier-1 model, backbone path (cli/api) and sampling temperature,
 - BlueCell version,
 - the prompt/mission texts (including the prompt-injection boundary text and
-  detector) and the tool schemas (separate hashes), plus a hash of the
-  LLM-path source code so a code change never serves a stale result,
+  detector) and the tool schemas (separate hashes), plus a hash of all package
+  source code so a code change never serves a stale result,
 - the threat-intel store contents (agents and the narrative read it),
 - orchestration settings (window, incident cap, votes, Tier-1 model,
   orchestration mode and the commander's agent/turn/time limits, budgets, ...).
@@ -36,13 +36,16 @@ import hashlib
 import inspect
 import json
 import os
+import sys
+import tempfile
+import time
 from datetime import datetime, timezone
 
 CACHE_ENV = "BLUECELL_CACHE_DIR"
+KEEP_ENV = "BLUECELL_CACHE_KEEP"   # newest entries kept after each store
+KEEP_DEFAULT = 200
+TMP_MAX_AGE_S = 300                # interrupted stores leave *.tmp behind
 _PKG_DIR = os.path.dirname(os.path.abspath(__file__))
-# Source files whose code shapes an LLM-backed result.
-_LLM_PATH_SOURCES = ("agents", "llm", os.path.join("report", "rca.py"), "analyzer.py")
-
 MODES = ("use", "refresh", "off")
 
 
@@ -63,7 +66,10 @@ def _sha(obj) -> str:
 def events_fingerprint(events) -> str:
     h = hashlib.sha256()
     for e in events:
-        h.update(json.dumps(e.to_dict(), sort_keys=True, default=str).encode("utf-8"))
+        d = e.to_dict()
+        if "ts-unparsed" in e.tags:   # ts is a now() guess; keep it out, as event_id does
+            d.pop("ts", None)
+        h.update(json.dumps(d, sort_keys=True, default=str).encode("utf-8"))
         h.update(b"\n")
     return h.hexdigest()
 
@@ -120,16 +126,15 @@ def tool_schema_fingerprint() -> str:
 
 
 def code_fingerprint() -> str:
+    # Every package source file: any module can shape a result (pipeline, intel,
+    # ingest, models...), and a missed one would serve stale output.
     h = hashlib.sha256()
-    for rel in _LLM_PATH_SOURCES:
-        path = os.path.join(_PKG_DIR, rel)
-        files = ([path] if os.path.isfile(path) else
-                 sorted(os.path.join(d, f) for d, _, fs in os.walk(path)
-                        for f in fs if f.endswith(".py")))
-        for f in files:
-            h.update(os.path.relpath(f, _PKG_DIR).encode())
-            with open(f, "rb") as fh:
-                h.update(hashlib.sha256(fh.read()).digest())
+    rels = sorted(os.path.relpath(os.path.join(d, f), _PKG_DIR)
+                  for d, _, fs in os.walk(_PKG_DIR) for f in fs if f.endswith(".py"))
+    for rel in rels:
+        h.update(rel.encode())
+        with open(os.path.join(_PKG_DIR, rel), "rb") as fh:
+            h.update(hashlib.sha256(fh.read()).digest())
     return h.hexdigest()
 
 
@@ -168,27 +173,101 @@ def _path(key: str) -> str:
 
 
 def load(key: str):
-    """The stored entry for ``key``, or None (missing or unreadable)."""
+    """The stored entry for ``key``, or None (missing, unreadable or malformed)."""
     try:
         with open(_path(key), encoding="utf-8") as fh:
             entry = json.load(fh)
     except (OSError, ValueError):
         return None
-    return entry if isinstance(entry, dict) and "result" in entry else None
+    ok = isinstance(entry, dict) and isinstance(entry.get("result"), dict)
+    return entry if ok else None
 
 
-def store(key: str, material: dict, result: dict, origin_run_id: str | None = None) -> str:
-    os.makedirs(cache_dir(), exist_ok=True)
-    path = _path(key)
-    tmp = f"{path}.{os.getpid()}.tmp"
+def invalidate(key: str) -> bool:
+    """Delete the stored entry for ``key``; True if one was removed. Never raises."""
+    try:
+        os.unlink(_path(key))
+        return True
+    except OSError:
+        return False
+
+
+def _prune(keep_path: str) -> None:
+    """Bound the cache after a store: drop entries from other code, keep the
+    newest KEEP_ENV entries, sweep stale temp files. Never raises; never
+    removes ``keep_path`` (the entry just written)."""
+    try:
+        keep = max(1, int(os.environ.get(KEEP_ENV) or KEEP_DEFAULT))
+    except ValueError:
+        keep = KEEP_DEFAULT
+    try:
+        d = cache_dir()
+        now = time.time()
+        current = code_fingerprint()
+        entries = []
+        for name in os.listdir(d):
+            path = os.path.join(d, name)
+            try:
+                if name.endswith(".tmp"):
+                    if now - os.path.getmtime(path) > TMP_MAX_AGE_S:
+                        os.unlink(path)
+                elif name.endswith(".json") and path != keep_path:
+                    with open(path, encoding="utf-8") as fh:
+                        code = (json.load(fh).get("material") or {}).get("code")
+                    if code is not None and code != current:   # orphaned by a code change
+                        os.unlink(path)
+                    else:
+                        entries.append((os.path.getmtime(path), path))
+                elif name.endswith(".json"):
+                    entries.append((os.path.getmtime(path), path))
+            except (OSError, ValueError, AttributeError):
+                continue        # a file that vanished or is unreadable is not worth failing for
+        entries.sort(reverse=True)
+        for _, path in entries[keep:]:
+            if path != keep_path:
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
+    except Exception as exc:    # pruning is housekeeping; it must never break an analysis
+        print(f"bluecell: run cache prune skipped ({exc})", file=sys.stderr)
+
+
+def store(key: str, material: dict, result: dict, origin_run_id: str | None = None) -> str | None:
+    """Store a finished result. Never raises: a failed write must not lose the analysis.
+
+    On failure the reason is recorded in ``result["meta"]["cache_error"]`` and
+    returned as None.
+    """
     entry = {"key": key, "material": material,
              "stored_at": datetime.now(timezone.utc).isoformat(),
              "origin_run_id": origin_run_id,   # trace of the run that produced it
              "result": result}
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(entry, fh, default=str)
-    os.replace(tmp, path)
-    return path
+    try:
+        data = json.dumps(entry, default=str)
+        os.makedirs(cache_dir(), exist_ok=True)
+        path = _path(key)
+        # mkstemp gives a unique name per call, so concurrent stores of one key
+        # (threads or processes) never share a temp file.
+        fd, tmp = tempfile.mkstemp(dir=cache_dir(), prefix=f"{key}.", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(data)
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+        _prune(path)
+        return path
+    except (OSError, TypeError, ValueError) as exc:
+        print(f"bluecell: run cache not stored ({exc})", file=sys.stderr)
+        result.setdefault("meta", {})
+        if isinstance(result["meta"], dict):
+            result["meta"]["cache_error"] = str(exc)
+        return None
 
 
 def uncacheable_reason(result: dict, backbone) -> str | None:
@@ -203,6 +282,7 @@ def uncacheable_reason(result: dict, backbone) -> str | None:
         return f"Incident Commander fell back to the fixed flow ({cmd['fallback_reason']})"
     if cmd.get("error"):
         return f"Incident Commander errored ({cmd['error']})"
+    gap = None   # reported last, so a clear error or fallback is named first
     for r in swarm.get("agent_runs") or []:
         if r.get("dispatch_warning"):
             return f"agent {r.get('agent')}: {r['dispatch_warning']}"
@@ -213,20 +293,31 @@ def uncacheable_reason(result: dict, backbone) -> str | None:
             return f"agent {name} fell back to rules"
         if r.get("truncated"):
             return f"agent {name} hit its turn budget"
+        note = str(r.get("note") or "")   # set by Tier-2 verify(): incidents left without a verdict
+        if gap is None and ("no verdict" in note or "no agent verdict" in note):
+            gap = f"agent {name} filed no verdict for some incidents"
     ai = result.get("ai_analysis")
     if ai is not None and not ai.get("available"):
         return "AI analyst call failed"
     if ai and isinstance(ai.get("review"), dict) and ai["review"].get("error"):
         return "AI reviewer call failed"
+    if ai and ai.get("final_verdict") is None:
+        return "AI analyst gave no usable verdict"
+    if ai:   # a part that was not valid JSON is kept as {"raw": text}; not a usable answer
+        for part in ("lead", "review"):
+            if isinstance(ai.get(part), dict) and "raw" in ai[part]:
+                return f"AI analyst {part} was not valid JSON"
     for block in result.get("incidents") or []:
         if (block.get("storyline") or {}).get("narrative_source") != "llm":
             return f"LLM narrative for {block.get('id')} failed"
-    return None
+    return gap
 
 
 def mark_hit(entry: dict, key: str, elapsed_ms: int) -> dict:
     result = entry["result"]
-    meta = result.setdefault("meta", {})
+    meta = result.get("meta")
+    if not isinstance(meta, dict):   # a malformed entry must not crash the run
+        meta = result["meta"] = {}
     meta["cache"] = "hit"
     meta["cache_key"] = key
     meta["cached_at"] = entry.get("stored_at")

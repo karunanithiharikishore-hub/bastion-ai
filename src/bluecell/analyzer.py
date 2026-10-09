@@ -175,12 +175,13 @@ def _analyze(paths, *, source_override=None, window_minutes=60,
         split = {f["incident_id"]: f["votes"] for f in swarm["findings"]
                  if f["tier"] == 2 and f.get("origin") != "agent"
                  and (f.get("votes") or {}).get("needs_review")}
+        # Case-wide: an injection in any event steers the analyst, so a dismissal of any
+        # incident in this case is downgraded (BUG-INJ-1).
+        inj = [e.event_id for e in events if injection.is_flagged(e)]
         for block in incident_blocks:
             if block["id"] in split:
                 block["verdict"] = dict(block["verdict"], votes=split[block["id"]])
             if block["id"] in tier2:
-                inj = [e["event_id"] for e in block["events"]
-                       if injection.INJECTION_TAG in (e.get("tags") or [])]
                 block["verdict"] = apply_tier2_verdict(block["verdict"], tier2[block["id"]],
                                                        injection_events=inj)
 
@@ -227,7 +228,8 @@ def _analyze(paths, *, source_override=None, window_minutes=60,
                 "swarm": swarm_ms,
                 "total": total_ms,
             },
-            "agents_deployed": (swarm["agent_count"] if swarm else 0),
+            # worker_count excludes the commander (BUG-CMD-11); fixed flow has none.
+            "agents_deployed": (swarm.get("worker_count", swarm["agent_count"]) if swarm else 0),
             "orchestration": (swarm.get("orchestration") if swarm else None),
             "repeatability": {
                 "sampling": getattr(backbone, "sampling", None) if llm_on else "n/a (no LLM)",
@@ -256,9 +258,15 @@ def _analyze(paths, *, source_override=None, window_minutes=60,
         reason = run_cache.uncacheable_reason(result, backbone)
         if reason is None:
             tr = tracing.current()
-            run_cache.store(cache_key, material, result,
-                            origin_run_id=getattr(tr, "run_id", None))
-            result["meta"]["cache"] = "refreshed" if cache_mode == "refresh" else "miss (stored)"
-        else:
-            result["meta"]["cache"] = f"miss (not stored: {reason})"
+            if run_cache.store(cache_key, material, result,
+                               origin_run_id=getattr(tr, "run_id", None)) is None:
+                reason = result["meta"].get("cache_error")   # store() recorded it there
+            else:
+                result["meta"]["cache"] = "refreshed" if cache_mode == "refresh" else "miss (stored)"
+        if reason is not None:
+            note = f"miss (not stored: {reason}"
+            # A refresh that cannot store must not leave the old entry to be served next time (BUG-FEAT-13).
+            if cache_mode == "refresh" and run_cache.invalidate(cache_key):
+                note += "; stale entry removed"
+            result["meta"]["cache"] = note + ")"
     return result

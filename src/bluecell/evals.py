@@ -87,19 +87,30 @@ def load_cases(cases_dir: str, names=None) -> list:
     for name in sorted(os.listdir(cases_dir)):
         d = os.path.join(cases_dir, name)
         exp_path = os.path.join(d, "expected.json")
-        if not os.path.isfile(exp_path) or (wanted and name not in wanted):
+        if wanted and name not in wanted:
+            continue
+        files = case_files(d)
+        if not os.path.isfile(exp_path):
+            if files:  # logs without a label file (e.g. expected.jsno): invalid, not skipped
+                cases.append({"name": name, "dir": d, "files": files, "expected": {},
+                              "problems": [f"no expected.json but {len(files)} log file(s) "
+                                           "present (misnamed label file?)"]})
             continue
         try:
             with open(exp_path, encoding="utf-8") as fh:
                 exp = json.load(fh)
             probs = validate_expected(exp)
+            if not isinstance(exp, dict):  # keep the problem, but callers need a dict
+                exp = {}
         except ValueError as exc:
             exp, probs = {}, [f"expected.json is not valid JSON: {exc}"]
-        cases.append({"name": name, "dir": d, "files": case_files(d),
+        cases.append({"name": name, "dir": d, "files": files,
                       "expected": exp, "problems": probs})
     missing = wanted - {c["name"] for c in cases}
     if missing:
         raise FileNotFoundError(f"case(s) not found in {cases_dir}: {', '.join(sorted(missing))}")
+    if not cases:  # an empty suite must not pass a CI gate vacuously
+        raise FileNotFoundError(f"no eval cases found in {cases_dir}")
     return cases
 
 
@@ -141,7 +152,8 @@ def observe(result: dict) -> dict:
     return {"verdict": verdict, "tier2": tier2, "tier2_rule": tier2_rule,
             "incidents": len(incs), "text": text,
             "run_id": trace.get("run_id"),
-            "cost_usd": trace.get("total_cost_usd") or 0.0,
+            "cost_usd": trace.get("total_cost_usd"),  # None = unknown, never a fake 0
+            "cost_unknown_calls": trace.get("cost_unknown_calls") or 0,
             "cost_basis": trace.get("cost_basis") or [],
             "tokens": (trace.get("tokens") or {}).get("total", 0),
             "llm_calls": trace.get("llm_calls", 0),
@@ -198,7 +210,8 @@ def _ratio(a, b):
 def aggregate(cases: list) -> dict:
     """Aggregate metrics over every run of every case (repetitions included)."""
     runs = [(c, r) for c in cases for r in c["runs"] if not r.get("error")]
-    errors = sum(1 for c in cases for r in c["runs"] if r.get("error"))
+    errored = [(c, r) for c in cases for r in c["runs"] if r.get("error")]
+    errors = len(errored)
     tp = fp = fn = tn = 0
     correct = t2_n = t2_ok = 0
     for c, r in runs:
@@ -212,8 +225,15 @@ def aggregate(cases: list) -> dict:
         if r["checks"]["tier2"] != "n/a":
             t2_n += 1
             t2_ok += r["checks"]["tier2"] == "pass"
+    # A crashed run is a wrong answer: a missed malicious case is a false negative;
+    # it is in no tp/fp/tn cell and in no correct count, so it lowers accuracy.
+    fn += sum(1 for c, _ in errored if c["expected"].get("verdict") == "likely-malicious")
     durations = [r["duration_ms"] for _, r in runs]
-    costs = [r.get("cost_usd") or 0.0 for _, r in runs]
+    costs = [r["cost_usd"] for _, r in runs if r.get("cost_usd") is not None]
+    # Runs with any unknown-cost call: total is the known partial sum (">= x"),
+    # or None (n/a) when no run has a known cost at all.
+    cost_unknown_runs = sum(1 for _, r in runs
+                            if r.get("cost_usd") is None or r.get("cost_unknown_calls"))
     bases = sorted({b for _, r in runs for b in r.get("cost_basis") or []})
     return {
         "cases": len(cases),
@@ -222,14 +242,15 @@ def aggregate(cases: list) -> dict:
         "failed_cases": [c["name"] for c in cases if not c["passed"]],
         "runs": len(runs) + errors,
         "run_errors": errors,
-        "accuracy": _ratio(correct, len(runs)),
+        "accuracy": _ratio(correct, len(runs) + errors),
         "malicious": {"tp": tp, "fp": fp, "fn": fn, "tn": tn,
                       "precision": _ratio(tp, tp + fp), "recall": _ratio(tp, tp + fn)},
         "false_positive_rate": _ratio(fp, fp + tn),
         "tier2_agreement": _ratio(t2_ok, t2_n),
         "tier2_scored_runs": t2_n,
         "mean_duration_ms": round(sum(durations) / len(durations), 1) if durations else None,
-        "total_cost_usd": round(sum(costs), 6),
+        "total_cost_usd": (round(sum(costs), 6) if costs or not cost_unknown_runs else None),
+        "cost_unknown_runs": cost_unknown_runs,
         "cost_basis": bases,
         "total_tokens": sum(r.get("tokens") or 0 for _, r in runs),
         "llm_calls": sum(r.get("llm_calls") or 0 for _, r in runs),
@@ -356,12 +377,15 @@ def format_report(report: dict) -> str:
             f"passed {s['cases_passed']}/{s['cases']} cases"
             + (f" (failed: {', '.join(s['failed_cases'])})" if s["failed_cases"] else ""),
             f"accuracy {_pct(s['accuracy'])} · malicious precision {_pct(m['precision'])} "
-            f"recall {_pct(m['recall'])} · false-positive rate {_pct(s['false_positive_rate'])}",
-            f"Tier-2 agreement {_pct(s['tier2_agreement'])} over {s['tier2_scored_runs']} scored run(s)"
+            f"recall {_pct(m['recall'])} · false-positive rate {_pct(s['false_positive_rate'])}"]
+    if s["run_errors"]:
+        out.append(f"{s['run_errors']} run error(s) of {s['runs']}, counted as wrong")
+    out += [f"Tier-2 agreement {_pct(s['tier2_agreement'])} over {s['tier2_scored_runs']} scored run(s)"
             + ("" if s["tier2_scored_runs"] else " (no Tier-2 agent verdicts: rules mode)"),
             f"mean duration {s['mean_duration_ms']} ms · tokens {s['total_tokens']} · "
             f"LLM calls {s['llm_calls']} · tool calls {s['tool_calls']} · "
-            f"cost ${s['total_cost_usd']:.4f}"
+            "cost " + ("n/a" if s["total_cost_usd"] is None else
+                       f"{'>= ' if s['cost_unknown_runs'] else ''}${s['total_cost_usd']:.4f}")
             + (f" ({'/'.join(s['cost_basis'])})" if s["cost_basis"] else ""),
             f"mean verdict stability {_pct(s['mean_verdict_stability'])}"]
     return "\n".join(out)

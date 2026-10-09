@@ -14,9 +14,11 @@ or uploaded files; the browser cannot point it at arbitrary filesystem paths.
 """
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import shutil
+import signal
 import socket
 import sys
 import tempfile
@@ -69,21 +71,22 @@ class _State:
         except BackboneUnavailable:
             return None
 
-    def _analyze_paths(self, paths, window):
+    def _analyze_paths(self, paths, window, label=None):
         intel = IntelStore(self.intel_db) if self.intel_db else IntelStore()
-        return analyze(
-            paths, window_minutes=window,
-            backbone=self._backbone(), intel_store=intel,
-            run_agents=True, use_llm=(self.llm_mode != "off"),
-            orchestration=self.orchestration, votes=self.votes,
-            tier1_model=self.tier1_model,
-        )
+        with tracing.input_names([label] if label else []):
+            return analyze(
+                paths, window_minutes=window,
+                backbone=self._backbone(), intel_store=intel,
+                run_agents=True, use_llm=(self.llm_mode != "off"),
+                orchestration=self.orchestration, votes=self.votes,
+                tier1_model=self.tier1_model,
+            )
 
-    def _run(self, paths, window):
+    def _run(self, paths, window, label=None):
         """Analyze under the lock; record a good result, or set error and
         return None while keeping the last good result for /api/report.md."""
         try:
-            res = self._analyze_paths(paths, window)
+            res = self._analyze_paths(paths, window, label)
         except Exception as exc:  # never crash the server
             self.error = f"{type(exc).__name__}: {exc}"
             return None
@@ -112,7 +115,8 @@ class _State:
         if os.path.splitext(name)[1].lower() not in _State._ALLOWED_EXT:
             name += ".log"
         stem, ext = os.path.splitext(name)
-        return stem[:_State._MAX_STEM] + ext   # stay under filesystem name limits
+        # Budget in UTF-8 bytes (NAME_MAX is 255 bytes); "__N" and ext fit in the margin.
+        return stem.encode()[:_State._MAX_STEM].decode(errors="ignore") + ext
 
     def _write_unique(self, folder, name, content):
         """Write one file into folder, de-duplicating identical basenames."""
@@ -156,8 +160,8 @@ class _State:
                 raise ValueError("unknown or expired staging token")
             try:
                 if not slot or slot[1] == 0:
-                    self.error = "no files staged"; return None
-                return self._run([slot[0]], window)
+                    raise ValueError("no files staged")
+                return self._run([slot[0]], window, _upload_label(slot[0]))
             finally:
                 if slot:
                     shutil.rmtree(slot[0], ignore_errors=True)
@@ -176,8 +180,8 @@ class _State:
                     self._write_unique(tmp, f.get("name"), f.get("content", ""))
                     safe_count += 1
                 if not safe_count:
-                    self.error = "no usable files uploaded"; return None
-                return self._run([tmp], window)
+                    raise ValueError("no usable files uploaded")
+                return self._run([tmp], window, _upload_label(tmp))
             finally:
                 shutil.rmtree(tmp, ignore_errors=True)
 
@@ -187,6 +191,13 @@ class _State:
             for folder, _ in self.stages.values():
                 shutil.rmtree(folder, ignore_errors=True)
             self.stages.clear()
+
+
+def _upload_label(folder):
+    """Run label for staged uploads: the file names, not the (later deleted) temp dir."""
+    names = sorted(os.listdir(folder))
+    more = f" (+{len(names) - 2} more)" if len(names) > 2 else ""
+    return "dashboard upload: " + ", ".join(names[:2]) + more
 
 
 _LOOPBACK = {"127.0.0.1", "localhost", "::1"}
@@ -200,17 +211,30 @@ def _host_name(host_header: str) -> str:
     return h.rsplit(":", 1)[0] if h.count(":") == 1 else h
 
 
+_MAX_WINDOW = 10 * 366 * 24 * 60  # minutes; larger values overflow timedelta downstream
+
+
 def _int_or(value, default: int) -> int:
     """A positive window in minutes from a request body (default when absent)."""
     if value in (None, ""):
         return default
     try:
-        n = int(value)
-    except (TypeError, ValueError):
+        n = int(value)  # OverflowError: Infinity
+    except (TypeError, ValueError, OverflowError):
         raise ValueError(f"window must be an integer, got {value!r}")
     if n < 1:
         raise ValueError(f"window must be at least 1 minute, got {n}")
+    if n > _MAX_WINDOW:
+        raise ValueError(f"window must be at most {_MAX_WINDOW} minutes, got {n}")
     return n
+
+
+def _opt_str(obj, key):
+    """A request field that must be a string when present (None = absent)."""
+    value = obj.get(key)
+    if value is not None and not isinstance(value, str):
+        raise ValueError(f"{key} must be a string")
+    return value
 
 
 def _make_handler(state: _State):
@@ -314,6 +338,7 @@ def _make_handler(state: _State):
                     "paths": state.paths, "window": state.window,
                     "llm_mode": state.llm_mode,
                     "max_upload_mb": state.max_upload_mb,
+                    "max_upload_bytes": state.max_upload,   # exact cap the client checks against
                     "orchestration": state.orchestration, "votes": state.votes,
                     "tier1_model": state.tier1_model,
                 })
@@ -344,6 +369,12 @@ def _make_handler(state: _State):
                 self._json({"error": f"request too large: {length} bytes (limit "
                             f"{state.max_upload_mb} MB per request, JSON-encoded; "
                             f"restart with a larger --max-upload-mb)"}, 413)
+                # Discard (bounded) the unread body: closing with bytes unread makes the kernel
+                # RST the socket, so the client never reads the 413 above.
+                left = min(length, 4 * state.max_upload)
+                while left > 0 and (chunk := self.rfile.read(min(left, 1 << 20))):
+                    left -= len(chunk)
+                self.close_connection = True
                 return None
             # Read in chunks so a big body doesn't stall on one call.
             buf = bytearray(); remaining = length
@@ -371,6 +402,8 @@ def _make_handler(state: _State):
                 self._json({"error": f"bad request: {exc}"}, 400)
             except OSError as exc:  # e.g. disk full while staging an upload
                 self._json({"error": f"could not store upload: {exc}"}, 500)
+            except Exception as exc:  # backstop: a handler bug must not drop the connection
+                self._json({"error": f"internal error: {type(exc).__name__}"}, 500)
 
         def _post(self):
             path = urlparse(self.path).path
@@ -382,14 +415,15 @@ def _make_handler(state: _State):
                 p = self._read_json()
                 if p is None:
                     return
-                n = state.stage_add(p.get("name"), p.get("content"), p.get("token"))
+                n = state.stage_add(_opt_str(p, "name"), _opt_str(p, "content"),
+                                    _opt_str(p, "token"))
                 self._json({"ok": True, "staged": n}); return
             if path == "/api/stage/run":
                 p = self._read_json()
                 if p is None:
                     return
                 window = _int_or(p.get("window"), state.window)
-                res = state.stage_run(window, p.get("token"))
+                res = state.stage_run(window, _opt_str(p, "token"))
                 self._json(res if res else {"error": state.error or "analysis failed"},
                            200 if res else 500); return
             # Back-compat: whole-batch upload in one request.
@@ -397,8 +431,15 @@ def _make_handler(state: _State):
                 p = self._read_json()
                 if p is None:
                     return
-                res = state.run_on_uploads(p.get("files") or [],
-                                           _int_or(p.get("window"), state.window))
+                files = p.get("files", [])
+                if files is None:
+                    files = []
+                if not isinstance(files, list):
+                    raise ValueError("files must be a list")
+                for f in files:
+                    if isinstance(f, dict):
+                        _opt_str(f, "name"); _opt_str(f, "content")
+                res = state.run_on_uploads(files, _int_or(p.get("window"), state.window))
                 self._json(res if res else {"error": state.error or "analysis failed"},
                            200 if res else 500); return
             self._send(404, b"not found", "text/plain")
@@ -413,6 +454,10 @@ class _V6Server(ThreadingHTTPServer):
 def _make_server(host, port, handler):
     """Bind an HTTP server; IPv6 literals (e.g. ::1) need an AF_INET6 socket."""
     return (_V6Server if ":" in host else ThreadingHTTPServer)((host, port), handler)
+
+
+def _interrupt(signum, frame):
+    raise KeyboardInterrupt  # routes SIGTERM/SIGHUP through serve()'s clean-shutdown path
 
 
 def serve(paths, host="127.0.0.1", port=8787, window=60, llm_mode="off",
@@ -441,6 +486,16 @@ def serve(paths, host="127.0.0.1", port=8787, window=60, llm_mode="off",
             webbrowser.open(url)
         except Exception:
             pass
+    # `kill`/systemd/docker stop send SIGTERM; SIGHUP is a terminal hangup. Both must clean up
+    # staged uploads like Ctrl-C does. Handlers only install on the main thread.
+    prev = {}
+    for name in ("SIGTERM", "SIGHUP"):
+        if hasattr(signal, name):
+            try:
+                prev[getattr(signal, name)] = signal.signal(getattr(signal, name), _interrupt)
+            except ValueError:  # not the main thread
+                pass
+    atexit.register(state.close)  # backstop for exits that bypass the finally below
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
@@ -448,4 +503,8 @@ def serve(paths, host="127.0.0.1", port=8787, window=60, llm_mode="off",
     finally:
         httpd.server_close()
         state.close()
+        atexit.unregister(state.close)
+        for sig, handler in prev.items():
+            if handler is not None:  # None = previous handler was set outside Python
+                signal.signal(sig, handler)
     return httpd

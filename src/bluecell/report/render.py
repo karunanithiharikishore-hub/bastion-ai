@@ -5,8 +5,31 @@
 from __future__ import annotations
 
 import json
+import re
 
 from .. import provenance
+from ..agents.commander import MAX_DIRECTIVE_CHARS, MAX_SUMMARY_CHARS
+from ..agents.injection import sanitize
+
+_MD_SPECIAL_RE = re.compile(r"([\\`*_\[\]()<>#|!~&])")
+_LIST_ITEM_RE = re.compile(r"^(\s*)([-*+]|\d+[.)])\s+(.*)$")
+_OUTCOME_CHARS = 300  # worker error text echoed by the commander
+
+
+def _md(value, code: bool = False, max_len: int | None = None) -> str:
+    """A log-derived value as inline text on one line, with no markdown, HTML or link syntax.
+    code=True is for values inside a backtick span (escaping shows there, so backticks are swapped)."""
+    s = " ".join(sanitize(value, max_len).split())
+    return s.replace("`", "'") if code else _MD_SPECIAL_RE.sub(r"\\\1", s)
+
+
+def _md_block(text: str) -> str:
+    """Multi-line prose: each line as _md, but a list marker and its nesting indent stay at line start."""
+    out = []
+    for ln in text.splitlines():
+        m = _LIST_ITEM_RE.match(ln)
+        out.append(f"{m.group(1)}{m.group(2)} {_md(m.group(3))}" if m else _md(ln))
+    return "\n".join(out)
 
 
 def render_json(result: dict) -> str:
@@ -92,11 +115,11 @@ def render_markdown(result: dict) -> str:
     if swarm:
         c = swarm["counts"]
         lines += [
-            f"- Agent swarm: **{swarm['agent_count']} agents** "
+            f"- Agent swarm: **{_agents_label(swarm)}** "
             f"(T1:{c['tier1_findings']} findings, T2:{c['tier2_findings']} verifications, "
             f"T3:{c['tier3_findings']} specialist findings, "
             f"{c['confirmed_incidents']} confirmed, "
-            f"{c.get('autonomous_agents', 0)} of {swarm['agent_count']} ran as autonomous AI agents)",
+            f"{c.get('autonomous_agents', 0)} of {swarm.get('worker_count', swarm['agent_count'])} ran as autonomous AI agents)",
             "",
         ]
 
@@ -118,32 +141,32 @@ def render_markdown(result: dict) -> str:
         "## Executive Summary",
         "",
         f"**Overall verdict:** {_verdict_badge(tv.get('level'))} "
-        f"(confidence {round(tv.get('confidence', 0) * 100)}%): {tv.get('headline', '')}",
+        f"(confidence {round(tv.get('confidence', 0) * 100)}%): {_md(tv.get('headline', ''))}",
         "",
     ]
     if _override_note(tv):
-        lines += [f"_{_override_note(tv)}_", ""]
+        lines += [f"_{_md(_override_note(tv))}_", ""]
     if _votes_note(tv):
-        lines += [f"_{_votes_note(tv)}_", ""]
+        lines += [f"_{_md(_votes_note(tv))}_", ""]
     benign = asum.get("framing") == "benign"
     lines += [
         f"**{'How it started' if benign else 'How they got in'}:** "
-        f"{asum.get('how_they_got_in', 'n/a')}",
+        f"{_md(asum.get('how_they_got_in', 'n/a'))}",
         "",
         f"**{'Assessment' if benign else 'Objective'}:** "
-        f"{asum.get('objective', ts.get('likely_objective', 'unknown'))}",
+        f"{_md(asum.get('objective', ts.get('likely_objective', 'unknown')))}",
         "",
         f"**{'What happened' if benign else 'What they did'}:**",
     ]
     for step in asum.get("what_they_did", []):
-        lines.append(f"- {step}")
+        lines.append(f"- {_md(step)}")
     if not asum.get("what_they_did"):
         lines.append("- No discrete actions reconstructed.")
     lines += [
         "",
-        f"**Scope:** hosts: {', '.join(ts.get('affected_hosts') or []) or 'n/a'} · "
-        f"users: {', '.join(ts.get('affected_users') or []) or 'n/a'} · "
-        f"window: {ts['window']['start']} → {ts['window']['end']}",
+        f"**Scope:** hosts: {_md(', '.join(ts.get('affected_hosts') or [])) or 'n/a'} · "
+        f"users: {_md(', '.join(ts.get('affected_users') or [])) or 'n/a'} · "
+        f"window: {_md(ts['window']['start'])} → {_md(ts['window']['end'])}",
         "",
     ]
 
@@ -161,27 +184,27 @@ def render_markdown(result: dict) -> str:
             lines += [
                 f"> **VERDICT: {_verdict_badge(v['level'])}** "
                 f"(confidence {round(v.get('confidence', 0) * 100)}%)  ",
-                f"> {v['headline']}  ",
+                f"> {_md(v['headline'])}  ",
             ]
             if _override_note(v):
-                lines.append(f"> _{_override_note(v)}_  ")
+                lines.append(f"> _{_md(_override_note(v))}_  ")
             if _votes_note(v):
-                lines.append(f"> _{_votes_note(v)}_  ")
+                lines.append(f"> _{_md(_votes_note(v))}_  ")
             lines += [
-                f"> {v['why']}",
+                f"> {_md(v['why'])}",
                 "",
                 "**What to do next:**",
             ]
             for chk in v.get("recommended_checks", []):
-                lines.append(f"- [ ] {chk}")
+                lines.append(f"- [ ] {_md(chk)}")
             lines.append("")
         lines += [
-            f"- Window: {s['window']['start']} → {s['window']['end']}",
-            f"- Hosts: {', '.join(s['affected_hosts']) or 'n/a'}",
-            f"- Users: {', '.join(s['affected_users']) or 'n/a'}",
-            f"- Sources: {', '.join(s['sources_involved'])}",
+            f"- Window: {_md(s['window']['start'])} → {_md(s['window']['end'])}",
+            f"- Hosts: {_md(', '.join(s['affected_hosts'])) or 'n/a'}",
+            f"- Users: {_md(', '.join(s['affected_users'])) or 'n/a'}",
+            f"- Sources: {_md(', '.join(s['sources_involved']))}",
             f"- {'Assessment' if _benign(s) else 'Likely objective'}: "
-            f"**{s['likely_objective']}**",
+            f"**{_md(s['likely_objective'])}**",
             "",
             "**RCA / Storyline** "
             f"_(source: {inc['storyline']['narrative_source']})_",
@@ -189,8 +212,9 @@ def render_markdown(result: dict) -> str:
         ]
         if _benign(s):
             lines += [f"_{_BENIGN_NARRATIVE_NOTE}_", ""]
+        # Narrative is multi-line prose: neutralize each line, keep the line breaks and list markers.
         lines += [
-            inc["storyline"]["narrative"],
+            _md_block(inc["storyline"]["narrative"]),
             "",
             "**ATT&CK phases:**",
         ]
@@ -209,8 +233,8 @@ def render_markdown(result: dict) -> str:
         lines.append(f"**{kind.upper()}**")
         for x in items[:15]:
             flag = " ⚠️" if x["suspicious"] else ""
-            hosts = f" - hosts: {', '.join(x['hosts'])}" if x["hosts"] else ""
-            lines.append(f"- `{x['value']}` (x{x['count']}){flag}{hosts}")
+            hosts = f" - hosts: {_md(', '.join(x['hosts']))}" if x["hosts"] else ""
+            lines.append(f"- `{_md(x['value'], code=True)}` (x{x['count']}){flag}{hosts}")
         lines.append("")
 
     lines.append(_render_injection(result.get("prompt_injection")))
@@ -218,17 +242,18 @@ def render_markdown(result: dict) -> str:
     # Threat-hunt checklist
     lines.append("## Threat-Hunt Checklist (prioritized)\n")
     for c in result["hunt_checklist"]:
-        lines.append(f"- [{c['priority'].upper()}] **{c['action']}**")
+        lines.append(f"- [{c['priority'].upper()}] **{_md(c['action'])}**")
         if c.get("targets"):
-            lines.append(f"    - targets: {', '.join(str(t) for t in c['targets'][:20])}")
-        lines.append(f"    - why: {c['why']}")
+            lines.append(f"    - targets: {_md(', '.join(str(t) for t in c['targets'][:20]))}")
+        lines.append(f"    - why: {_md(c['why'])}")
     lines.append("")
 
     # Threat intel used
     if result.get("intel_used"):
         lines.append("## Threat Intel Referenced\n")
         for e in result["intel_used"]:
-            lines.append(f"- {e.get('id')}: {e.get('title')} (sev {e.get('severity','?')}, src {e.get('source','?')})")
+            lines.append(f"- {_md(e.get('id'))}: {_md(e.get('title'))} "
+                         f"(sev {_md(e.get('severity', '?'))}, src {_md(e.get('source', '?'))})")
         lines.append("")
 
     # Agent swarm detail.
@@ -243,6 +268,13 @@ def render_markdown(result: dict) -> str:
     return "\n".join(lines)
 
 
+def _cost_text(cost, unknown_calls=0) -> str:
+    """None = unknown ("n/a"); a known sum with unknown calls is a lower bound (">= $x")."""
+    if cost is None:
+        return "n/a"
+    return f"{'>= ' if unknown_calls else ''}${cost:.4f}"
+
+
 def _render_trace(meta: dict) -> str:
     """Short "Run cost & trace" section from meta["trace"] ('' when absent)."""
     t = meta.get("trace")
@@ -255,7 +287,8 @@ def _render_trace(meta: dict) -> str:
            f"LLM calls: {t.get('llm_calls', 0)} · tool calls: {t.get('tool_calls', 0)}",
            f"- Tokens: {tok.get('total', 0)} (in {tok.get('input', 0)}, out {tok.get('output', 0)}, "
            f"cache read {tok.get('cache_read', 0)}, cache write {tok.get('cache_creation', 0)})",
-           f"- Cost: ${t.get('total_cost_usd') or 0:.4f} ({t.get('cost_note') or 'n/a'})"]
+           f"- Cost: {_cost_text(t.get('total_cost_usd'), t.get('cost_unknown_calls'))} "
+           f"({t.get('cost_note') or 'n/a'})"]
     if meta.get("cache") == "hit":
         orig = meta.get("original_run_id")
         out.append("- Served from the run cache (stored "
@@ -265,7 +298,7 @@ def _render_trace(meta: dict) -> str:
     for a in costly:
         out.append(f"    - T{a.get('tier')} `{a.get('agent')}`: {a.get('tool_calls', 0)} tool calls, "
                    f"{(a.get('tokens') or {}).get('total', 0)} tokens, "
-                   f"${a.get('cost_usd') or 0:.4f}")
+                   f"{_cost_text(a.get('cost_usd'), a.get('cost_unknown_calls'))}")
     out.append("")
     return "\n".join(out)
 
@@ -283,10 +316,10 @@ def _render_injection(pi: dict | None) -> str:
            "AML.T0051.001, and incidents containing them cannot be reported as "
            "benign. The text was treated as evidence and was not followed.\n"]
     for e in pi["events"]:
-        reasons = ", ".join(e.get("reasons") or [])
-        out.append(f"- `{e['event_id']}` {e['ts']} ({e['source']}, host {e.get('host') or '-'}): "
-                   f"{reasons}")
-        out.append(f"    - excerpt: `{(e.get('excerpt') or '').replace('`', chr(39))}`")
+        reasons = _md(", ".join(e.get("reasons") or []))
+        out.append(f"- `{_md(e['event_id'], code=True)}` {_md(e['ts'])} ({_md(e['source'])}, "
+                   f"host {_md(e.get('host')) or '-'}): {reasons}")
+        out.append(f"    - excerpt: `{_md(e.get('excerpt'), code=True)}`")
     if pi["count"] > len(pi["events"]):
         out.append(f"- ... and {pi['count'] - len(pi['events'])} more")
     out.append("")
@@ -309,42 +342,51 @@ def _render_commander(swarm: dict) -> list:
            + (" (the Incident Commander agent decided which agents to deploy)"
               if orch == "commander" else " (fixed Tier-1 -> Tier-2 -> Tier-3 flow)")]
     if cmd and cmd.get("fallback_reason"):
-        out.append(f"- Commander not used: {cmd['fallback_reason']}; "
+        out.append(f"- Commander not used: {_md(cmd['fallback_reason'])}; "
                    "fell back to the fixed tiered flow.")
-    plan = (cmd or {}).get("plan") or []
+    # A discarded commander plan produced nothing: the fixed flow re-ran the case.
+    plan = [] if (cmd or {}).get("plan_discarded") else (cmd or {}).get("plan") or []
     if plan:
         out.append("")
         out.append("**Incident Commander decisions:**")
         for i, step in enumerate(plan, 1):
             if step["action"] == "deploy":
                 target = step.get("incident_id") or step.get("source")
-                line = (f"{i}. deploy `{step['agent']}` ({step['role']}"
-                        + (f", {target}" if target else "") + f"): {step.get('reason') or ''}")
+                line = (f"{i}. deploy `{_md(step['agent'], code=True)}` ({_md(step['role'])}"
+                        + (f", {_md(target)}" if target else "")
+                        + f"): {_md(step.get('reason'), max_len=MAX_DIRECTIVE_CHARS)}")
                 if step.get("objective"):
-                    line += f" · objective: {step['objective']}"
-                line += f" → {step.get('outcome', '')}"
+                    line += f" · objective: {_md(step['objective'], max_len=MAX_DIRECTIVE_CHARS)}"
+                line += f" → {_md(step.get('outcome'), max_len=_OUTCOME_CHARS)}"
             elif step["action"] == "refused":
-                line = f"{i}. deploy refused: {step.get('error')}"
+                line = f"{i}. deploy refused: {_md(step.get('error'), max_len=_OUTCOME_CHARS)}"
             else:
-                line = f"{i}. {step['action']}"
+                line = f"{i}. {_md(step['action'])}"
             out.append(line)
     if cmd and cmd.get("summary") and orch == "commander":
-        out += ["", f"**Incident Commander summary:** {cmd['summary']}"]
+        out += ["", f"**Incident Commander summary:** {_md(cmd['summary'], max_len=MAX_SUMMARY_CHARS)}"]
     out.append("")
     return out
+
+
+def _agents_label(swarm: dict) -> str:
+    """Workers are the --max-agents quantity; the commander is named apart from them."""
+    if swarm.get("orchestrator"):
+        return f"{swarm['worker_count']} workers + commander"
+    return f"{swarm.get('worker_count', swarm['agent_count'])} agents"
 
 
 def _render_swarm(swarm: dict) -> str:
     out = ["## Agent Swarm - findings & consensus\n"]
     out += _render_commander(swarm)
-    out.append(f"**Roster ({swarm['agent_count']} agents):**")
+    out.append(f"**Roster ({_agents_label(swarm)}):**")
     for a in swarm["roster"]:
-        out.append(f"- T{a['tier']} `{a['name']}` - {a['role']}")
+        out.append(f"- T{a['tier']} `{_md(a['name'], code=True)}` - {_md(a['role'])}")
     out.append("")
     out.append("**Per-incident consensus:**")
     for con in swarm["consensus"]:
         out.append(
-            f"- {con['incident_id']} - {con['severity'].upper()} "
+            f"- {_md(con['incident_id'])} - {con['severity'].upper()} "
             f"(score {con['score']}/100) · "
             f"{'✅ CONFIRMED by Tier-2' if con['confirmed_by_tier2'] else '⏳ not confirmed'} · "
             f"{con['agents_involved']} agents, tiers {con['tiers_involved']}, "
@@ -355,45 +397,48 @@ def _render_swarm(swarm: dict) -> str:
         out.append("**Tier-2 verdicts:**")
         for f in t2:
             tag = "AI agent" if f.get("origin") == "agent" else "rule"
-            out.append(f"- **{f['title']}** ({tag}, conf {f['confidence']}): {f['rationale']}")
+            out.append(f"- **{_md(f['title'])}** ({tag}, conf {f['confidence']}): "
+                       f"{_md(f['rationale'])}")
         out.append("")
     t1 = [f for f in swarm["findings"] if f["tier"] == 1]
     if t1:
         out.append("**Tier-1 candidates:**")
         for f in t1:
             tag = "AI agent" if f.get("origin") == "agent" else "rule"
-            out.append(f"- [{f['severity'].upper()}] `{f['agent']}` ({tag}, "
-                       f"{f['status']}): {f['title']}")
+            out.append(f"- [{f['severity'].upper()}] `{_md(f['agent'], code=True)}` ({tag}, "
+                       f"{_md(f['status'])}): {_md(f['title'])}")
         out.append("")
     runs = swarm.get("agent_runs") or []
     if runs:
         out.append("**How each agent ran:**")
         for r in runs:
-            line = f"- T{r.get('tier', '?')} `{r['agent']}`: {r['mode']}"
+            line = f"- T{r.get('tier', '?')} `{_md(r['agent'], code=True)}`: {_md(r['mode'])}"
+            if r.get("source"):  # hashed agent names (soc1-src-xxxx) need their raw log source
+                line += f" (source: {_md(str(r['source'])[:80])})"
             if r.get("mode") == "autonomous":
                 line += (f" · {r.get('tool_calls', 0)} tool calls, {r.get('turns')} turns, "
                          f"{r.get('findings_filed', 0)} submissions accepted, "
                          f"{r.get('rejected_submissions', 0)} rejected by grounding")
             if r.get("error"):
-                line += f" · error: {r['error'][:160]}"
+                line += f" · error: {_md(r['error'][:160])}"
             if r.get("note"):
-                line += f" · {r['note']}"
+                line += f" · {_md(r['note'])}"
             out.append(line)
         out.append("")
     if swarm.get("tier3_skipped"):
-        out += [f"**Tier-3 specialists skipped:** {swarm['tier3_skipped']}", ""]
+        out += [f"**Tier-3 specialists skipped:** {_md(swarm['tier3_skipped'])}", ""]
     # Tier-3 specialist recommendations are the actionable output.
     t3 = [f for f in swarm["findings"] if f["tier"] == 3]
     if t3:
         out.append("**Specialist findings (Tier-3):**")
         for f in t3:
             tag = "AI agent" if f.get("origin") == "agent" else "rule"
-            out.append(f"- [{f['severity'].upper()}] _{f['role']}_ ({tag}, "
-                       f"conf {f['confidence']}): **{f['title']}**")
+            out.append(f"- [{f['severity'].upper()}] _{_md(f['role'])}_ ({tag}, "
+                       f"conf {f['confidence']}): **{_md(f['title'])}**")
             if f.get("origin") == "agent":
-                out.append(f"    - why: {f['rationale']}")
-                out.append(f"    - evidence: {', '.join(f['evidence'][:12])}")
+                out.append(f"    - why: {_md(f['rationale'])}")
+                out.append(f"    - evidence: {_md(', '.join(str(x) for x in f['evidence'][:12]))}")
             if f.get("recommended_action"):
-                out.append(f"    - action: {f['recommended_action']}")
+                out.append(f"    - action: {_md(f['recommended_action'])}")
         out.append("")
     return "\n".join(out)

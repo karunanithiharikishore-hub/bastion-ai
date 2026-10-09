@@ -464,7 +464,7 @@ tokens, span tree), `POST /api/stage/reset` (returns a `token`) ->
 `POST /api/stage/add` (`{token,name,content}`, one file per request) ->
 `POST /api/stage/run` (`{token,window}`), and the one-shot `POST /api/upload`
 (`{files:[{name,content}], window}`). Each POST body is capped by
-`--max-upload-mb` (default 256 MB, measured on the JSON-encoded body).
+`--max-upload-mb` (default 256 MB): the whole JSON-encoded request body, not the raw file size.
 Every endpoint, including the runs API, gets the same protections: when bound
 to loopback only localhost `Host` headers are served (DNS rebinding), browser
 cross-site / same-site requests to `/api/*` (`Sec-Fetch-Site`) are refused,

@@ -16,6 +16,7 @@ Commands:
 from __future__ import annotations
 
 import argparse
+import signal
 import json
 import os
 import sys
@@ -25,6 +26,11 @@ from .analyzer import analyze
 from .intel import IntelStore
 from .llm import LLMBackbone, BackboneUnavailable
 from .report import render_markdown, render_json
+from .ingest.loader import _SOURCE_HINTS, _canon
+from .ingest.parsers import STRUCTURED_PARSERS
+
+# Every source label the loader can assign; --source is validated against it.
+_SOURCE_CHOICES = sorted({_canon(h) for h in _SOURCE_HINTS} | set(STRUCTURED_PARSERS))
 
 
 def _positive_int(value: str) -> int:
@@ -34,6 +40,35 @@ def _positive_int(value: str) -> int:
         raise argparse.ArgumentTypeError(f"expected a whole number, got {value!r}")
     if n < 1:
         raise argparse.ArgumentTypeError(f"must be at least 1, got {n}")
+    return n
+
+
+def _budget_seconds(value: str) -> int:
+    from .agents.commander import MIN_WORKER_SECONDS
+    n = _positive_int(value)
+    if n <= MIN_WORKER_SECONDS:  # a budget of exactly one worker's minimum leaves no room to plan
+        raise argparse.ArgumentTypeError(f"must be more than {MIN_WORKER_SECONDS} (a worker needs "
+                                         f"{MIN_WORKER_SECONDS}s), got {n}")
+    return n
+
+
+_MAX_WINDOW_MIN = 10 * 366 * 24 * 60  # same bound as web/server.py; timedelta overflows above it
+
+
+def _window(value: str) -> int:
+    n = _positive_int(value)
+    if n > _MAX_WINDOW_MIN:
+        raise argparse.ArgumentTypeError(f"window must be at most {_MAX_WINDOW_MIN} minutes, got {n}")
+    return n
+
+
+def _port(value: str) -> int:
+    try:
+        n = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected a whole number, got {value!r}")
+    if not 1 <= n <= 65535:
+        raise argparse.ArgumentTypeError(f"port must be 1-65535, got {n}")
     return n
 
 
@@ -162,12 +197,19 @@ def cmd_intel(args) -> int:
     if args.intel_cmd == "stats":
         print(json.dumps(store.stats(), indent=2))
     elif args.intel_cmd == "add":
+        if not args.id.strip():
+            print("[bluecell] intel add: --id must not be empty", file=sys.stderr)
+            return 2
         ok = store.add({
             "id": args.id, "title": args.title, "summary": args.summary or "",
             "severity": args.severity or "", "source": "manual",
             "keywords": (args.keywords or "").split(",") if args.keywords else [],
         })
-        store.save()
+        try:
+            store.save()
+        except (OSError, RuntimeError) as exc:
+            print(f"[bluecell] intel add failed: {exc}", file=sys.stderr)
+            return 2
         print("added" if ok else "already present (or missing id)")
     elif args.intel_cmd == "import":
         if not os.path.exists(args.file):
@@ -185,7 +227,15 @@ def cmd_intel(args) -> int:
             print(f"[bluecell] expected a JSON list or an object with an \"entries\" / "
                   f"\"vulnerabilities\" list: {args.file}", file=sys.stderr)
             return 2
-        n = store.ingest_cve_feed(records)
+        # Non-object entries (e.g. bare numbers) would crash ingest; skip and report them.
+        skipped = sum(1 for r in records if not isinstance(r, dict))
+        if skipped:
+            print(f"[bluecell] skipped {skipped} non-object record(s) in {args.file}", file=sys.stderr)
+        try:
+            n = store.ingest_cve_feed([r for r in records if isinstance(r, dict)])
+        except (OSError, RuntimeError) as exc:
+            print(f"[bluecell] intel import failed: {exc}", file=sys.stderr)
+            return 2
         print(f"imported {n} new intel entries (total {len(store.entries)})")
     elif args.intel_cmd == "search":
         for e in store.search(args.terms.split(), limit=args.limit):
@@ -269,6 +319,12 @@ def cmd_info(args) -> int:
 
 def cmd_eval(args) -> int:
     from . import evals
+    # check the --json target before the (slow) eval runs, as cmd_analyze does
+    json_dir = os.path.dirname(os.path.abspath(args.json)) if args.json else ""
+    if json_dir and not os.path.isdir(json_dir):
+        print(f"[bluecell] cannot write eval JSON: directory not found: {json_dir}",
+              file=sys.stderr)
+        return 2
     backbone = _make_backbone(args.llm, args.model)
     if args.llm != "off" and backbone is None:
         print("[bluecell] eval: no backbone available; scoring the rules only.",
@@ -292,10 +348,22 @@ def cmd_eval(args) -> int:
         return 2
     print(evals.format_report(report))
     if args.json:
-        with open(args.json, "w", encoding="utf-8") as fh:
-            json.dump(report, fh, indent=2, default=str)
+        try:
+            with open(args.json, "w", encoding="utf-8") as fh:
+                json.dump(report, fh, indent=2, default=str)
+        except OSError as exc:
+            print(f"[bluecell] cannot write eval JSON: {exc}", file=sys.stderr)
+            return 2
         print(f"[bluecell] wrote eval JSON -> {args.json}")
     return 0 if report["summary"]["cases_failed"] == 0 else 1
+
+
+def _cost_text(s, dollar=False) -> str:
+    cost = s.get("total_cost_usd")  # None = unknown; never shown as 0
+    if cost is None:
+        return "n/a"
+    text = f"{'$' if dollar else ''}{cost:.4f}"
+    return f">= {text}" if s.get("cost_unknown_calls") else text
 
 
 def cmd_runs(args) -> int:
@@ -313,7 +381,7 @@ def cmd_runs(args) -> int:
         tok = s.get("tokens") or {}
         print(f"duration {s.get('duration_ms')} ms · LLM calls {s.get('llm_calls')} · "
               f"tool calls {s.get('tool_calls')} · tokens {tok.get('total', 0)} · "
-              f"cost ${s.get('total_cost_usd') or 0:.4f} ({s.get('cost_note')})")
+              f"cost {_cost_text(s, dollar=True)} ({s.get('cost_note')})")
         print()
         for line in tracing.span_tree_lines(run):
             print(line)
@@ -329,7 +397,7 @@ def cmd_runs(args) -> int:
         rows.append((s.get("run_id"), (s.get("started") or "")[:19].replace("T", " "),
                      name[:40], s.get("verdict") or "-", s.get("agents", 0),
                      s.get("tool_calls", 0), (s.get("tokens") or {}).get("total", 0),
-                     f"{s.get('total_cost_usd') or 0:.4f}" + ("~" if s.get("cost_estimated") else ""),
+                     _cost_text(s) + ("~" if s.get("cost_estimated") and s.get("total_cost_usd") is not None else ""),
                      f"{(s.get('duration_ms') or 0) / 1000:.1f}"))
     widths = [max(len(str(r[i])) for r in rows) for i in range(len(rows[0]))]
     for i, r in enumerate(rows):
@@ -356,7 +424,7 @@ def _add_commander_limits(p) -> None:
     p.add_argument("--max-commander-turns", dest="max_commander_turns", type=_positive_int,
                    default=DEFAULT_COMMANDER_TURNS,
                    help=f"Incident Commander: its own turn cap (default {DEFAULT_COMMANDER_TURNS})")
-    p.add_argument("--budget-seconds", dest="budget_seconds", type=_positive_int,
+    p.add_argument("--budget-seconds", dest="budget_seconds", type=_budget_seconds,
                    default=DEFAULT_BUDGET_SECONDS,
                    help=f"Incident Commander: wall-clock budget (default {DEFAULT_BUDGET_SECONDS})")
 
@@ -376,9 +444,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     a = sub.add_parser("analyze", help="Analyze log files/dirs")
     a.add_argument("paths", nargs="+", help="Log files or directories")
-    a.add_argument("--source", help="Override source type for all inputs "
-                   "(edr|dns|network|firewall|cloud|auth|syslog)")
-    a.add_argument("--window", type=_positive_int, default=60,
+    a.add_argument("--source", type=str.lower, choices=_SOURCE_CHOICES,
+                   help="Override source type for all inputs "
+                   f"({'|'.join(_SOURCE_CHOICES)})")
+    a.add_argument("--window", type=_window, default=60,
                    help="Correlation window in minutes (default 60)")
     a.add_argument("--max-incidents", type=_positive_int, default=10, dest="max_incidents")
     a.add_argument("--no-agents", action="store_true", dest="no_agents",
@@ -447,23 +516,23 @@ def build_parser() -> argparse.ArgumentParser:
     ii.add_argument("file")
     isr = its.add_parser("search", help="Search intel")
     isr.add_argument("terms")
-    isr.add_argument("--limit", type=int, default=10)
+    isr.add_argument("--limit", type=_positive_int, default=10)
     it.set_defaults(func=cmd_intel)
 
     sv = sub.add_parser("serve", help="Launch the local web dashboard")
     sv.add_argument("paths", nargs="+", help="Log files or directories to analyze")
     sv.add_argument("--host", default="127.0.0.1", help="Bind host (default 127.0.0.1)")
-    sv.add_argument("--port", type=int, default=8787, help="Port (default 8787)")
-    sv.add_argument("--window", type=_positive_int, default=60, help="Correlation window minutes")
+    sv.add_argument("--port", type=_port, default=8787, help="Port 1-65535 (default 8787)")
+    sv.add_argument("--window", type=_window, default=60, help="Correlation window minutes")
     sv.add_argument("--llm", choices=["auto", "cli", "api", "off"], default="off",
                     help="LLM backbone for RCA/agents (default off for speed)")
     sv.add_argument("--model", default="claude-sonnet-5")
     sv.add_argument("--intel-db", dest="intel_db", help="Path to intel JSON store")
     sv.add_argument("--open", action="store_true", help="Open the browser automatically")
-    sv.add_argument("--max-upload-mb", dest="max_upload_mb", type=int, default=256,
-                    help="Upload request-body cap in MB (default 256). The dashboard "
-                         "sends one file per request, JSON-encoded, so this is roughly "
-                         "the largest single file; total batch size is limited only by disk.")
+    sv.add_argument("--max-upload-mb", dest="max_upload_mb", type=_positive_int, default=256,
+                    help="Cap on each upload request body in MB (default 256), counted on "
+                         "the whole JSON-encoded request, not the raw file size, so JSON "
+                         "escaping counts against it. Staged uploads send one file per request.")
     sv.add_argument("--orchestration", choices=ORCHESTRATIONS,
                     default="auto", help=ORCH_HELP)
     sv.add_argument("--votes", type=_positive_int, default=1,
@@ -474,8 +543,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     pl = sub.add_parser("plan", help="Offline cost plan for analyzing some logs")
     pl.add_argument("paths", nargs="+", help="Log files or directories")
-    pl.add_argument("--source", help="Override source type for all inputs")
-    pl.add_argument("--window", type=_positive_int, default=60)
+    pl.add_argument("--source", type=str.lower, choices=_SOURCE_CHOICES,
+                    help="Override source type for all inputs "
+                    f"({'|'.join(_SOURCE_CHOICES)})")
+    pl.add_argument("--window", type=_window, default=60)
     pl.add_argument("--max-incidents", type=_positive_int, default=10, dest="max_incidents")
     pl.add_argument("--votes", type=_positive_int, default=1)
     _add_commander_limits(pl)
@@ -490,12 +561,27 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _terminate(signum, frame):
+    raise SystemExit(128 + signum)  # unwinds through the finally/close() that reap worker processes
+
+
 def main(argv=None) -> int:
-    # Authorship integrity gate: halts if attribution was removed/altered.
+    # Authorship integrity gate: warns on stderr if attribution was removed/altered; never exits.
     provenance.enforce(strict=True)
     parser = build_parser()
     args = parser.parse_args(argv)
-    return args.func(args)
+    prev = {}
+    for name in ("SIGTERM", "SIGHUP"):      # default action would skip every finally
+        try:
+            prev[getattr(signal, name)] = signal.signal(getattr(signal, name), _terminate)
+        except (AttributeError, ValueError):    # no SIGHUP / not the main thread
+            pass
+    try:
+        return args.func(args)
+    finally:
+        for sig, handler in prev.items():
+            if handler is not None:
+                signal.signal(sig, handler)
 
 
 if __name__ == "__main__":

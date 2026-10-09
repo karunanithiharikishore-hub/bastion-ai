@@ -36,10 +36,13 @@ const toast = (m) => { const t = $("toast"); t.innerHTML = m; t.classList.remove
 
 /* ================= file intake (drag & drop) ================= */
 const pending = new Map();   // name -> {name, content, size}
-// The server caps each upload *request* (--max-upload-mb, read from /api/meta);
-// one file per request, JSON-escaped, so leave headroom for the encoding.
-let MAX_UPLOAD_MB = 256;
-const maxFile = () => Math.floor(MAX_UPLOAD_MB * 1024 * 1024 * 0.9);
+// The server caps each upload *request body* (--max-upload-mb; exact bytes from /api/meta).
+let MAX_UPLOAD_MB = 256, MAX_UPLOAD_BYTES = 256 * 1048576;
+const TOKEN_LEN = 32;   // /api/stage/reset returns a uuid4 hex token (32 chars)
+// Exact UTF-8 size of the /api/stage/add body postJSON() sends (JSON escaping included).
+function uploadBodyBytes(name, content) {
+  return new TextEncoder().encode(JSON.stringify({ token: "0".repeat(TOKEN_LEN), name, content })).length;
+}
 let resultId = null;   // id of the analysis on screen (for the IR report download)
 
 function humanSize(n) { return n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB"; }
@@ -65,13 +68,17 @@ function addFiles(fileList) {
   let done = 0;
   if (!arr.length) return;
   arr.forEach((file) => {
-    if (file.size > maxFile()) {
-      toast(`${esc(file.name)} is ${humanSize(file.size)}, over the ~${humanSize(maxFile())} upload limit (server --max-upload-mb ${MAX_UPLOAD_MB})`);
+    const overCap = (bytes) => toast(`${esc(file.name)} is ${humanSize(bytes)} as an upload request, over the ${humanSize(MAX_UPLOAD_BYTES)} limit (server --max-upload-mb ${MAX_UPLOAD_MB})`);
+    // readAsText drops a UTF-8 BOM (3 bytes), so the JSON body is at least file.size - 3.
+    if (file.size - 3 > MAX_UPLOAD_BYTES) {
+      overCap(file.size);
       done++; if (done === arr.length) renderFileList(); return;
     }
     const reader = new FileReader();
     reader.onload = () => {
-      pending.set(file.name, { name: file.name, content: reader.result, size: file.size });
+      const bytes = uploadBodyBytes(file.name, reader.result);
+      if (bytes > MAX_UPLOAD_BYTES) overCap(bytes);
+      else pending.set(file.name, { name: file.name, content: reader.result, size: file.size });
       done++; if (done === arr.length) renderFileList();
     };
     reader.onerror = () => { done++; toast("Could not read " + esc(file.name));
@@ -149,7 +156,8 @@ function renderHero(r) {
   const host = $("hero"); host.innerHTML = "";
   const m = r.meta || {}, sw = r.swarm || { agent_count: 0 };
   const t = fmtTime((m.timing_ms || {}).total);
-  host.appendChild(metric(m.agents_deployed ?? sw.agent_count ?? 0, "Agents Deployed", "v"));
+  const agents = sw.worker_count ?? m.agents_deployed ?? sw.agent_count ?? 0;
+  host.appendChild(metric(agents, sw.orchestrator ? "Workers (+ Commander)" : "Agents Deployed", "v"));
   const tm = el("div", "metric p"); const tv = el("div", "mval", "0"); tm.appendChild(tv);
   tm.appendChild(el("div", "mlbl", "Time to Deduce")); host.appendChild(tm);
   (function () { const dur = 900, t0 = performance.now();
@@ -160,7 +168,7 @@ function renderHero(r) {
   host.appendChild(metric((r.incidents || []).length, "Incidents", "g"));
   $("backbone").textContent = "backbone: " + (m.backbone || "unknown");
   $("hc-backbone").textContent = (m.backbone || "unknown").split(" ")[0];
-  $("hc-agents").textContent = (m.agents_deployed ?? sw.agent_count ?? 0) + " deployed";
+  $("hc-agents").textContent = esc(agents) + " deployed";
   $("ver").textContent = "v" + (m.version || "");
 }
 
@@ -333,7 +341,7 @@ function showPhaseDetail(i) {
 function renderSwarm(r) {
   const orbit = $("orbit"), side = $("swarm-side"); orbit.innerHTML = ""; side.innerHTML = "";
   const sw = r.swarm;
-  $("swarm-sub").textContent = sw ? `${sw.agent_count} agents · ${sw.counts.confirmed_incidents} confirmed` : "";
+  $("swarm-sub").textContent = sw ? `${esc(sw.worker_count)} ${sw.orchestrator ? "workers + commander" : "agents"} · ${esc(sw.counts.confirmed_incidents)} confirmed` : "";
   if (!sw) { orbit.appendChild(el("p", "empty", "Swarm did not run.")); return; }
   orbit.appendChild(el("div", "core", "SOC<br>CORE"));
   const rings = { 1: 44, 2: 104, 3: 156 }, bucket = { 1: [], 2: [], 3: [] };
@@ -426,7 +434,7 @@ function renderAll(r) {
 }
 async function mergeMetaAndRender(data) {
   try { const m = await (await fetch("/api/meta")).json(); data.meta = Object.assign({}, m, data.meta);
-    if (m.max_upload_mb) MAX_UPLOAD_MB = m.max_upload_mb; } catch (e) {}
+    if (m.max_upload_bytes) { MAX_UPLOAD_MB = m.max_upload_mb; MAX_UPLOAD_BYTES = m.max_upload_bytes; } } catch (e) {}
   renderAll(data); return data;
 }
 async function load(url) {

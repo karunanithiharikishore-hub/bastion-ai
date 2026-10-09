@@ -60,12 +60,12 @@ def test_tests_never_write_to_real_home():
 # Run cache x tracing
 # ---------------------------------------------------------------------------
 def test_cache_hit_is_traced_and_links_the_original_run(tmp_path, monkeypatch):
-    from test_repeatability import FakeBackbone
+    from test_repeatability import VerdictBackbone
     from bluecell import analyzer, tracing
     from bluecell.report import render_markdown
     monkeypatch.setenv("BLUECELL_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setenv("BLUECELL_RUNS_DIR", str(tmp_path / "runs"))
-    bb = FakeBackbone()
+    bb = VerdictBackbone(SAMPLES)
     first = analyzer.analyze([SAMPLES], backbone=bb, intel_store=None, cache="use",
                              orchestration="fixed")
     assert first["meta"]["cache"] == "miss (stored)", first["meta"]["cache"]

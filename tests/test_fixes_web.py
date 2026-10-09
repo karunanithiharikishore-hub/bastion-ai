@@ -134,7 +134,7 @@ def test_w5_failed_run_keeps_last_good_result(srv):
     state._analyze_paths = lambda *a, **k: calls.append(a) or orig(*a, **k)
     _req(port, "POST", "/api/stage/reset", {})
     s, _ = _req(port, "POST", "/api/stage/run", {"window": 60})
-    assert s == 500
+    assert s == 400
     s, _ = _req(port, "GET", "/api/report.md")
     assert s == 200
     assert state.result is good and not calls   # no silent re-analysis
@@ -154,7 +154,8 @@ def test_w9_staging_dirs_removed(tmp_path, monkeypatch):
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
     state = _State([SAMPLES], window=120, llm_mode="off", model="x", intel_db=None)
     tok = state.stage_reset()
-    assert state.stage_run(token=tok) is None           # "no files staged" branch
+    with pytest.raises(ValueError, match="no files staged"):  # "no files staged" branch
+        state.stage_run(token=tok)
     assert not glob.glob(str(tmp_path / "bluecell_stage_*"))
     tok = state.stage_reset()
     state.stage_add("a.log", SYSLOG, token=tok)
