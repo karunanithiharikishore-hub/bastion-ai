@@ -304,7 +304,7 @@ class Dispatcher:
                               "tier": agent.tier, "mode": "skipped", "error": why,
                               "findings_filed": 0}
             return []
-        agent.timeout = int(max(MIN_WORKER_SECONDS, min(agent.timeout, left)))
+        agent.timeout = max(MIN_WORKER_SECONDS, min(agent.timeout, left))  # float: int() turned sub-second budgets into 0
         ctx = self.ctx
         if isinstance(agent, SeniorSocAnalyst):
             return self.orch.traced_verify(agent, ctx, list(self.orch.tier1),
