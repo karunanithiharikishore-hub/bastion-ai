@@ -215,7 +215,8 @@ def cmd_roster(args) -> int:
     from .agents.roles import SPECIALISTS
     rows = [
         ("0", "soc-lead", "SOC Lead / Incident Commander (plans + deploys the "
-                          "agents below; --orchestration commander)"),
+                          "agents below; default with a model backbone, "
+                          "--orchestration auto|commander)"),
         ("1", "soc1-<source>", "Tier-1 SOC Analyst (one per log source)"),
         ("2", "soc2-lead", "Tier-2 SOC Analyst (verification/confirmation)"),
     ]

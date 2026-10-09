@@ -8,3 +8,4 @@ data/intel.json
 data/intel.json.tmp
 .venv/
 venv/
+.claude/
