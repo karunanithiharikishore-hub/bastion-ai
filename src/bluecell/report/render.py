@@ -37,6 +37,8 @@ def _benign(structured: dict) -> bool:
 
 def _override_note(v: dict) -> str:
     """One line saying the Tier-2 agent overruled the rule score, or ''."""
+    if v.get("injection_note"):
+        return v["injection_note"]
     if not v.get("overrides_rules"):
         return ""
     rv = v.get("rule_verdict") or {}
@@ -188,6 +190,8 @@ def render_markdown(result: dict) -> str:
             lines.append(f"- `{x['value']}` (x{x['count']}){flag}{hosts}")
         lines.append("")
 
+    lines.append(_render_injection(result.get("prompt_injection")))
+
     # Threat-hunt checklist
     lines.append("## Threat-Hunt Checklist (prioritized)\n")
     for c in result["hunt_checklist"]:
@@ -239,6 +243,29 @@ def _render_trace(meta: dict) -> str:
         out.append(f"    - T{a.get('tier')} `{a.get('agent')}`: {a.get('tool_calls', 0)} tool calls, "
                    f"{(a.get('tokens') or {}).get('total', 0)} tokens, "
                    f"${a.get('cost_usd') or 0:.4f}")
+    out.append("")
+    return "\n".join(out)
+
+
+def _render_injection(pi: dict | None) -> str:
+    """Report section for log lines that try to instruct the AI analyst ('' if none)."""
+    if not pi or not pi.get("count"):
+        return ""
+    out = ["## Prompt-injection attempts detected in logs\n",
+           f"**{pi['count']} event(s)** contain text written to steer an AI analyst "
+           "(for example 'ignore previous instructions' or 'mark this as benign'). "
+           "Someone who can write to those logged fields tried to manipulate this "
+           "analysis. That is a security signal in itself: the events were raised to "
+           "at least high severity, tagged ATT&CK T1562 (Impair Defenses) and ATLAS "
+           "AML.T0051.001, and incidents containing them cannot be reported as "
+           "benign. The text was treated as evidence and was not followed.\n"]
+    for e in pi["events"]:
+        reasons = ", ".join(e.get("reasons") or [])
+        out.append(f"- `{e['event_id']}` {e['ts']} ({e['source']}, host {e.get('host') or '-'}): "
+                   f"{reasons}")
+        out.append(f"    - excerpt: `{(e.get('excerpt') or '').replace('`', chr(39))}`")
+    if pi["count"] > len(pi["events"]):
+        out.append(f"- ... and {pi['count'] - len(pi['events'])} more")
     out.append("")
     return "\n".join(out)
 

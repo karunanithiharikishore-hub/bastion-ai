@@ -15,8 +15,9 @@ Key = sha256 over:
 - every normalized event (its event_id and full normalized content),
 - model, Tier-1 model, backbone path (cli/api) and sampling temperature,
 - BlueCell version,
-- the prompt/mission texts and the tool schemas (separate hashes), plus a hash
-  of the LLM-path source code so a code change never serves a stale result,
+- the prompt/mission texts (including the prompt-injection boundary text and
+  detector) and the tool schemas (separate hashes), plus a hash of the
+  LLM-path source code so a code change never serves a stale result,
 - the threat-intel store contents (agents and the narrative read it),
 - orchestration settings (window, incident cap, votes, budgets, ...).
 
@@ -67,9 +68,15 @@ def events_fingerprint(events) -> str:
 
 def prompt_texts() -> dict:
     """Every system prompt / mission / prompt template a model sees."""
-    from .agents import runtime, analyst, roles
+    from .agents import runtime, analyst, roles, injection, toolbox
     from .report import rca
     texts = {
+        # Prompt-injection defenses: the boundary instruction every prompt
+        # carries, the tool-output warning, and the detector itself (its
+        # patterns decide which events are flagged and how verdicts are guarded).
+        "injection_boundary": injection.BOUNDARY_INSTRUCTION,
+        "injection_warning": toolbox.INJECTION_WARNING,
+        "injection_detector": _source_of(injection),
         "operating_protocol": runtime.OPERATING_PROTOCOL,
         "task_prompt": runtime.task_prompt("{agent}", "{role}"),
         "tier1": roles.JuniorSocAnalyst.mission,
@@ -86,6 +93,13 @@ def prompt_texts() -> dict:
     for cls in roles.SPECIALISTS:
         texts["tier3:" + cls.role] = cls.mission
     return texts
+
+
+def _source_of(obj) -> str:
+    try:
+        return inspect.getsource(obj)
+    except (OSError, TypeError):   # no source available (e.g. zipped install)
+        return repr(obj)
 
 
 def prompt_fingerprint() -> str:

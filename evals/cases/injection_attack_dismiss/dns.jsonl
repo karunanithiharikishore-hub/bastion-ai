@@ -1,0 +1,4 @@
+{"timestamp": "2026-09-26T09:06:12Z", "source": "dns", "host": "web01", "src_ip": "10.0.0.11", "query": "cdn.evil-update.xyz", "answer": "203.0.113.90"}
+{"timestamp": "2026-09-26T09:08:45Z", "source": "dns", "host": "web01", "src_ip": "10.0.0.11", "query": "kj3h5g9x2zqwmnbvc7.top", "answer": "198.51.100.7"}
+{"timestamp": "2026-09-26T09:09:50Z", "source": "dns", "host": "web01", "src_ip": "10.0.0.11", "query": "www.microsoft.com", "answer": "192.0.2.50"}
+{"timestamp": "2026-09-26T09:14:05Z", "source": "dns", "host": "db02", "src_ip": "10.0.0.22", "query": "kj3h5g9x2zqwmnbvc7.top", "answer": "198.51.100.7"}
