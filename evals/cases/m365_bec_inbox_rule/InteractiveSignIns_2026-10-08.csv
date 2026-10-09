@@ -1,0 +1,2 @@
+Date (UTC),User,Application,Client app,IP address,Location,Status,Sign-in error code,Risk level during sign-in,Risk state,Multifactor authentication result
+2026-10-08T13:02:41Z,finance.lead@northwind.example,OfficeHome,Browser,198.51.100.77,"Lagos, NG",Success,0,high,atRisk,MFA requirement satisfied by claim in the token

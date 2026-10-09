@@ -1,0 +1,2 @@
+Oct  9 19:00:04 itsm01 change-mgmt[311]: Change CHG0051234 opened by it-ops: emergency patch KB5031356 to srv-fs01, srv-fs02, srv-print01 via PsExec from adm-ws01 (approved by CAB, window 19:00-20:00)
+Oct  9 19:52:40 itsm01 change-mgmt[311]: Change CHG0051234 closed by it-ops: all 3 servers patched and rebooted, verified

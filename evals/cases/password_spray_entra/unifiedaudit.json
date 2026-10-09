@@ -1,0 +1,44 @@
+[
+ {
+  "CreationDate": "2026-10-07T01:50:40Z",
+  "RecordType": "ExchangeItemAggregated",
+  "Operation": "MailItemsAccessed",
+  "UserId": "k.osei@northwind.example",
+  "AuditData": "{\"ClientIPAddress\": \"203.0.113.45\", \"Workload\": \"Exchange\", \"ResultStatus\": \"Succeeded\", \"OperationCount\": 40, \"Folders\": [{\"Path\": \"\\\\Inbox\"}]}"
+ },
+ {
+  "CreationDate": "2026-10-07T01:52:40Z",
+  "RecordType": "ExchangeItemAggregated",
+  "Operation": "MailItemsAccessed",
+  "UserId": "k.osei@northwind.example",
+  "AuditData": "{\"ClientIPAddress\": \"203.0.113.45\", \"Workload\": \"Exchange\", \"ResultStatus\": \"Succeeded\", \"OperationCount\": 65, \"Folders\": [{\"Path\": \"\\\\Inbox\"}]}"
+ },
+ {
+  "CreationDate": "2026-10-07T01:54:40Z",
+  "RecordType": "ExchangeItemAggregated",
+  "Operation": "MailItemsAccessed",
+  "UserId": "k.osei@northwind.example",
+  "AuditData": "{\"ClientIPAddress\": \"203.0.113.45\", \"Workload\": \"Exchange\", \"ResultStatus\": \"Succeeded\", \"OperationCount\": 90, \"Folders\": [{\"Path\": \"\\\\Inbox\"}]}"
+ },
+ {
+  "CreationDate": "2026-10-07T01:56:40Z",
+  "RecordType": "ExchangeItemAggregated",
+  "Operation": "MailItemsAccessed",
+  "UserId": "k.osei@northwind.example",
+  "AuditData": "{\"ClientIPAddress\": \"203.0.113.45\", \"Workload\": \"Exchange\", \"ResultStatus\": \"Succeeded\", \"OperationCount\": 115, \"Folders\": [{\"Path\": \"\\\\Inbox\"}]}"
+ },
+ {
+  "CreationDate": "2026-10-07T01:58:40Z",
+  "RecordType": "ExchangeItemAggregated",
+  "Operation": "MailItemsAccessed",
+  "UserId": "k.osei@northwind.example",
+  "AuditData": "{\"ClientIPAddress\": \"203.0.113.45\", \"Workload\": \"Exchange\", \"ResultStatus\": \"Succeeded\", \"OperationCount\": 140, \"Folders\": [{\"Path\": \"\\\\Inbox\"}]}"
+ },
+ {
+  "CreationDate": "2026-10-07T02:00:40Z",
+  "RecordType": "ExchangeItemAggregated",
+  "Operation": "MailItemsAccessed",
+  "UserId": "k.osei@northwind.example",
+  "AuditData": "{\"ClientIPAddress\": \"203.0.113.45\", \"Workload\": \"Exchange\", \"ResultStatus\": \"Succeeded\", \"OperationCount\": 165, \"Folders\": [{\"Path\": \"\\\\Inbox\"}]}"
+ }
+]

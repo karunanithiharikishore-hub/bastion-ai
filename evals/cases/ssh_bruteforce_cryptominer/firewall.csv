@@ -1,0 +1,4 @@
+timestamp,source,action,src_ip,dst_ip,dst_port,message,severity
+2026-10-02T03:13:58Z,firewall,allow,203.0.113.77,10.20.0.13,22,inbound ssh to build03,low
+2026-10-02T03:17:22Z,firewall,allow,10.20.0.13,198.51.100.23,80,outbound http download,medium
+2026-10-02T03:18:25Z,firewall,allow,10.20.0.13,198.51.100.23,3333,outbound stratum mining pool connection,high

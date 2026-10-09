@@ -19,7 +19,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-from .. import __version__, provenance
+from .. import __version__, provenance, tracing
 from ..analyzer import analyze
 from ..intel import IntelStore
 from ..llm import LLMBackbone, BackboneUnavailable
@@ -266,6 +266,18 @@ def _make_handler(state: _State):
                     "paths": state.paths, "window": state.window,
                     "llm_mode": state.llm_mode,
                 })
+            elif path == "/api/runs":
+                try:
+                    limit = max(1, min(500, int(parse_qs(route.query).get("limit", ["100"])[0])))
+                except ValueError:
+                    limit = 100
+                self._json({"runs": tracing.list_runs(limit=limit)})
+            elif path.startswith("/api/runs/"):
+                run = tracing.load_run(path[len("/api/runs/"):])
+                if run is None:
+                    self._json({"error": "run not found"}, 404)
+                else:
+                    self._json(run)
             elif path in ("/", "/index.html"):
                 self._static("index.html")
             else:

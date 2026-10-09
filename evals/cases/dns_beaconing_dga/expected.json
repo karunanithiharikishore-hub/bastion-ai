@@ -1,0 +1,12 @@
+{
+  "description": "A workstation resolves a rotating set of DGA-looking .top domains every ~60 s, all pointing at one IP, and rundll32 (spawned by Word) talks to that IP: periodic C2 beaconing.",
+  "verdict": "likely-malicious",
+  "tier2": "confirmed",
+  "must_mention": [
+    "198.51.100.66"
+  ],
+  "must_not_mention": [
+    "outlook.office365.com is malicious"
+  ],
+  "min_incidents": 1
+}

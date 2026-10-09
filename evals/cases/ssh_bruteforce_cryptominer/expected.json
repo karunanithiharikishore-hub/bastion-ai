@@ -1,0 +1,10 @@
+{
+  "description": "Internet SSH brute force against build03 succeeds for 'deploy', then an XMRig miner is downloaded, persisted via cron and systemd, and connects to a stratum pool.",
+  "verdict": "likely-malicious",
+  "tier2": "confirmed",
+  "must_mention": [
+    "203.0.113.77",
+    "198.51.100.23"
+  ],
+  "min_incidents": 1
+}

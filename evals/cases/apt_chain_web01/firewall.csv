@@ -1,0 +1,5 @@
+timestamp,source,action,src_ip,dst_ip,dst_port,message,severity
+2026-09-26T09:07:05Z,firewall,allow,10.0.0.11,203.0.113.90,80,outbound tool download,medium
+2026-09-26T09:08:50Z,firewall,allow,10.0.0.11,198.51.100.7,443,c2 beacon,medium
+2026-09-26T09:14:10Z,firewall,allow,10.0.0.22,198.51.100.7,443,c2 beacon,medium
+2026-09-26T09:20:00Z,firewall,allow,10.0.0.11,198.51.100.7,443,large transfer upload 480MB exfil,high

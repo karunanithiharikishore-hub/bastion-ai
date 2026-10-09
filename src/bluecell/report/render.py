@@ -78,7 +78,7 @@ def render_markdown(result: dict) -> str:
         lines.append("_No correlated incidents crossed the reporting threshold._")
         if swarm:
             lines += ["", _render_swarm(swarm)]
-        lines += ["", "---", _footer()]
+        lines += ["", _render_trace(meta), "---", _footer()]
         return "\n".join(lines)
 
     # ---- Executive summary (IR-report style) --------------------------------
@@ -201,11 +201,34 @@ def render_markdown(result: dict) -> str:
     if swarm:
         lines.append(_render_swarm(swarm))
 
+    lines.append(_render_trace(meta))
     lines.append("---")
     lines.append("_BlueCell is a read-only analysis aid. Validate all findings "
                  "before acting. IOCs and RCA are hypotheses, not proof._")
     lines.append(_footer())
     return "\n".join(lines)
+
+
+def _render_trace(meta: dict) -> str:
+    """Short "Run cost & trace" section from meta["trace"] ('' when absent)."""
+    t = meta.get("trace")
+    if not t:
+        return ""
+    tok = t.get("tokens") or {}
+    out = ["## Run cost & trace\n",
+           f"- Run id: `{t.get('run_id')}` (`bluecell runs show {t.get('run_id')}`)",
+           f"- Duration: {round((t.get('duration_ms') or 0) / 1000, 2)} s · "
+           f"LLM calls: {t.get('llm_calls', 0)} · tool calls: {t.get('tool_calls', 0)}",
+           f"- Tokens: {tok.get('total', 0)} (in {tok.get('input', 0)}, out {tok.get('output', 0)}, "
+           f"cache read {tok.get('cache_read', 0)}, cache write {tok.get('cache_creation', 0)})",
+           f"- Cost: ${t.get('total_cost_usd') or 0:.4f} ({t.get('cost_note') or 'n/a'})"]
+    costly = [a for a in t.get("per_agent") or [] if a.get("llm_calls") or a.get("tool_calls")]
+    for a in costly:
+        out.append(f"    - T{a.get('tier')} `{a.get('agent')}`: {a.get('tool_calls', 0)} tool calls, "
+                   f"{(a.get('tokens') or {}).get('total', 0)} tokens, "
+                   f"${a.get('cost_usd') or 0:.4f}")
+    out.append("")
+    return "\n".join(out)
 
 
 def _footer() -> str:

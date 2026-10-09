@@ -1,0 +1,32 @@
+[
+ {
+  "timestamp": "2026-10-09T19:06:00Z",
+  "source": "auth",
+  "host": "srv-fs01",
+  "user": "NORTHWIND\\adm.jlee",
+  "action": "login_success",
+  "src_ip": "10.0.5.21",
+  "message": "Logon type 3 (network) from adm-ws01 10.0.5.21 to srv-fs01 for CHG0051234",
+  "severity": "low"
+ },
+ {
+  "timestamp": "2026-10-09T19:18:00Z",
+  "source": "auth",
+  "host": "srv-fs02",
+  "user": "NORTHWIND\\adm.jlee",
+  "action": "login_success",
+  "src_ip": "10.0.5.21",
+  "message": "Logon type 3 (network) from adm-ws01 10.0.5.21 to srv-fs02 for CHG0051234",
+  "severity": "low"
+ },
+ {
+  "timestamp": "2026-10-09T19:30:00Z",
+  "source": "auth",
+  "host": "srv-print01",
+  "user": "NORTHWIND\\adm.jlee",
+  "action": "login_success",
+  "src_ip": "10.0.5.21",
+  "message": "Logon type 3 (network) from adm-ws01 10.0.5.21 to srv-print01 for CHG0051234",
+  "severity": "low"
+ }
+]

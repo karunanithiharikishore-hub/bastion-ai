@@ -1,0 +1,9 @@
+{
+  "description": "An administrator pushes an emergency patch to three servers with PsExec from the admin workstation, inside approved change CHG0051234 that is opened and closed in the logs. Looks like lateral movement + service persistence to rules; it is documented admin work.",
+  "verdict": "likely-benign",
+  "tier2": "dismissed",
+  "must_mention": [
+    "CHG0051234"
+  ],
+  "min_incidents": 1
+}

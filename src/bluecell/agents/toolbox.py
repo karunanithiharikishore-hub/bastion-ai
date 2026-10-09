@@ -24,6 +24,7 @@ import fcntl
 import json
 import os
 import re
+import time
 from collections import Counter
 from datetime import datetime, timezone
 
@@ -226,9 +227,10 @@ class SecurityToolbox:
     # ---- dispatch -----------------------------------------------------------
     def call(self, name: str, args: dict | None) -> str:
         args = args or {}
+        t0 = time.time()   # timing feeds the run trace (tracing.record_tool_calls)
         fn = getattr(self, "t_" + name, None)
         if fn is None or name not in self.tools:
-            self.calls.append({"tool": name, "args": args, "ok": False})
+            self.calls.append({"tool": name, "args": args, "ok": False, "t0": t0, "ms": 0.0})
             return json.dumps({"error": f"unknown tool {name!r}"})
         try:
             result = fn(**args)
@@ -237,7 +239,8 @@ class SecurityToolbox:
             result, ok = {"error": f"bad arguments: {exc}"}, False
         except Exception as exc:  # a tool bug must not kill the agent loop
             result, ok = {"error": f"{type(exc).__name__}: {exc}"}, False
-        self.calls.append({"tool": name, "args": args, "ok": ok})
+        self.calls.append({"tool": name, "args": args, "ok": ok, "t0": t0,
+                           "ms": round((time.time() - t0) * 1000, 1)})
         return result if isinstance(result, str) else json.dumps(result, default=str)
 
     # ---- helpers ------------------------------------------------------------

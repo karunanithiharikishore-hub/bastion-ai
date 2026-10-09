@@ -1,0 +1,7 @@
+{
+  "description": "The bundled attack sample (samples/): SSH brute force with success on web01, encoded PowerShell, certutil tool download, DGA C2, IAM persistence, ransomware with shadow-copy deletion, PsExec to db02, and an exfil upload.",
+  "verdict": "likely-malicious",
+  "tier2": "confirmed",
+  "must_mention": ["203.0.113.66", "kj3h5g9x2zqwmnbvc7.top"],
+  "min_incidents": 1
+}

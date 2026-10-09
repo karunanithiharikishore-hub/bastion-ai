@@ -1,0 +1,86 @@
+[
+ {
+  "timestamp": "2026-10-09T19:06:05Z",
+  "host": "adm-ws01",
+  "user": "NORTHWIND\\adm.jlee",
+  "action": "process_create",
+  "process": "PsExec64.exe",
+  "message": "PsExec64.exe \\\\srv-fs01 -s cmd /c wusa C:\\Patches\\KB5031356.msu /quiet /norestart (CHG0051234)",
+  "severity": "medium",
+  "src_ip": "10.0.5.21"
+ },
+ {
+  "timestamp": "2026-10-09T19:06:07Z",
+  "host": "srv-fs01",
+  "user": "SYSTEM",
+  "action": "service_install",
+  "process": "services.exe",
+  "message": "new service PSEXESVC installed (PsExec remote service, issued by adm-ws01)",
+  "severity": "medium"
+ },
+ {
+  "timestamp": "2026-10-09T19:12:00Z",
+  "host": "srv-fs01",
+  "user": "SYSTEM",
+  "action": "process_create",
+  "process": "wusa.exe",
+  "message": "wusa.exe installed signed Microsoft update KB5031356; planned restart",
+  "severity": "low"
+ },
+ {
+  "timestamp": "2026-10-09T19:18:05Z",
+  "host": "adm-ws01",
+  "user": "NORTHWIND\\adm.jlee",
+  "action": "process_create",
+  "process": "PsExec64.exe",
+  "message": "PsExec64.exe \\\\srv-fs02 -s cmd /c wusa C:\\Patches\\KB5031356.msu /quiet /norestart (CHG0051234)",
+  "severity": "medium",
+  "src_ip": "10.0.5.21"
+ },
+ {
+  "timestamp": "2026-10-09T19:18:07Z",
+  "host": "srv-fs02",
+  "user": "SYSTEM",
+  "action": "service_install",
+  "process": "services.exe",
+  "message": "new service PSEXESVC installed (PsExec remote service, issued by adm-ws01)",
+  "severity": "medium"
+ },
+ {
+  "timestamp": "2026-10-09T19:24:00Z",
+  "host": "srv-fs02",
+  "user": "SYSTEM",
+  "action": "process_create",
+  "process": "wusa.exe",
+  "message": "wusa.exe installed signed Microsoft update KB5031356; planned restart",
+  "severity": "low"
+ },
+ {
+  "timestamp": "2026-10-09T19:30:05Z",
+  "host": "adm-ws01",
+  "user": "NORTHWIND\\adm.jlee",
+  "action": "process_create",
+  "process": "PsExec64.exe",
+  "message": "PsExec64.exe \\\\srv-print01 -s cmd /c wusa C:\\Patches\\KB5031356.msu /quiet /norestart (CHG0051234)",
+  "severity": "medium",
+  "src_ip": "10.0.5.21"
+ },
+ {
+  "timestamp": "2026-10-09T19:30:07Z",
+  "host": "srv-print01",
+  "user": "SYSTEM",
+  "action": "service_install",
+  "process": "services.exe",
+  "message": "new service PSEXESVC installed (PsExec remote service, issued by adm-ws01)",
+  "severity": "medium"
+ },
+ {
+  "timestamp": "2026-10-09T19:36:00Z",
+  "host": "srv-print01",
+  "user": "SYSTEM",
+  "action": "process_create",
+  "process": "wusa.exe",
+  "message": "wusa.exe installed signed Microsoft update KB5031356; planned restart",
+  "severity": "low"
+ }
+]

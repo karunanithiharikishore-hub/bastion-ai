@@ -1,0 +1,4 @@
+[
+  {"timestamp": "2026-10-03T22:07:40Z", "source": "auth", "host": "win-app02", "user": "jsmith", "action": "login_success",
+   "src_ip": "10.0.5.20", "message": "RDP logon (type 10) from jump host jump01 10.0.5.20, MFA satisfied", "severity": "low"}
+]

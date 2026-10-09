@@ -1,0 +1,17 @@
+{"timestamp": "2026-10-06T14:00:07Z", "source": "dns", "host": "hr-ws12", "src_ip": "10.30.4.112", "query": "qzx8vkt3lm9pw2rb.top", "answer": "198.51.100.66"}
+{"timestamp": "2026-10-06T14:01:07Z", "source": "dns", "host": "hr-ws12", "src_ip": "10.30.4.112", "query": "tq7mzv2kxr8pl4wd.top", "answer": "198.51.100.66"}
+{"timestamp": "2026-10-06T14:02:08Z", "source": "dns", "host": "hr-ws12", "src_ip": "10.30.4.112", "query": "wv3kq9zxt7mrp2lb.top", "answer": "198.51.100.66"}
+{"timestamp": "2026-10-06T14:03:10Z", "source": "dns", "host": "hr-ws12", "src_ip": "10.30.4.112", "query": "xk2tzq8vm4pwr7nd.top", "answer": "198.51.100.66"}
+{"timestamp": "2026-10-06T14:04:10Z", "source": "dns", "host": "hr-ws12", "src_ip": "10.30.4.112", "query": "pz9wqk3vxt2mr8lc.top", "answer": "198.51.100.66"}
+{"timestamp": "2026-10-06T14:05:11Z", "source": "dns", "host": "hr-ws12", "src_ip": "10.30.4.112", "query": "mr4zt8kqv2xwp9tf.top", "answer": "198.51.100.66"}
+{"timestamp": "2026-10-06T14:06:13Z", "source": "dns", "host": "hr-ws12", "src_ip": "10.30.4.112", "query": "kv7xq2zm9tp4wrlb.top", "answer": "198.51.100.66"}
+{"timestamp": "2026-10-06T14:07:13Z", "source": "dns", "host": "hr-ws12", "src_ip": "10.30.4.112", "query": "zt3pq8mkv7xw2rnd.top", "answer": "198.51.100.66"}
+{"timestamp": "2026-10-06T14:08:14Z", "source": "dns", "host": "hr-ws12", "src_ip": "10.30.4.112", "query": "qzx8vkt3lm9pw2rb.top", "answer": "198.51.100.66"}
+{"timestamp": "2026-10-06T14:09:16Z", "source": "dns", "host": "hr-ws12", "src_ip": "10.30.4.112", "query": "tq7mzv2kxr8pl4wd.top", "answer": "198.51.100.66"}
+{"timestamp": "2026-10-06T14:10:16Z", "source": "dns", "host": "hr-ws12", "src_ip": "10.30.4.112", "query": "wv3kq9zxt7mrp2lb.top", "answer": "198.51.100.66"}
+{"timestamp": "2026-10-06T14:11:17Z", "source": "dns", "host": "hr-ws12", "src_ip": "10.30.4.112", "query": "xk2tzq8vm4pwr7nd.top", "answer": "198.51.100.66"}
+{"timestamp": "2026-10-06T14:12:19Z", "source": "dns", "host": "hr-ws12", "src_ip": "10.30.4.112", "query": "pz9wqk3vxt2mr8lc.top", "answer": "198.51.100.66"}
+{"timestamp": "2026-10-06T14:13:19Z", "source": "dns", "host": "hr-ws12", "src_ip": "10.30.4.112", "query": "mr4zt8kqv2xwp9tf.top", "answer": "198.51.100.66"}
+{"timestamp": "2026-10-06T14:14:20Z", "source": "dns", "host": "hr-ws12", "src_ip": "10.30.4.112", "query": "kv7xq2zm9tp4wrlb.top", "answer": "198.51.100.66"}
+{"timestamp": "2026-10-06T14:15:22Z", "source": "dns", "host": "hr-ws12", "src_ip": "10.30.4.112", "query": "zt3pq8mkv7xw2rnd.top", "answer": "198.51.100.66"}
+{"timestamp": "2026-10-06T14:03:30Z", "source": "dns", "host": "hr-ws12", "src_ip": "10.30.4.112", "query": "outlook.office365.com", "answer": "192.0.2.80"}
