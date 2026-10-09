@@ -26,18 +26,40 @@ from .agents import run_swarm, ai_analyze
 from .agents import budget
 from . import provenance
 from . import cache as run_cache
+from . import tracing
 
 
 _VERDICT_RANK = {"likely-malicious": 0, "needs-review": 1, "likely-benign": 2}
 
 
-def analyze(paths, *, source_override=None, window_minutes=60,
-            max_incidents=10, backbone=None, intel_store=None,
-            max_digest_lines=400, run_agents=True, use_llm=True,
-            cache=None, votes=1, tier1_model=None, skip_idle_tier1=True):
+def analyze(paths, *, trace=None, **kwargs):
     """Run the pipeline (and, by default, the agent swarm). Returns a result dict.
 
-    cache: None/"off" (no cache), "use" (return a stored result for the same
+    Every run is traced (spans, LLM usage, cost) into ``result["meta"]["trace"]``.
+    ``trace=False`` skips persisting it under the runs dir (see tracing.py);
+    tracing failures never affect the analysis. Other keyword arguments are
+    those of ``_analyze``.
+    """
+    backbone = kwargs.get("backbone")
+    tracer = tracing.start_run(
+        paths, persist=trace,
+        backbone=(backbone.resolved if backbone else "none"),
+        model=getattr(backbone, "model", None),
+        use_llm=kwargs.get("use_llm", True), run_agents=kwargs.get("run_agents", True))
+    try:
+        result = _analyze(paths, **kwargs)
+    except BaseException as exc:
+        tracing.end_run(tracer, error=f"{type(exc).__name__}: {exc}")
+        raise
+    tracing.end_run(tracer, result)
+    return result
+
+
+def _analyze(paths, *, source_override=None, window_minutes=60,
+             max_incidents=10, backbone=None, intel_store=None,
+             max_digest_lines=400, run_agents=True, use_llm=True,
+             cache=None, votes=1, tier1_model=None, skip_idle_tier1=True):
+    """cache: None/"off" (no cache), "use" (return a stored result for the same
     inputs + config, store complete new runs) or "refresh" (always run, then
     overwrite). Only LLM runs are cached; see cache.py.
     votes: Tier-2 self-consistency runs (majority vote per incident).
@@ -46,17 +68,21 @@ def analyze(paths, *, source_override=None, window_minutes=60,
     """
     import time
     _t0 = time.perf_counter()
+    tracing.stage("ingest")
     events = ingest_paths(paths, source_override)
     ingested = len(events)
 
+    tracing.stage("normalize+attack")
     events = normalize(events)
     map_attack(events)
 
+    tracing.stage("compress+correlate")
     digest = compress(events, max_lines=max_digest_lines)
     incidents = correlate(events, window_minutes=window_minutes)
     incidents_total = len(incidents)
     incidents = incidents[:max_incidents]
 
+    tracing.stage("intel+iocs")
     if intel_store is None:
         try:
             intel_store = IntelStore()
@@ -87,6 +113,7 @@ def analyze(paths, *, source_override=None, window_minutes=60,
                 return run_cache.mark_hit(entry, cache_key,
                                           int((time.perf_counter() - _t0) * 1000))
 
+    tracing.stage("storyline", incidents=len(incidents))
     incident_blocks = []
     for inc in incidents:
         # Per-incident digest keeps the LLM focused and token-lean.
@@ -105,6 +132,7 @@ def analyze(paths, *, source_override=None, window_minutes=60,
     _t_story = time.perf_counter()
     story_ms = int((_t_story - _t0) * 1000)
 
+    tracing.stage("swarm")
     swarm = None
     _t_swarm0 = time.perf_counter()
     if run_agents:
@@ -138,6 +166,7 @@ def analyze(paths, *, source_override=None, window_minutes=60,
 
     # Model-driven AI analyst — genuine LLM reasoning over the evidence, grounded.
     # Opt-in: only runs when an LLM backbone is available (use_llm and backbone).
+    tracing.stage("ai_analysis")
     ai_analysis = None
     if run_agents and use_llm and backbone is not None:
         try:
@@ -146,6 +175,7 @@ def analyze(paths, *, source_override=None, window_minutes=60,
         except Exception as exc:  # never break the deterministic result
             ai_analysis = {"available": False, "reason": f"{type(exc).__name__}: {exc}"}
 
+    tracing.stage("finalize")
     total_ms = int((time.perf_counter() - _t0) * 1000)
 
     result = {
@@ -189,7 +219,9 @@ def analyze(paths, *, source_override=None, window_minutes=60,
         result["meta"]["cache_key"] = cache_key
         reason = run_cache.uncacheable_reason(result, backbone)
         if reason is None:
-            run_cache.store(cache_key, material, result)
+            tr = tracing.current()
+            run_cache.store(cache_key, material, result,
+                            origin_run_id=getattr(tr, "run_id", None))
             result["meta"]["cache"] = "refreshed" if cache_mode == "refresh" else "miss (stored)"
         else:
             result["meta"]["cache"] = f"miss (not stored: {reason})"

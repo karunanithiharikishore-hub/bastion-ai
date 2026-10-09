@@ -1,0 +1,10 @@
+{
+  "description": "One external IP tries a single common password against 20 accounts in six minutes (spray), gets in as k.osei, then reads the mailbox in bulk from the same IP.",
+  "verdict": "likely-malicious",
+  "tier2": "confirmed",
+  "must_mention": [
+    "203.0.113.45",
+    "k.osei@northwind.example"
+  ],
+  "min_incidents": 1
+}

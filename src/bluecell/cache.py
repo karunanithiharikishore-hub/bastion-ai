@@ -155,12 +155,14 @@ def load(key: str):
     return entry if isinstance(entry, dict) and "result" in entry else None
 
 
-def store(key: str, material: dict, result: dict) -> str:
+def store(key: str, material: dict, result: dict, origin_run_id: str | None = None) -> str:
     os.makedirs(cache_dir(), exist_ok=True)
     path = _path(key)
     tmp = f"{path}.{os.getpid()}.tmp"
     entry = {"key": key, "material": material,
-             "stored_at": datetime.now(timezone.utc).isoformat(), "result": result}
+             "stored_at": datetime.now(timezone.utc).isoformat(),
+             "origin_run_id": origin_run_id,   # trace of the run that produced it
+             "result": result}
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(entry, fh, default=str)
     os.replace(tmp, path)
@@ -199,5 +201,6 @@ def mark_hit(entry: dict, key: str, elapsed_ms: int) -> dict:
     meta["cached_at"] = entry.get("stored_at")
     meta["original_generated"] = meta.get("generated")
     meta["original_timing_ms"] = meta.get("timing_ms")
+    meta["original_run_id"] = entry.get("origin_run_id")   # `bluecell runs show <id>`
     meta["timing_ms"] = {"storyline": 0, "swarm": 0, "total": elapsed_ms}
     return result

@@ -31,6 +31,8 @@ import tempfile
 import urllib.request
 import urllib.error
 
+from .. import tracing
+
 DEFAULT_MODEL = "claude-sonnet-5"
 # Seconds per call. The AI analyst's lead call has been measured at 36-120+ s
 # on the samples; 120 s was too tight and failed intermittently.
@@ -100,16 +102,20 @@ class LLMBackbone:
     # ---- generation ---------------------------------------------------------
     def complete(self, prompt: str, system: str | None = None,
                  max_tokens: int = 1500) -> str:
-        if self.resolved == "cli":
-            return self._complete_cli(prompt, system)
-        return self._complete_api(prompt, system, max_tokens)
+        with tracing.span("llm:complete", "llm", mode=self.resolved, model=self.model):
+            if self.resolved == "cli":
+                return self._complete_cli(prompt, system)
+            return self._complete_api(prompt, system, max_tokens)
 
     def _complete_cli(self, prompt: str, system: str | None) -> str:
         # Same isolation as the agent runtime: the prompt carries log-controlled
         # text, so no built-in tools, no user MCP servers/hooks/settings, and an
-        # empty cwd (no project CLAUDE.md, nothing local to read).
+        # empty cwd (no project CLAUDE.md, nothing local to read). JSON output
+        # carries the CLI-reported usage and total_cost_usd for the run trace;
+        # the answer text is its "result" field.
         cmd = ["claude", "-p", "--tools", "", "--strict-mcp-config",
-               "--setting-sources", "project", "--no-session-persistence"]
+               "--setting-sources", "project", "--no-session-persistence",
+               "--output-format", "json"]
         if self.model:
             cmd += ["--model", self.model]
         if system:
@@ -127,7 +133,20 @@ class LLMBackbone:
             reason = (proc.stderr or "").strip() or (proc.stdout or "").strip()
             raise BackboneUnavailable(
                 f"claude CLI exited {proc.returncode}: {reason[:200]}")
-        return proc.stdout.strip()
+        out = proc.stdout.strip()
+        try:
+            msg = json.loads(out)
+        except ValueError:
+            msg = None
+        if not isinstance(msg, dict) or msg.get("type") != "result":
+            tracing.record_llm(None, model=self.model, source="cli")  # cost unknown
+            return out   # older CLI / plain text: return as before
+        tracing.record_llm(msg.get("usage"), model=self.model,
+                           cost_usd=msg.get("total_cost_usd"), source="cli")
+        if msg.get("is_error"):
+            raise BackboneUnavailable(
+                f"claude CLI error ({msg.get('subtype')}): {str(msg.get('result'))[:200]}")
+        return str(msg.get("result") or "").strip()
 
     def _complete_api(self, prompt: str, system: str | None,
                       max_tokens: int) -> str:
@@ -141,6 +160,8 @@ class LLMBackbone:
         if system:
             body["system"] = system
         payload = self.messages(body)
+        tracing.record_llm(payload.get("usage"), model=payload.get("model") or self.model,
+                           source="api")
         parts = payload.get("content", [])
         return "".join(p.get("text", "") for p in parts if p.get("type") == "text").strip()
 

@@ -1,0 +1,22 @@
+Date (UTC),User,Application,Client app,IP address,Location,Status,Sign-in error code,Failure reason
+2026-10-07T01:40:00Z,a.patel@northwind.example,Azure Active Directory PowerShell,Other clients,203.0.113.45,Unknown,Failure,50126,Error validating credentials due to invalid username or password.
+2026-10-07T01:40:17Z,b.okafor@northwind.example,Azure Active Directory PowerShell,Other clients,203.0.113.45,Unknown,Failure,50126,Error validating credentials due to invalid username or password.
+2026-10-07T01:40:34Z,c.nguyen@northwind.example,Azure Active Directory PowerShell,Other clients,203.0.113.45,Unknown,Failure,50126,Error validating credentials due to invalid username or password.
+2026-10-07T01:40:51Z,d.silva@northwind.example,Azure Active Directory PowerShell,Other clients,203.0.113.45,Unknown,Failure,50126,Error validating credentials due to invalid username or password.
+2026-10-07T01:41:08Z,e.kowalski@northwind.example,Azure Active Directory PowerShell,Other clients,203.0.113.45,Unknown,Failure,50126,Error validating credentials due to invalid username or password.
+2026-10-07T01:41:25Z,f.haddad@northwind.example,Azure Active Directory PowerShell,Other clients,203.0.113.45,Unknown,Failure,50126,Error validating credentials due to invalid username or password.
+2026-10-07T01:41:42Z,g.larsen@northwind.example,Azure Active Directory PowerShell,Other clients,203.0.113.45,Unknown,Failure,50126,Error validating credentials due to invalid username or password.
+2026-10-07T01:41:59Z,h.tanaka@northwind.example,Azure Active Directory PowerShell,Other clients,203.0.113.45,Unknown,Failure,50126,Error validating credentials due to invalid username or password.
+2026-10-07T01:42:16Z,i.moreau@northwind.example,Azure Active Directory PowerShell,Other clients,203.0.113.45,Unknown,Failure,50126,Error validating credentials due to invalid username or password.
+2026-10-07T01:42:33Z,j.fischer@northwind.example,Azure Active Directory PowerShell,Other clients,203.0.113.45,Unknown,Failure,50126,Error validating credentials due to invalid username or password.
+2026-10-07T01:42:50Z,k.osei@northwind.example,Azure Active Directory PowerShell,Other clients,203.0.113.45,Unknown,Failure,50126,Error validating credentials due to invalid username or password.
+2026-10-07T01:43:07Z,l.romero@northwind.example,Azure Active Directory PowerShell,Other clients,203.0.113.45,Unknown,Failure,50126,Error validating credentials due to invalid username or password.
+2026-10-07T01:43:24Z,m.ivanova@northwind.example,Azure Active Directory PowerShell,Other clients,203.0.113.45,Unknown,Failure,50126,Error validating credentials due to invalid username or password.
+2026-10-07T01:43:41Z,n.berg@northwind.example,Azure Active Directory PowerShell,Other clients,203.0.113.45,Unknown,Failure,50126,Error validating credentials due to invalid username or password.
+2026-10-07T01:43:58Z,o.mensah@northwind.example,Azure Active Directory PowerShell,Other clients,203.0.113.45,Unknown,Failure,50126,Error validating credentials due to invalid username or password.
+2026-10-07T01:44:15Z,p.dubois@northwind.example,Azure Active Directory PowerShell,Other clients,203.0.113.45,Unknown,Failure,50126,Error validating credentials due to invalid username or password.
+2026-10-07T01:44:32Z,q.sato@northwind.example,Azure Active Directory PowerShell,Other clients,203.0.113.45,Unknown,Failure,50126,Error validating credentials due to invalid username or password.
+2026-10-07T01:44:49Z,r.costa@northwind.example,Azure Active Directory PowerShell,Other clients,203.0.113.45,Unknown,Failure,50126,Error validating credentials due to invalid username or password.
+2026-10-07T01:45:06Z,s.weber@northwind.example,Azure Active Directory PowerShell,Other clients,203.0.113.45,Unknown,Failure,50126,Error validating credentials due to invalid username or password.
+2026-10-07T01:45:23Z,t.nowak@northwind.example,Azure Active Directory PowerShell,Other clients,203.0.113.45,Unknown,Failure,50126,Error validating credentials due to invalid username or password.
+2026-10-07T01:48:40Z,k.osei@northwind.example,Office 365 Exchange Online,Browser,203.0.113.45,Unknown,Success,0,

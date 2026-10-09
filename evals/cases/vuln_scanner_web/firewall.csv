@@ -1,0 +1,4 @@
+timestamp,source,action,src_ip,dst_ip,dst_port,message,severity
+2026-10-06T02:11:00Z,firewall,allow,203.0.113.200,10.40.0.21,443,inbound https to web02 (public site),low
+2026-10-06T02:10:41Z,firewall,deny,203.0.113.200,10.40.0.21,22,inbound ssh blocked by policy,low
+2026-10-06T02:10:42Z,firewall,deny,203.0.113.200,10.40.0.21,3306,inbound mysql blocked by policy,low

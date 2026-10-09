@@ -1,0 +1,9 @@
+{
+  "description": "An old phone with a cached password retries Exchange ActiveSync every five minutes from the office NAT IP after a password change. 36 failures, no success, no follow-on.",
+  "verdict": "likely-benign",
+  "tier2": "dismissed",
+  "must_mention": [
+    "m.chen@northwind.example"
+  ],
+  "min_incidents": 1
+}

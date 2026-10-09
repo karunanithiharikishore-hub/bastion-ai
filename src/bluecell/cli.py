@@ -10,6 +10,8 @@ Commands:
   roster    Show the blue-team agent swarm roster.
   plan      Offline cost plan (processes, turn budget) for analyzing some logs.
   info      Show environment + backbone availability + authorship.
+  eval      Run the labelled eval suite and score verdicts.
+  runs      List traced runs (cost, tokens, duration) or show one span tree.
 """
 from __future__ import annotations
 
@@ -70,6 +72,7 @@ def cmd_analyze(args) -> int:
         votes=args.votes,
         tier1_model=args.model_tier1,
         skip_idle_tier1=not args.all_tier1,
+        trace=(False if args.no_trace else None),
     )
     output = render_json(result) if args.format == "json" else render_markdown(result)
     if args.output:
@@ -251,6 +254,73 @@ def cmd_info(args) -> int:
     return 0
 
 
+def cmd_eval(args) -> int:
+    from . import evals
+    backbone = _make_backbone(args.llm, args.model)
+    if args.llm != "off" and backbone is None:
+        print("[bluecell] eval: no backbone available; scoring the rules only.",
+              file=sys.stderr)
+
+    def progress(case):
+        mark = "PASS" if case["passed"] else "FAIL"
+        print(f"[bluecell] eval {case['name']}: {mark}", file=sys.stderr)
+    try:
+        report = evals.run_eval(args.cases, names=args.case or None, repeat=args.repeat,
+                                llm=args.llm, backbone=backbone,
+                                trace=(False if args.no_trace else None), progress=progress)
+    except FileNotFoundError as exc:
+        print(f"[bluecell] {exc}", file=sys.stderr)
+        return 2
+    print(evals.format_report(report))
+    if args.json:
+        with open(args.json, "w", encoding="utf-8") as fh:
+            json.dump(report, fh, indent=2, default=str)
+        print(f"[bluecell] wrote eval JSON -> {args.json}")
+    return 0 if report["summary"]["cases_failed"] == 0 else 1
+
+
+def cmd_runs(args) -> int:
+    from . import tracing
+    if args.runs_cmd == "show":
+        run = tracing.load_run(args.run_id)
+        if run is None:
+            print(f"[bluecell] run not found: {args.run_id} (in {tracing.runs_dir()})",
+                  file=sys.stderr)
+            return 2
+        s = run["summary"]
+        print(f"run {s.get('run_id')}  started {s.get('started')}  "
+              f"verdict {s.get('verdict')}  backbone {s.get('backbone')}")
+        print(f"inputs: {', '.join(s.get('inputs') or [])}")
+        tok = s.get("tokens") or {}
+        print(f"duration {s.get('duration_ms')} ms · LLM calls {s.get('llm_calls')} · "
+              f"tool calls {s.get('tool_calls')} · tokens {tok.get('total', 0)} · "
+              f"cost ${s.get('total_cost_usd') or 0:.4f} ({s.get('cost_note')})")
+        print()
+        for line in tracing.span_tree_lines(run):
+            print(line)
+        return 0
+    runs = tracing.list_runs(limit=args.last)
+    if not runs:
+        print(f"[bluecell] no traced runs in {tracing.runs_dir()}")
+        return 0
+    rows = [("run id", "time (UTC)", "input", "verdict", "agents", "tools", "tokens",
+             "cost $", "secs")]
+    for s in runs:
+        name = tracing.input_label(s.get("inputs"))
+        rows.append((s.get("run_id"), (s.get("started") or "")[:19].replace("T", " "),
+                     name[:40], s.get("verdict") or "-", s.get("agents", 0),
+                     s.get("tool_calls", 0), (s.get("tokens") or {}).get("total", 0),
+                     f"{s.get('total_cost_usd') or 0:.4f}" + ("~" if s.get("cost_estimated") else ""),
+                     f"{(s.get('duration_ms') or 0) / 1000:.1f}"))
+    widths = [max(len(str(r[i])) for r in rows) for i in range(len(rows[0]))]
+    for i, r in enumerate(rows):
+        print("  ".join(str(v).ljust(widths[j]) for j, v in enumerate(r)))
+        if i == 0:
+            print("  ".join("-" * w for w in widths))
+    print("(~ = cost estimated from token counts at list prices)")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="bluecell",
@@ -287,7 +357,29 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Do not read or write the run cache")
     c.add_argument("--refresh", action="store_true",
                    help="Re-run even if cached, and overwrite the cached result")
+    a.add_argument("--no-trace", action="store_true", dest="no_trace",
+                   help="Do not save this run's trace under the runs dir")
     a.set_defaults(func=cmd_analyze)
+
+    ev = sub.add_parser("eval", help="Run the labelled eval suite")
+    ev.add_argument("--cases", default="evals/cases", help="Cases directory (default evals/cases)")
+    ev.add_argument("--case", action="append", help="Run only this case (repeatable)")
+    ev.add_argument("--llm", choices=["auto", "cli", "api", "off"], default="off",
+                    help="LLM backbone (default off = rules only)")
+    ev.add_argument("--model", default="claude-sonnet-5", help="Claude model")
+    ev.add_argument("--repeat", type=_positive_int, default=1,
+                    help="Runs per case; reports verdict stability")
+    ev.add_argument("--json", help="Write the full eval report as JSON")
+    ev.add_argument("--no-trace", action="store_true", dest="no_trace",
+                    help="Do not save run traces")
+    ev.set_defaults(func=cmd_eval)
+
+    rn = sub.add_parser("runs", help="List traced runs, or show one run's span tree")
+    rn.add_argument("--last", type=_positive_int, default=20, help="How many runs (default 20)")
+    rns = rn.add_subparsers(dest="runs_cmd")
+    rshow = rns.add_parser("show", help="Show one run's span tree")
+    rshow.add_argument("run_id")
+    rn.set_defaults(func=cmd_runs, runs_cmd=None)
 
     it = sub.add_parser("intel", help="Manage threat-intel knowledge base")
     it.add_argument("--intel-db", dest="intel_db", help="Path to intel JSON store")

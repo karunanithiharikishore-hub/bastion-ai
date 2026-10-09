@@ -1,0 +1,9 @@
+{
+  "description": "A mass internet scanner (zgrab UA) probes web02 for common exposures and one router RCE payload. Every request is 404/403, other ports are blocked, web02 makes no outbound connection: background noise, nothing succeeded.",
+  "verdict": "likely-benign",
+  "tier2": "dismissed",
+  "must_mention": [
+    "203.0.113.200"
+  ],
+  "min_incidents": 0
+}

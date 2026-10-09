@@ -39,6 +39,7 @@ import subprocess
 import sys
 import tempfile
 
+from .. import tracing
 from .base import Agent, AgentContext, Finding
 from .toolbox import Blackboard, SecurityToolbox, BASE_TOOLS, file_slug, tool_specs
 from .budget import TIER_MAX_TURNS
@@ -185,13 +186,22 @@ def _run_cli(agent, session: SwarmSession, backbone, max_turns: int,
             # The CLI prints some failures (e.g. usage limits) on stdout.
             reason = (proc.stderr or "").strip() or (proc.stdout or "").strip()
             error = f"claude exited {proc.returncode}: {reason[:300]}"
+        stream = tracing.parse_stream_json(proc.stdout)
     except (subprocess.TimeoutExpired, OSError) as exc:
         error = f"{type(exc).__name__}: {exc}"
+        stream = None
 
     result = {"findings": [], "verdicts": [], "calls": []}
     if os.path.exists(out_path):
         with open(out_path, encoding="utf-8") as fh:
             result = json.load(fh)
+    if stream is not None:
+        # Usage + cost as reported by the CLI; tool spans from the MCP audit
+        # trail (timed), else from the stream's tool_use blocks (untimed).
+        tracing.record_llm(stream["usage"], model=stream["model"] or backbone.model,
+                           cost_usd=stream["cost_usd"], source="cli-agent",
+                           calls=stream["num_turns"] or 1)
+        tracing.record_tool_calls(result["calls"] or stream["tool_uses"], agent=agent.name)
     if not result["calls"] and error is None:
         error = "agent made no tool calls (MCP server may have failed to start)"
     return {"findings": result["findings"], "verdicts": result.get("verdicts", []),
@@ -219,6 +229,9 @@ def _run_api(agent, session: SwarmSession, backbone, max_turns: int,
             if temperature is not None:
                 body["temperature"] = temperature
             payload = backbone.messages(body)
+            tracing.record_llm(payload.get("usage"),
+                               model=payload.get("model") or body["model"],
+                               source="api-agent")
             content = payload.get("content", [])
             messages.append({"role": "assistant", "content": content})
             uses = [c for c in content if c.get("type") == "tool_use"]
@@ -236,6 +249,7 @@ def _run_api(agent, session: SwarmSession, backbone, max_turns: int,
             messages.append({"role": "user", "content": results})
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
+    tracing.record_tool_calls(box.calls, agent=agent.name)
     return {"findings": box.findings, "verdicts": list(box.verdicts.values()),
             "calls": box.calls, "summary": summary.strip(),
             "turns": turns, "cost_usd": None, "error": error,
@@ -315,6 +329,15 @@ class AutonomousAgent(Agent):
 
     def run(self, ctx: AgentContext, use_llm: bool = True,
             session: SwarmSession | None = None) -> list:
+        with tracing.span(f"agent:{self.name}", "agent", agent=self.name,
+                          role=self.role, tier=self.tier) as sp:
+            findings = self._run(ctx, use_llm, session)
+            sp.set(mode=(self.last_run or {}).get("mode"), findings=len(findings),
+                   error=(self.last_run or {}).get("error"))
+            return findings
+
+    def _run(self, ctx: AgentContext, use_llm: bool = True,
+             session: SwarmSession | None = None) -> list:
         if use_llm and ctx.backbone is not None and session is not None and self.mission:
             try:
                 return self.investigate(ctx, session)

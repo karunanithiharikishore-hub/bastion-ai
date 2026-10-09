@@ -19,8 +19,10 @@ rules. ``agent_runs`` in the result records which mode every agent ran in.
 """
 from __future__ import annotations
 
+import contextvars
 from concurrent.futures import ThreadPoolExecutor
 
+from .. import tracing
 from .base import AgentContext, Finding
 from .roles import JuniorSocAnalyst, SeniorSocAnalyst, SPECIALISTS
 from .runtime import SwarmSession
@@ -67,8 +69,11 @@ class SwarmOrchestrator:
             results = [a.run(ctx, use_llm=False) for a in agents]
         else:
             with ThreadPoolExecutor(max_workers=self.max_parallel) as pool:
+                # Pool threads don't inherit contextvars; carry the active
+                # trace run into each agent thread.
                 results = list(pool.map(
-                    lambda a: a.run(ctx, use_llm=True, session=session), agents))
+                    lambda a: contextvars.copy_context().run(
+                        a.run, ctx, use_llm=True, session=session), agents))
         self.agent_runs.extend(a.last_run for a in agents)
         return [f for findings in results for f in findings]
 
@@ -92,8 +97,11 @@ class SwarmOrchestrator:
             self._register(senior)
         if session is not None:
             session.stage(ctx, seed=self._seed(self.tier1))
-        self.tier2 = senior.verify(ctx, self.tier1, use_llm=session is not None,
-                                   session=session)
+        with tracing.span(f"agent:{senior.name}", "agent", agent=senior.name,
+                          role=senior.role, tier=senior.tier) as sp:
+            self.tier2 = senior.verify(ctx, self.tier1, use_llm=session is not None,
+                                       session=session)
+            sp.set(mode=(senior.last_run or {}).get("mode"), findings=len(self.tier2))
         if ctx.incidents:
             self.agent_runs.append(senior.last_run)
 

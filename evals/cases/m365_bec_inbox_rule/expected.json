@@ -1,0 +1,10 @@
+{
+  "description": "Risky sign-in for the finance lead from an unfamiliar country, a hidden inbox rule that moves invoice/payment mail to RSS Subscriptions, bulk mailbox reads, then SendAs from accounts-payable announcing changed bank details. Classic BEC.",
+  "verdict": "likely-malicious",
+  "tier2": "confirmed",
+  "must_mention": [
+    "198.51.100.77",
+    "finance.lead@northwind.example"
+  ],
+  "min_incidents": 1
+}

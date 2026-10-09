@@ -240,9 +240,10 @@ threat-hunt checklist, and matched threat intel.
 
 JSON/HTTP API: `GET /api/report`, `GET /api/refresh`, `GET /api/meta`,
 `GET /api/report.md[?id=<meta.result_id>]` (Markdown IR report),
-`POST /api/stage/reset` (returns a `token`) -> `POST /api/stage/add`
-(`{token,name,content}`, one file per request) -> `POST /api/stage/run`
-(`{token,window}`), and the one-shot `POST /api/upload`
+`GET /api/runs[?limit=N]` and `GET /api/runs/<run_id>` (traced runs: cost,
+tokens, span tree), `POST /api/stage/reset` (returns a `token`) ->
+`POST /api/stage/add` (`{token,name,content}`, one file per request) ->
+`POST /api/stage/run` (`{token,window}`), and the one-shot `POST /api/upload`
 (`{files:[{name,content}], window}`). Each POST body is capped by
 `--max-upload-mb` (default 256 MB, measured on the JSON-encoded body).
 Cross-site requests are refused.
@@ -289,6 +290,68 @@ latest vulnerability and TTP context. Network failures are non-fatal.
 - **Sources:** `edr`/`endpoint`, `dns`, `network`/`firewall`/`router`/`switch`, `cloud`/`cloudtrail`, `auth`, `syslog`
 - Source type is auto-detected from a `source`/`log_type` field or the filename;
   override with `--source`.
+
+## Evals
+
+`evals/cases/<name>/` holds a labelled case: log files plus `expected.json`:
+
+```json
+{"description": "...", "verdict": "likely-malicious | likely-benign | needs-review",
+ "tier2": "confirmed | dismissed | null",
+ "must_mention": ["optional, case-insensitive, checked against report + findings"],
+ "must_not_mention": ["optional"], "min_incidents": 1}
+```
+
+```bash
+bluecell eval                          # rules only (--llm off, the default)
+bluecell eval --llm auto --repeat 3    # real agents; reports verdict stability
+bluecell eval --case psexec_change_window --json eval.json
+```
+
+It prints per-case pass/fail and aggregates: accuracy, malicious precision and
+recall, false-positive rate, Tier-2 agreement, mean duration, total tokens and
+cost, and verdict stability across `--repeat`. The exit code is non-zero if any
+case fails. The 9 shipped cases are synthetic (RFC 5737 public IPs only) and
+cover SSH brute force plus miner, password spray, a vulnerability scanner, M365
+BEC, DNS DGA beaconing, stale-credential noise, and two benign changes
+(maintenance window, PsExec under a change ticket).
+
+Be aware of what the offline numbers mean. The deterministic rules cannot read
+a change ticket, so with `--llm off` the benign-maintenance and PsExec cases
+are expected to fail (rules call them malicious; only a Tier-2 agent can
+dismiss them), and the spray and scanner cases land on `needs-review`. These
+failures are reported, not hidden: they measure the rules, and the LLM modes
+are what the Tier-2 metric is for. Tier-2 agreement only counts runs where an
+agent produced the verdict, so it shows `n/a` offline. Eval data is small and
+synthetic; treat the scores as regression signals, not as accuracy claims.
+
+## Tracing & cost
+
+Every `analyze` run is traced: spans (run, pipeline stage, agent, tool, llm)
+with timings, plus LLM token usage and cost. Traces are saved to
+`~/.bluecell/runs/<run_id>/trace.jsonl` and `summary.json` (override with
+`BLUECELL_RUNS_DIR`; skip with `--no-trace` or `BLUECELL_NO_TRACE=1`). Tracing
+errors never fail an analysis. Each report ends with a short "Run cost & trace"
+section.
+
+```bash
+bluecell runs --last 10        # table: time, input, verdict, tools, tokens, cost
+bluecell runs show <run_id>    # span tree
+```
+
+The dashboard has a **Runs & cost** page (`/runs.html`; `GET /api/runs`,
+`GET /api/runs/<id>`) with a cost-over-time chart and per-run traces.
+
+Cost is not always a real bill:
+
+- **CLI mode:** the cost is what the `claude` CLI reports as `total_cost_usd`.
+  It is shown as reported. On a subscription this is notional, not money charged.
+- **API mode:** cost is *estimated* from token counts and a price table in
+  `src/bluecell/tracing.py` at list prices (cache writes 1.25x, reads 0.1x input).
+  It ignores discounts and any price change since the table was written, and
+  unknown models get no price. Estimates are marked `~` in the CLI and dashboard.
+- Calls with no usage data count as cost unknown, and are not treated as zero
+  in the notes.
 
 ## Layout
 

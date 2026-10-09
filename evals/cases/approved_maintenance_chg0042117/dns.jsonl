@@ -1,0 +1,4 @@
+{"timestamp": "2026-10-03T22:01:45Z", "source": "dns", "host": "app01", "src_ip": "10.0.2.11", "query": "archive.ubuntu.com", "answer": "192.0.2.10"}
+{"timestamp": "2026-10-03T22:04:20Z", "source": "dns", "host": "app01", "src_ip": "10.0.2.11", "query": "github.com", "answer": "192.0.2.20"}
+{"timestamp": "2026-10-03T22:10:58Z", "source": "dns", "host": "win-app02", "src_ip": "10.0.2.12", "query": "download.windowsupdate.com", "answer": "192.0.2.30"}
+{"timestamp": "2026-10-03T22:35:02Z", "source": "dns", "host": "win-app02", "src_ip": "10.0.2.12", "query": "settings-win.data.microsoft.com", "answer": "192.0.2.40"}

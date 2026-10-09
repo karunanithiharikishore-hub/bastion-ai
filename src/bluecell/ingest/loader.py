@@ -246,6 +246,24 @@ def _json_object(line: str) -> Optional[dict]:
     return obj if isinstance(obj, dict) else None
 
 
+_EVAL_VERDICTS = ("likely-malicious", "likely-benign", "needs-review")
+
+
+def _is_eval_label(path: str) -> bool:
+    """True for an eval case's ``expected.json`` (see bluecell.evals): a small
+    JSON object whose ``verdict`` is a BlueCell verdict level. Directory walks
+    skip it so ``bluecell analyze evals/cases/<case>`` never ingests the answer
+    key as an event."""
+    try:
+        if os.path.getsize(path) > 65536:
+            return False
+        with open(path, encoding="utf-8") as fh:
+            obj = json.load(fh)
+    except (OSError, ValueError):
+        return False
+    return isinstance(obj, dict) and obj.get("verdict") in _EVAL_VERDICTS
+
+
 def ingest_path(path: str, override: Optional[str] = None) -> list:
     """Parse a file or recurse a directory into Events."""
     if os.path.isdir(path):
@@ -254,6 +272,8 @@ def ingest_path(path: str, override: Optional[str] = None) -> list:
             for fname in sorted(files):
                 if fname.startswith("."):
                     continue
+                if fname == "expected.json" and _is_eval_label(os.path.join(root, fname)):
+                    continue   # an eval case's label file, not a log
                 if os.path.splitext(fname)[1].lower() in (
                     ".json", ".jsonl", ".ndjson", ".csv", ".log", ".txt", ".syslog"
                 ):

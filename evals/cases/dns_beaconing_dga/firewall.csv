@@ -1,0 +1,17 @@
+timestamp,source,action,src_ip,dst_ip,dst_port,message,severity
+2026-10-06T14:00:08Z,firewall,allow,10.30.4.112,198.51.100.66,443,outbound tls 1.2 KB,low
+2026-10-06T14:01:08Z,firewall,allow,10.30.4.112,198.51.100.66,443,outbound tls 1.2 KB,low
+2026-10-06T14:02:09Z,firewall,allow,10.30.4.112,198.51.100.66,443,outbound tls 1.2 KB,low
+2026-10-06T14:03:11Z,firewall,allow,10.30.4.112,198.51.100.66,443,outbound tls 1.2 KB,low
+2026-10-06T14:04:11Z,firewall,allow,10.30.4.112,198.51.100.66,443,outbound tls 1.2 KB,low
+2026-10-06T14:05:12Z,firewall,allow,10.30.4.112,198.51.100.66,443,outbound tls 1.2 KB,low
+2026-10-06T14:06:14Z,firewall,allow,10.30.4.112,198.51.100.66,443,outbound tls 1.2 KB,low
+2026-10-06T14:07:14Z,firewall,allow,10.30.4.112,198.51.100.66,443,outbound tls 1.2 KB,low
+2026-10-06T14:08:15Z,firewall,allow,10.30.4.112,198.51.100.66,443,outbound tls 1.2 KB,low
+2026-10-06T14:09:17Z,firewall,allow,10.30.4.112,198.51.100.66,443,outbound tls 1.2 KB,low
+2026-10-06T14:10:17Z,firewall,allow,10.30.4.112,198.51.100.66,443,outbound tls 1.2 KB,low
+2026-10-06T14:11:18Z,firewall,allow,10.30.4.112,198.51.100.66,443,outbound tls 1.2 KB,low
+2026-10-06T14:12:20Z,firewall,allow,10.30.4.112,198.51.100.66,443,outbound tls 1.2 KB,low
+2026-10-06T14:13:20Z,firewall,allow,10.30.4.112,198.51.100.66,443,outbound tls 1.2 KB,low
+2026-10-06T14:14:21Z,firewall,allow,10.30.4.112,198.51.100.66,443,outbound tls 1.2 KB,low
+2026-10-06T14:15:23Z,firewall,allow,10.30.4.112,198.51.100.66,443,outbound tls 1.2 KB,low

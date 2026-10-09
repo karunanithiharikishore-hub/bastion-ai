@@ -1,0 +1,14 @@
+[
+  {"timestamp": "2026-10-03T22:08:05Z", "host": "win-app02", "user": "jsmith", "action": "process_create",
+   "process": "powershell.exe", "message": "powershell Get-HotFix | Sort-Object InstalledOn (CHG0042117 pre-patch inventory)",
+   "severity": "low", "src_ip": "10.0.5.20"},
+  {"timestamp": "2026-10-03T22:09:30Z", "host": "win-app02", "user": "jsmith", "action": "process_create",
+   "process": "certutil.exe", "message": "certutil -hashfile C:\\Installers\\KB5044284.msu SHA256 (verify vendor checksum before install)",
+   "severity": "low", "src_ip": "10.0.5.20"},
+  {"timestamp": "2026-10-03T22:11:02Z", "host": "win-app02", "user": "jsmith", "action": "process_create",
+   "process": "wusa.exe", "message": "wusa C:\\Installers\\KB5044284.msu /quiet /norestart (signed: Microsoft Corporation)",
+   "severity": "low", "src_ip": "10.0.5.20"},
+  {"timestamp": "2026-10-03T22:30:15Z", "host": "win-app02", "user": "SYSTEM", "action": "system_restart",
+   "process": "shutdown.exe", "message": "Planned restart after update KB5044284 (CHG0042117)",
+   "severity": "info"}
+]

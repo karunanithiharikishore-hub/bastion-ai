@@ -1,0 +1,23 @@
+[
+ {
+  "timestamp": "2026-10-06T13:59:41Z",
+  "host": "hr-ws12",
+  "user": "NORTHWIND\\r.ahmed",
+  "action": "process_create",
+  "process": "rundll32.exe",
+  "message": "rundll32.exe C:\\Users\\Public\\Libraries\\msvcp_win64.dll,Start (parent: WINWORD.EXE)",
+  "file_path": "C:\\Users\\Public\\Libraries\\msvcp_win64.dll",
+  "sha256": "9b1c3e5a7f9d1b3c5e7a9f1d3b5c7e9a1f3d5b7c9e1a3f5d7b9c1e3a5f7d9b1c",
+  "severity": "high"
+ },
+ {
+  "timestamp": "2026-10-06T14:00:08Z",
+  "host": "hr-ws12",
+  "user": "NORTHWIND\\r.ahmed",
+  "action": "network_connection",
+  "process": "rundll32.exe",
+  "message": "rundll32.exe connected to 198.51.100.66:443",
+  "dst_ip": "198.51.100.66",
+  "severity": "medium"
+ }
+]
