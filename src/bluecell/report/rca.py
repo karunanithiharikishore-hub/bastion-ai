@@ -25,6 +25,9 @@ _ATTACK_CHECKS = (
 )
 
 
+_CLOUD_SIGNIN_SOURCES = frozenset({"azure_ad", "okta", "o365", "m365_ual"})
+
+
 def _injection_ids(inc) -> list:
     return [e.event_id for e in inc.events if INJECTION_TAG in (e.tags or [])]
 
@@ -54,8 +57,10 @@ def _assess_rules(inc) -> dict:
     events = inc.events
 
     def _is_success(e):
+        # Only a sign-in is a success; same predicate as attack.map_attack.
         a = (e.action or "").lower(); m = (e.message or "").lower()
-        return "success" in a or a == "login_success" or "accepted" in m
+        return e.category == "authentication" and (
+            "success" in a or "accepted" in m or a == "login_success")
     def _is_fail(e):
         return "fail" in (e.action or "").lower() or "login_failed" == (e.action or "").lower()
 
@@ -74,12 +79,11 @@ def _assess_rules(inc) -> dict:
     only_cred = bool(cred_tactics) and cred_tactics.issubset({"credential-access", "authentication"})
     serious = bool(tactics & {"impact", "exfiltration", "command-and-control", "lateral-movement"})
 
-    # Distinct external IPs seen (rough breadth signal).
-    ips = set()
-    for e in events:
-        for ip in (e.src_ip, e.dst_ip):
-            if ip:
-                ips.add(ip)
+    # Distinct source IPs of the failures: breadth of a spray vs. one retrying device.
+    ips = {e.src_ip for e in events if e.src_ip}
+    # shortcut: fixed cutoffs; a benign retry loop is 1-2 IPs and tens of failures
+    # (stale-credential sample: 36), upgrade to a tuned/baselined threshold.
+    benign_noise = len(ips) <= 2 and fail_ct <= 100
 
     if serious and inc.score() >= 50:
         return {
@@ -91,22 +95,42 @@ def _assess_rules(inc) -> dict:
                     f"({inc.score()}/100). That progression is not normal noise."),
             "recommended_checks": list(_ATTACK_CHECKS),
         }
-    if only_cred and not has_success and single_source:
+    if only_cred and not has_success and single_source and benign_noise:
+        # Only cloud sign-ins can be blamed on a device; sshd/EDR logons are not a mail client.
+        cloud = bool(sources) and sources <= _CLOUD_SIGNIN_SOURCES
+        cause = ("an expired password or a stale cached credential on a device (e.g. a mail client)"
+                 if cloud else
+                 "a mistyped password or a stale credential in a script or service")
         return {
             "level": "likely-benign",
             "confidence": 0.7,
             "headline": "Likely benign failed-login noise, not a confirmed breach.",
             "why": (f"{fail_ct} failed sign-in(s) with NO successful compromise, "
-                    f"a single source ({', '.join(sorted(sources)) or 'n/a'}), and no "
-                    f"follow-on activity (no lateral movement, C2, or impact). "
-                    f"Most common cause: an expired password or a stale cached "
-                    f"credential on a device (e.g. a mail client) retrying and "
+                    f"a single source ({', '.join(sorted(sources)) or 'n/a'}) from "
+                    f"{len(ips)} IP(s), and no follow-on activity (no lateral movement, "
+                    f"C2, or impact). Most common cause: {cause} retrying and "
                     f"racking up failures."),
             "recommended_checks": [
                 "Confirm NONE of the failed attempts later SUCCEEDED from the same IP.",
                 "Check whether the IPs are the user's known home/office/mobile network.",
-                "Reset the password / re-auth the mail client to stop the retry spam.",
+                "Reset the password / re-auth the client to stop the retry spam.",
                 "Confirm MFA is enforced on the account(s).",
+            ],
+        }
+    if only_cred and not has_success and single_source:
+        # Too many failures or too many source IPs to be a retry loop: a spray or brute force.
+        return {
+            "level": "needs-review",
+            "confidence": 0.6,
+            "headline": (f"Possible brute force / password spray: {fail_ct} failed "
+                         f"sign-in(s) from {len(ips)} source IP(s)."),
+            "why": (f"{fail_ct} failed sign-in(s) from {len(ips)} distinct source IP(s) "
+                    f"with no success yet. That breadth or volume is not a single "
+                    f"device retrying, so it needs a human check."),
+            "recommended_checks": [
+                "Check the source IPs: are they known/expected networks, and are they reputation-listed?",
+                "Confirm NONE of the attempts succeeded (no success from any of these IPs).",
+                "Block or rate-limit the source IPs; enforce MFA and lockout on the targeted accounts.",
             ],
         }
     if only_cred and has_success:

@@ -49,7 +49,7 @@ def extract_iocs(events: list) -> dict:
 
     for ev in events:
         flagged = bool(ev.attack)
-        for ip in (ev.src_ip, ev.dst_ip):
+        for ip in dict.fromkeys((ev.src_ip, ev.dst_ip)):  # once per event, order kept
             if ip and _is_public_ip(ip):
                 buckets["ip"][ip] += 1
                 note_host("ip", ip, ev.host)

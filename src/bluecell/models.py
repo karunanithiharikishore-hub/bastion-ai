@@ -12,8 +12,10 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, Optional
 
 
@@ -34,9 +36,16 @@ CATEGORIES = (
 def _parse_ts(value: Any) -> datetime:
     """Best-effort timestamp parsing -> tz-aware UTC datetime.
 
-    Accepts ISO-8601 (with or without 'Z'), epoch seconds/millis/micros/nanos,
-    compact YYYYMMDDhhmmss, US "1/15/2024 10:22:33 AM", year-less syslog, or
-    falls back to now(). Never raises: a bad timestamp must not crash ingestion.
+    Falls back to now() when the value cannot be parsed; Event tags those.
+    """
+    return _parse_ts_or_none(value) or datetime.now(timezone.utc)
+
+
+def _parse_ts_or_none(value: Any) -> Optional[datetime]:
+    """Tz-aware UTC datetime for ISO-8601 (with or without 'Z'/zone), epoch
+    seconds/millis/micros/nanos, compact YYYYMMDDhhmmss, RFC 2822, Apache CLF,
+    US "1/15/2024 10:22:33 AM", year-less syslog; None when unparseable.
+    Never raises: a bad timestamp must not crash ingestion.
     """
     if isinstance(value, datetime):
         return _utc(value)
@@ -61,14 +70,16 @@ def _parse_ts(value: Any) -> datetime:
                 seconds = float(value)
             return datetime.fromtimestamp(seconds, tz=timezone.utc)
         except (OverflowError, OSError, ValueError):
-            return datetime.now(timezone.utc)
+            return None
     if isinstance(value, str):
-        v = value.strip().replace("Z", "+00:00")
-        for candidate in (v, v.split(".")[0] + "+00:00" if "." in v else v):
-            try:
-                return _utc(datetime.fromisoformat(candidate))
-            except ValueError:
-                continue
+        # Only UTC/GMT/Z are stripped and read as UTC; other zone names (PST) stay
+        # in the text so they fail to parse instead of being taken as UTC.
+        v = re.sub(r"\s+(UTC|GMT|Z)$", "", value.strip()).replace("Z", "+00:00")
+        v = re.sub(r"(\.\d{6})\d+", r"\1", v)   # keep offset; drop sub-microsecond digits
+        try:
+            return _utc(datetime.fromisoformat(v))
+        except ValueError:
+            pass
         # Common syslog format: "Mmm dd HH:MM:SS" (no year) -> assume current.
         # Parsed with an explicit year so "Feb 29" works (strptime's default
         # year 1900 is not a leap year); walk back until it is not in the future.
@@ -83,17 +94,32 @@ def _parse_ts(value: Any) -> datetime:
             if dt <= now + timedelta(days=2):
                 return dt
         # US-style Export-Csv dates (PowerShell / Exchange message trace).
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %H:%M:%S"):
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %H:%M:%S",
+                    "%m/%d/%Y, %I:%M:%S %p", "%m/%d/%Y %I:%M %p",
+                    "%d/%b/%Y:%H:%M:%S %z"):          # Apache CLF
             try:
-                return datetime.strptime(v, fmt).replace(tzinfo=timezone.utc)
+                return _utc(datetime.strptime(v, fmt))
             except ValueError:
                 continue
-    return datetime.now(timezone.utc)
+        try:                                          # RFC 2822 (mail, HTTP Date)
+            return _utc(parsedate_to_datetime(v))
+        except (TypeError, ValueError, IndexError):
+            pass
+    return None
 
 
 def _utc(dt: datetime) -> datetime:
     """Tz-aware UTC; naive values are taken to be UTC already."""
-    return dt.astimezone(timezone.utc) if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    if not dt.tzinfo:
+        return dt.replace(tzinfo=timezone.utc)
+    try:
+        return dt.astimezone(timezone.utc)
+    except OverflowError:
+        # Extreme date (e.g. .NET MinValue/MaxValue) written with an offset
+        # pushes the UTC instant out of range: clamp to the range edge.
+        offset = dt.utcoffset() or timedelta(0)
+        edge = datetime.min if offset > timedelta(0) else datetime.max
+        return edge.replace(tzinfo=timezone.utc)
 
 
 def _raw_digest(raw: Any) -> str:
@@ -111,6 +137,17 @@ def _raw_digest(raw: Any) -> str:
 # Entity fields that must be strings (JSON may hold numbers, lists or objects).
 _STR_FIELDS = ("host", "user", "process", "src_ip", "dst_ip", "domain",
                "file_path", "file_hash")
+_ENTITY_FIELDS = ("host", "user", "process", "domain")
+_PLACEHOLDERS = {"-", "n/a", "na", "null", "(null)", "none", "unknown", "?"}
+_CONTROL = re.compile(r"[\x00-\x08\x0e-\x1f\x7f]")   # keep \t\n\v\f\r: _flat() escapes those for the digest
+
+
+def _flat(value: Any) -> str:
+    """Escape control chars and line separators (\\n, \\r, \\x85, \\u2028...) so one
+    event stays one digest line; normal text passes through unchanged."""
+    return "".join(c.encode("unicode_escape").decode("ascii")
+                   if unicodedata.category(c) in ("Cc", "Zl", "Zp") else c
+                   for c in str(value))
 
 
 @dataclass
@@ -137,11 +174,22 @@ class Event:
     tags: list = field(default_factory=list)
 
     def __post_init__(self) -> None:
-        self.ts = _parse_ts(self.ts)
+        parsed = _parse_ts_or_none(self.ts)
+        if parsed is None:                 # never pass off a guessed time as the real one
+            self.tags.append("ts-unparsed")
+            parsed = datetime.now(timezone.utc)
+        self.ts = parsed
         for name in _STR_FIELDS:
             val = getattr(self, name)
             if val is not None:
-                val = str(val).strip()
+                val = str(val)
+                if name in _ENTITY_FIELDS:
+                    # NUL/C0 bytes and "-"/"N/A" would otherwise link unrelated events in correlate().
+                    val = _CONTROL.sub("", val).strip()
+                    if val.lower() in _PLACEHOLDERS:
+                        val = ""
+                else:
+                    val = val.strip()
                 setattr(self, name, val or None)
         self.message = "" if self.message is None else str(self.message)
         self.action = str(self.action or "event")
@@ -156,7 +204,9 @@ class Event:
     @property
     def event_id(self) -> str:
         """Stable id derived from content — used for dedup and evidence refs."""
-        basis = (f"{self.ts.isoformat()}|{self.source}|{self.action}|{self.host}|{self.user}|"
+        # ts-unparsed: ts is a wall-clock guess, so keep it out of the id (stable across runs).
+        ts = "" if "ts-unparsed" in self.tags else self.ts.isoformat()
+        basis = (f"{ts}|{self.source}|{self.action}|{self.host}|{self.user}|"
                  f"{self.src_ip}|{self.dst_ip}|{self.domain}|{self.process}|{self.file_hash}|"
                  f"{self.file_path}|{self.message}|{self.category}|{self.severity}|"
                  f"{_raw_digest(self.raw)}")
@@ -186,7 +236,7 @@ class Event:
 
     def compact(self) -> str:
         """Token-lean single-line representation for the LLM stage."""
-        parts = [self.ts.strftime("%m-%dT%H:%M:%S"), self.source, self.action]
+        parts = [self.ts.strftime("%m-%dT%H:%M:%S"), _flat(self.source), _flat(self.action)]
         for label, val in (
             ("h", self.host),
             ("u", self.user),
@@ -197,9 +247,9 @@ class Event:
             ("hash", self.file_hash),
         ):
             if val:
-                parts.append(f"{label}={val}")
+                parts.append(f"{label}={_flat(val)}")
         if self.attack:
-            parts.append("att=" + ",".join(self.attack))
+            parts.append("att=" + ",".join(_flat(a) for a in self.attack))
         return " ".join(parts)
 
 

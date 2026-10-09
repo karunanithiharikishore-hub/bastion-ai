@@ -47,17 +47,27 @@ _SUS_TLDS = (".xyz", ".top", ".tk", ".gq", ".ml", ".cf", ".ru", ".su", ".info", 
 _LOLBINS = ("powershell", "cmd.exe", "wscript", "cscript", "mshta", "rundll32",
             "regsvr32", "certutil", "bitsadmin", "wmic", "psexec")
 _RANSOM_EXT = (".locked", ".encrypted", ".crypt", ".enc", ".ryk", ".lockbit")
+# In free text the extension must end a token: "foo.encoding", "report.encrypted-pdf"
+# and "anti-ransomware" are not ransomware artifacts. Ransom-note wording is matched
+# as phrases, not the bare word "ransom".
+_RANSOM_EXT_RE = re.compile(r"\.(?:locked|encrypted|crypt|enc|ryk|lockbit)(?![\w-])")
+_RANSOM_NOTE_RE = re.compile(r"ransom note|ransom demand|(?:your|all) (?:files|data|documents)"
+                             r" (?:have been|were|are|got) (?:encrypted|locked)")
 # CDN / cloud parents whose machine-generated hostnames look random by design.
 _CDN_PARENTS = ("cloudfront.net", "akamaiedge.net", "akamai.net", "azureedge.net",
                 "fastly.net", "edgekey.net", "googleusercontent.com", "amazonaws.com")
 
 # Whole-word rules, so "rdp" in wordpress.com, "smb" in SMBIOS or "at.exe" in
 # chat.exe do not fire.
-_SCHED_RE = re.compile(r"scheduled task|schtasks|crontab|(?:^|[\\/\s\"'])at\.exe\b"
+# Scheduled-job *creation* only: a task that merely ran or completed is not persistence.
+_SCHED_RE = re.compile(r"scheduled tasks?\b[^.;]{0,80}?\b(?:created|registered|updated)\b"
+                       r"|schtasks\s+/create|eventid\D{0,3}470[28]\b|crontab|(?:^|[\\/\s\"'])at\.exe\b"
                        r"|new cron job|cron job created")
-_REMOTE_RE = re.compile(r"psexec|\bwmic\s|\brdp|\bsmb(?!ios)|\bwinrm\b")
+_REMOTE_RE = re.compile(r"psexec|\bwmic\s|\brdp|\bsmb(?!ios|d\b)|\bwinrm\b")
+# Whole-word failure: "failover" is not a failed login.
+_FAIL_RE = re.compile(r"(?<![a-z])fail(?:ed|ure|ures|ing|s)?(?![a-z])")
 _SEC_TOOL = (r"(?:defender|windefend|mpssvc|antivirus|anti-virus|antimalware|"
-             r"firewall\w*|edr|sysmon|real-?time (?:protection|monitoring)|"
+             r"firewall\w*|edr|sysmon\d*|real-?time (?:protection|monitoring)|"
              r"tamper protection|security (?:service|product|agent|center|software|tool))")
 _DISABLE_VERB = r"(?:disabled?|disabling|stop(?:ped|ping|s)?|uninstall(?:ed|ing)?|turned off)"
 # The verb must act on the tool: "sc stop WinDefend", "stopped Windows Defender
@@ -66,7 +76,7 @@ _DISABLE_VERB = r"(?:disabled?|disabling|stop(?:ped|ping|s)?|uninstall(?:ed|ing)
 _IMPAIR_RE = re.compile(
     rf"\b{_DISABLE_VERB}\b(?:\s+[\w-]+){{0,2}}?\s+{_SEC_TOOL}\b"
     rf"|\b{_SEC_TOOL}(?:\s+(?:service|agent|protection))?\s+{_DISABLE_VERB}\b"
-    rf"|\b{_SEC_TOOL}(?:\s+(?!session|connection|flow|traffic)[\w-]+){{0,3}}?"
+    rf"|\b{_SEC_TOOL}(?:\s+(?!session|connection|flow|traffic|scan|job|task|log|export|update|rule)[\w-]+){{0,3}}?"
     rf"\s+(?:was|is|has been|got|were)\s+{_DISABLE_VERB}\b"
     r"|set-mppreference\b.*\s-disable\w+")
 
@@ -101,7 +111,7 @@ def map_attack(events: list) -> list:
         # earlier failure ("accepted ... after 1 failed attempt") is not one.
         success = ev.category == "authentication" and (
             "success" in act or "accepted" in msg or "login_success" in act)
-        if ev.category == "authentication" and not success and ("fail" in act or "fail" in msg):
+        if ev.category == "authentication" and not success and (_FAIL_RE.search(act) or _FAIL_RE.search(msg)):
             _tag(ev, "T1110", "auth-failure")
         if success:
             ev.tags.append("auth:success")
@@ -130,7 +140,7 @@ def map_attack(events: list) -> list:
             _tag(ev, "T1105", "tool-download")
 
         # Ransomware impact signals.
-        if any(ext in msg for ext in _RANSOM_EXT) or "ransom" in msg or ev.file_path and any(
+        if _RANSOM_EXT_RE.search(msg) or _RANSOM_NOTE_RE.search(msg) or ev.file_path and any(
             (ev.file_path or "").lower().endswith(ext) for ext in _RANSOM_EXT):
             _tag(ev, "T1486", "ransom-artifact")
         if "vssadmin" in msg and "delete" in msg or "shadowcopy" in msg and "delete" in msg:

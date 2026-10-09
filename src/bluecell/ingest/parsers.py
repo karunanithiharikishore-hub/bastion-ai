@@ -35,23 +35,51 @@ def _get(d: dict, *keys, default=None):
 
 
 def _clean_ip(val) -> Optional[str]:
-    """IP text with any port / brackets removed; None if it is not an IP.
+    """IP text with control chars, port and brackets removed; None if it is not an IP.
 
     "1.2.3.4:443" -> "1.2.3.4", "[2001:db8::1]:443" -> "2001:db8::1"; bare IPv6
-    ("2001:db8::1", "::ffff:1.2.3.4") is kept intact.
+    ("2001:db8::1", "::ffff:1.2.3.4") is kept intact. Unspecified addresses
+    ("0.0.0.0", "::") mean "any"/"unset" in firewall and syslog exports, so they
+    are dropped too: kept, they would link every such record into one incident.
     """
     if val in (None, ""):
         return None
-    s = str(val).strip()
+    s = re.sub(r"[\x00-\x1f\x7f]", "", str(val)).strip()   # NUL and C0 controls
     m = re.fullmatch(r"\[([0-9A-Fa-f:.]+)\](?::\d+)?", s) or \
         re.fullmatch(r"((?:\d{1,3}\.){3}\d{1,3}):\d+", s)
     if m:
         s = m.group(1)
     try:
-        ipaddress.ip_address(s)
+        ip = ipaddress.ip_address(s)
     except ValueError:
         return None
-    return s
+    return None if ip.is_unspecified else s
+
+
+def _ip_field(r: dict, *keys) -> Optional[str]:
+    """First of keys whose value is a real IP; placeholders ('-', 'N/A') fall through."""
+    for k in keys:
+        ip = _clean_ip(_get(r, k))
+        if ip:
+            return ip
+    return None
+
+
+def _log_source(r: dict, default: str) -> str:
+    """Log-source label from source/device_type; firewall CSVs put an address in `source`, which is not a label."""
+    for v in (_get(r, "source"), _get(r, "device_type")):
+        if v is not None and not _is_addr(v):
+            return str(v)
+    return default
+
+
+def _is_addr(v) -> bool:
+    s = str(v).strip()
+    try:
+        ipaddress.ip_address(s)
+        return True
+    except ValueError:
+        return _clean_ip(s) is not None   # "ip:port" / "[ipv6]:port"
 
 
 _SEV_WORDS = {
@@ -78,66 +106,114 @@ def _severity(val) -> int:
 
 # ---- structured (dict) parsers --------------------------------------------
 
+# Every key parse_edr reads. A record with none of them is not an EDR event (BUG-INGEST-12).
+_EDR_KEYS = (
+    "action", "event_type", "operation", "activity", "ActionType", "alert", "detection",
+    "threat_name", "process", "process_name", "image", "proc", "ProcessCommandLine", "FileName",
+    "InitiatingProcessFileName", "InitiatingProcessCommandLine", "RemoteIP", "LocalIP",
+    "RemotePort", "src_ip", "source_ip", "local_ip", "dst_ip", "dest_ip", "remote_ip",
+    "timestamp", "ts", "time", "@timestamp", "eventTime", "TimeGenerated", "TimeGenerated [UTC]",
+    "message", "description", "name", "severity", "risk", "level", "host", "hostname", "device",
+    "endpoint", "computer_name", "DeviceName", "user", "username", "account", "user_name",
+    "AccountName", "InitiatingProcessAccountName", "file_path", "path", "target_file", "sha256",
+    "hash", "file_hash", "sha1", "md5", "RemoteUrl",
+)
+
+
 def parse_edr(r: dict) -> Optional[Event]:
-    """Endpoint / EDR alerts and process telemetry."""
-    action = _get(r, "action", "event_type", "operation", "activity", default="edr_event")
+    """Endpoint / EDR alerts, process telemetry, and Defender Advanced Hunting Device* tables."""
+    if _get(r, *_EDR_KEYS) is None:
+        return None
+    action = _get(r, "action", "event_type", "operation", "activity", "ActionType", default="edr_event")
     # CSV gives "false"/"0" as text, which is truthy; treat those as no alert.
     alert = any(str(v).strip().lower() not in ("false", "0", "no", "none", "")
                 for v in (_get(r, "alert"), _get(r, "detection"), _get(r, "threat_name"))
                 if v is not None)
+    # DeviceProcessEvents: FileName is the process itself; InitiatingProcess* is its parent.
+    proc = _get(r, "process", "process_name", "image", "proc")
+    if proc is None and _get(r, "ProcessCommandLine") is not None:
+        proc = _get(r, "FileName")
+    proc = proc or _get(r, "InitiatingProcessFileName", "FileName")
+    # DeviceNetworkEvents rows carry RemoteIP/LocalIP; they are connections, not processes.
+    # DeviceLogonEvents: a sign-in, not a connection. Its message names "failed"
+    # as a word, because attack.py's _FAIL_RE does not match "LogonFailed".
+    logon = str(action).lower() in ("logonsuccess", "logonfailed", "logonattempted")
+    net = _get(r, "RemoteIP", "LocalIP") is not None and not logon
+    src_ip = _ip_field(r, "src_ip", "source_ip", "local_ip", "LocalIP")
+    dst_ip = _ip_field(r, "dst_ip", "dest_ip", "remote_ip", "RemoteIP")
+    if logon:
+        # Inbound logon: RemoteIP is the client, so it is the source (INGEST-22).
+        # dst_ip falls back to RemoteIP when there is no LocalIP (INGEST-2 asserts it).
+        src_ip = _ip_field(r, "RemoteIP") or _ip_field(r, "src_ip", "source_ip")
+        dst_ip = _ip_field(r, "LocalIP") or dst_ip
+    default_msg = (f"{src_ip or '?'} -> {dst_ip or '?'}:{_get(r, 'RemotePort', default='?')}"
+                   if net else action)
+    if logon:
+        verb = {"logonfailed": "failed", "logonsuccess": "succeeded"}.get(str(action).lower(), "attempted")
+        default_msg = f"logon {verb} for {_get(r, 'AccountName', default='?')} from {src_ip or '?'}"
     return Event(
-        ts=_get(r, "timestamp", "ts", "time", "@timestamp", "eventTime", default=None),
+        ts=_get(r, "timestamp", "ts", "time", "@timestamp", "eventTime", "TimeGenerated", "TimeGenerated [UTC]", default=None),
         source="edr",
-        category="alert" if alert else "process",
+        category="alert" if alert else ("authentication" if logon else "network" if net else "process"),
         action=str(action),
-        message=str(_get(r, "message", "description", "threat_name", "name", default=action)),
+        message=str(_get(r, "message", "description", "threat_name", "name",
+                         "ProcessCommandLine", "InitiatingProcessCommandLine", default=default_msg)),
         severity=_severity(_get(r, "severity", "risk", "level")),
-        host=_get(r, "host", "hostname", "device", "endpoint", "computer_name"),
-        user=_get(r, "user", "username", "account", "user_name"),
-        process=_get(r, "process", "process_name", "image", "proc"),
+        host=_get(r, "host", "hostname", "device", "endpoint", "computer_name", "DeviceName"),
+        user=_get(r, "user", "username", "account", "user_name", "AccountName",
+                  "InitiatingProcessAccountName"),
+        process=proc,
         file_path=_get(r, "file_path", "path", "target_file"),
-        file_hash=_get(r, "sha256", "hash", "file_hash", "md5"),
-        src_ip=_get(r, "src_ip", "source_ip", "local_ip"),
-        dst_ip=_get(r, "dst_ip", "dest_ip", "remote_ip"),
+        file_hash=_get(r, "sha256", "hash", "file_hash", "sha1", "md5"),
+        src_ip=src_ip,
+        dst_ip=dst_ip,
+        domain=_get(r, "RemoteUrl"),
         raw=r,
     )
 
 
 def parse_dns(r: dict) -> Optional[Event]:
-    domain = _get(r, "query", "domain", "question", "name", "qname")
+    domain = _get(r, "query", "domain", "question", "name", "qname", "query_name", "QueryName",
+                  "rrname", "dns.question.name")
     if not domain:
         return None
     return Event(
-        ts=_get(r, "timestamp", "ts", "time", "@timestamp", default=None),
+        ts=_get(r, "timestamp", "ts", "time", "@timestamp", "TimeGenerated", "TimeGenerated [UTC]", default=None),
         source="dns",
         category="dns",
         action="dns_query",
         message=f"DNS query {domain} -> {_get(r, 'answer', 'response', 'resolved_ip', default='?')}",
         severity=_severity(_get(r, "severity")),
         host=_get(r, "host", "client", "source_host"),
-        src_ip=_get(r, "src_ip", "client_ip", "source_ip"),
-        dst_ip=_get(r, "resolved_ip", "answer_ip"),
+        src_ip=_ip_field(r, "src_ip", "client_ip", "source_ip"),
+        dst_ip=_ip_field(r, "resolved_ip", "answer_ip"),
         domain=str(domain).rstrip("."),
         raw=r,
     )
 
 
 def parse_network(r: dict) -> Optional[Event]:
-    """Firewall / router / switch / netflow style connection records."""
+    """Firewall / router / switch / netflow style connection records, and
+    Defender DeviceNetworkEvents (routed here by its filename)."""
+    src_ip = _ip_field(r, "src_ip", "source_ip", "source", "source_address", "src_addr", "src", "LocalIP")
+    dst_ip = _ip_field(r, "dst_ip", "dest_ip", "destination", "destination_address", "dst_addr", "dst",
+                       "destination_ip", "RemoteIP")
     return Event(
-        ts=_get(r, "timestamp", "ts", "time", "@timestamp", default=None),
-        source=str(_get(r, "source", "device_type", default="firewall")),
+        ts=_get(r, "timestamp", "ts", "time", "@timestamp", "TimeGenerated", "TimeGenerated [UTC]", default=None),
+        source=_log_source(r, "firewall"),
         category="network",
-        action=str(_get(r, "action", "verdict", "disposition", default="connection")),
+        action=str(_get(r, "action", "verdict", "disposition", "ActionType", default="connection")),
         message=str(_get(
             r, "message",
-            default=f"{_get(r, 'src_ip', 'source_ip', default='?')} -> "
-                    f"{_get(r, 'dst_ip', 'dest_ip', default='?')}:"
-                    f"{_get(r, 'dst_port', 'port', default='?')}")),
+            default=f"{src_ip or '?'} -> {dst_ip or '?'}:"
+                    f"{_get(r, 'dst_port', 'port', 'RemotePort', default='?')}")),
         severity=_severity(_get(r, "severity", "level")),
-        host=_get(r, "host", "device", "hostname"),
-        src_ip=_get(r, "src_ip", "source_ip", "src"),
-        dst_ip=_get(r, "dst_ip", "dest_ip", "dst", "destination_ip"),
+        host=_get(r, "host", "device", "hostname", "DeviceName"),
+        user=_get(r, "user", "AccountName", "InitiatingProcessAccountName"),
+        process=_get(r, "InitiatingProcessFileName"),
+        src_ip=src_ip,
+        dst_ip=dst_ip,
+        domain=_get(r, "RemoteUrl"),
         raw=r,
     )
 
@@ -165,7 +241,7 @@ def parse_cloud(r: dict) -> Optional[Event]:
         action, category = "login_failed", "authentication"
         tags.append("aws:console-login-failed")
     ev = Event(
-        ts=_get(r, "eventTime", "timestamp", "time", "@timestamp", "activityDateTime",
+        ts=_get(r, "eventTime", "timestamp", "time", "@timestamp", "activityDateTime", "eventTimestamp", "TimeGenerated", "TimeGenerated [UTC]",
                 default=None),
         source=str(_get(r, "eventSource", "provider", default="cloud")),
         category=category,
@@ -174,7 +250,7 @@ def parse_cloud(r: dict) -> Optional[Event]:
         severity=_severity(_get(r, "severity", default=("high" if failed else "info"))),
         user=_cloud_user(r),
         # Service principals ("ec2.amazonaws.com") sit in sourceIPAddress too.
-        src_ip=_clean_ip(_get(r, "sourceIPAddress", "callerIp", "callerIpAddress", "src_ip")),
+        src_ip=_ip_field(r, "sourceIPAddress", "callerIp", "callerIpAddress", "src_ip"),
         raw=r,
     )
     ev.tags.extend(tags)
@@ -200,15 +276,15 @@ def parse_auth(r: dict) -> Optional[Event]:
     """Generic authentication events (server auth, IdP, VPN)."""
     action = _get(r, "action", "event", default="auth")
     return Event(
-        ts=_get(r, "timestamp", "ts", "time", default=None),
-        source=str(_get(r, "source", default="auth")),
+        ts=_get(r, "timestamp", "ts", "time", "TimeGenerated", "TimeGenerated [UTC]", default=None),
+        source=_log_source(r, "auth"),
         category="authentication",
         action=str(action),
         message=str(_get(r, "message", default=action)),
         severity=_severity(_get(r, "severity", default=("high" if "fail" in str(action).lower() else "info"))),
         host=_get(r, "host", "hostname", "server"),
         user=_get(r, "user", "username", "account"),
-        src_ip=_get(r, "src_ip", "source_ip", "client_ip"),
+        src_ip=_ip_field(r, "src_ip", "source_ip", "source", "client_ip"),
         raw=r,
     )
 
@@ -244,6 +320,9 @@ _REPEAT_CAP = 1000
 # Processes whose failures are authentication failures.
 _AUTH_PROCS = ("sshd", "sshd-session", "login", "su", "sudo", "pam", "gdm-password",
                "polkitd", "vsftpd", "dovecot", "systemd-logind", "passwd", "chage")
+# Failure wording that does not itself contain "fail" (sshd probes, PAM, sudo).
+_AUTH_FAIL_PHRASES = ("invalid user", "illegal user", "authentication failure",
+                      "maximum authentication attempts", "incorrect password")
 # "for"/"user"/"account" followed by the account name. Filler words that can sit
 # in between ("session closed for user X", "for invalid user X") are skipped so
 # they are never taken as the account itself.
@@ -257,12 +336,9 @@ def _syslog_ip(msg: str) -> Optional[str]:
     rm = _RHOST_RE.search(msg)
     if rm and _clean_ip(rm.group("h")):
         return _clean_ip(rm.group("h"))
-    ips = _IP_RE.findall(msg)
-    if ips:
-        return ips[0]
-    for cand in _IP6_RE.findall(msg):
-        if _clean_ip(cand):
-            return cand
+    for cand in _IP_RE.findall(msg) + _IP6_RE.findall(msg):
+        if _clean_ip(cand):   # 999.999.999.999 is not an address
+            return _clean_ip(cand)
     return None
 
 
@@ -288,10 +364,14 @@ def parse_syslog_line(line: str) -> Optional[Event]:
     # A failure is only a failed *login* with auth context: an auth process, or
     # password / authentication-failure wording naming a user ("systemd: Failed
     # to start ... User Login Management" is not one).
-    auth_ctx = (proc or "").lower().rsplit("/", 1)[-1] in _AUTH_PROCS or "pam_" in low or \
+    auth_proc = (proc or "").lower().rsplit("/", 1)[-1] in _AUTH_PROCS
+    auth_ctx = auth_proc or "pam_" in low or \
         (("password" in low or "authentication failure" in low) and um is not None)
-    if "fail" in low and ("password" in low or "authentication" in low or "login" in low) \
-            and auth_ctx:
+    failed = "fail" in low or any(p in low for p in _AUTH_FAIL_PHRASES)
+    # In an auth process the failure wording alone is enough (sshd "Failed publickey",
+    # "Invalid user"); elsewhere the message must also name password/auth/login.
+    if failed and auth_ctx and (auth_proc or "password" in low or "authentication" in low
+                                or "login" in low):
         action, category, sev = "login_failed", "authentication", 3
     elif _SSH_ACCEPTED_RE.search(msg):
         action, category, sev = "login_success", "authentication", 1
@@ -300,7 +380,10 @@ def parse_syslog_line(line: str) -> Optional[Event]:
     else:
         action, category, sev = "log", "other", 1
     if action != "sudo":
-        um = _USER_RE.search(msg) or _USER_EQ_RE.search(msg)
+        # "for/user/account X" names an account only in auth context; elsewhere
+        # ("Waiting for network", "for 10.0.0.5") it is not a user.
+        auth_user = action in ("login_failed", "login_success") or auth_proc or "pam_" in low
+        um = (_USER_RE.search(msg) if auth_user else None) or _USER_EQ_RE.search(msg)
     raw = {"line": line}
     if repeat:
         raw["repeated"] = repeat   # the loader expands this into N events
@@ -345,10 +428,12 @@ def parse_azure_signin(r: dict) -> Optional[Event]:
     Application sign-ins CSV or JSON)."""
     user = _get(r, "User", "Username", "User principal name", "userPrincipalName",
                 "userDisplayName", "Identity")
-    ip = _get(r, "IP address", "IP Address", "ipAddress", "IP address (seen by resource)")
-    status = _get(r, "Status", "Sign-in status", "status", "conditionalAccessStatus")
-    errcode = _get(r, "Sign-in error code", "Sign in error code", "errorCode", "Error code")
-    reason = _get(r, "Failure reason", "failureReason", "Status reason")
+    ip_raw = _get(r, "IP address", "IP Address", "ipAddress", "IP address (seen by resource)")
+    ip = _clean_ip(ip_raw)
+    status =_get(r, "Status", "Sign-in status", "status", "conditionalAccessStatus")
+    errcode = _get(r, "Sign-in error code", "Sign in error code", "errorCode", "Error code",
+                    "ResultType")
+    reason = _get(r, "Failure reason", "failureReason", "Status reason", "ResultDescription")
     if isinstance(status, dict):
         # Graph / portal JSON: status = {"errorCode": 0, "failureReason": ..,
         # "additionalDetails": ..}. Never substring-match the dict's repr.
@@ -367,7 +452,7 @@ def parse_azure_signin(r: dict) -> Optional[Event]:
     mfa = _get(r, "Multifactor authentication result", "authenticationRequirement",
                "MFA result")
 
-    if user is None and ip is None and status is None:
+    if user is None and ip_raw is None and status is None:
         return None  # not an azure sign-in row
 
     transfer = _get(r, "Original transfer method", "originalTransferMethod")
@@ -387,7 +472,7 @@ def parse_azure_signin(r: dict) -> Optional[Event]:
     is_devicecode = "devicecode" in str(transfer or "").lower().replace(" ", "")
 
     ev = Event(
-        ts=_get(r, "Date (UTC)", "Date", "date", "createdDateTime", "Timestamp",
+        ts=_get(r, "Date (UTC)", "Date", "date", "createdDateTime", "Timestamp", "TimeGenerated", "TimeGenerated [UTC]",
                 "Date (local)"),
         source="azure_ad",
         category="authentication",
@@ -489,9 +574,7 @@ def parse_ual(r: dict) -> Optional[Event]:
     action, category, sev, attack = _UAL_OPS.get(
         op_l, (str(op), "other", 1, []))
 
-    ip = a("ClientIP", "ClientIPAddress", "ActorIpAddress", "IPAddress")
-    if ip:
-        ip = _clean_ip(ip) or str(ip).strip()   # strip port / brackets, keep IPv6
+    ip = _clean_ip(a("ClientIP", "ClientIPAddress", "ActorIpAddress", "IPAddress"))
     user = _get(r, "UserId", "UserIds") or a("UserId", "UserKey")
     workload = a("Workload")
     result = a("ResultStatus")
@@ -545,6 +628,7 @@ def parse_o365_message(r: dict) -> Optional[Event]:
     subject = _get(r, "subject", "Subject", "Message Subject", "message_subject")
     status = _get(r, "status", "Status", "Delivery Status")
     rstat = _get(r, "Recipient_status", "Recipient status")
+    pairs = []
     if rstat:
         # MTSummary: "a@x.com##Receive, Deliver;b@x.com##Receive, Fail"
         pairs = [p.split("##", 1) for p in str(rstat).split(";") if p.strip()]
@@ -555,10 +639,12 @@ def parse_o365_message(r: dict) -> Optional[Event]:
     if sender is None and recipient is None and subject is None:
         return None
     s = str(status or "").lower()
-    sev = 2 if any(w in s for w in ("fail", "quarantine", "spam", "block", "defer")) else 1
+    # Severity looks at every recipient's final disposition, not only the first.
+    all_dispositions = " ".join([s] + [p[1].split(",")[-1] for p in pairs if len(p) > 1]).lower()
+    sev = 2 if any(w in all_dispositions for w in ("fail", "quarantine", "spam", "block", "defer")) else 1
     return Event(
         ts=_get(r, "origin_timestamp_utc", "Origin Timestamp", "Date (UTC)", "Date",
-                "received", "Received"),
+                "received", "Received", "TimeGenerated", "TimeGenerated [UTC]"),
         source="o365",
         category="other",
         action="email_" + (s.replace(" ", "_") or "event"),
@@ -566,8 +652,8 @@ def parse_o365_message(r: dict) -> Optional[Event]:
                  f"subj='{str(subject or '')[:80]}'"),
         severity=sev,
         user=str(sender) if sender else None,
-        src_ip=_clean_ip(_get(r, "original_client_ip", "Original Client IP", "FromIP",
-                              "From IP", "client_ip")),
+        src_ip=_ip_field(r, "original_client_ip", "Original Client IP", "FromIP",
+                         "From IP", "client_ip"),
         raw=r,
     )
 

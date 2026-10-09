@@ -10,10 +10,21 @@ the "cross-refer and cross-correlate" stage.
 """
 from __future__ import annotations
 
+import ipaddress
 from dataclasses import dataclass, field
 from datetime import timedelta
 
 from .attack import ATTACK_TECHNIQUES
+
+
+def _is_shared_noise_ip(val) -> bool:
+    """Loopback/unspecified/link-local IPs are local to each host, not a shared attacker."""
+    try:
+        a = ipaddress.ip_address(str(val).strip().strip("[]"))
+    except ValueError:
+        return False
+    a = getattr(a, "ipv4_mapped", None) or a  # ::ffff:127.0.0.1 is still loopback
+    return a.is_loopback or a.is_unspecified or a.is_link_local
 
 
 @dataclass
@@ -119,6 +130,8 @@ def correlate(events: list, window_minutes: int = 60,
     last_seen: dict = {}  # (entity_key, value) -> index
     for i, ev in enumerate(events):
         for key, val in ev.entities().items():
+            if key in ("src_ip", "dst_ip") and _is_shared_noise_ip(val):
+                continue
             # An IP is the same entity whether it is the source or destination
             # (attacker IP as SSH source, then as a firewall destination).
             token = ("ip" if key in ("src_ip", "dst_ip") else key, str(val).lower())
