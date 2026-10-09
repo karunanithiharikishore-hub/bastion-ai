@@ -19,6 +19,7 @@ from ..pipeline.attack import ATTACK_TECHNIQUES
 from ..pipeline.ioc import hunt_checklist
 from .runtime import AutonomousAgent
 from .toolbox import BASE_TOOLS
+from .injection import safe_label
 
 
 # ---------------------------------------------------------------------------
@@ -40,12 +41,14 @@ class JuniorSocAnalyst(AutonomousAgent):
     candidates, so make the rationale precise enough to check."""
 
     def __init__(self, source: str, **kw):
-        super().__init__(name=f"soc1-{source}", **kw)
+        # The source name comes from the logs and lands in the system prompt:
+        # reduce it to an identifier-like label there.
+        super().__init__(name=f"soc1-{safe_label(source)}", **kw)
         self.source = source
         self.source_scope = source
 
     def brief(self) -> str:
-        return self.mission.format(source=self.source)
+        return self.mission.format(source=safe_label(self.source))
 
     def analyze(self, ctx: AgentContext) -> list:
         findings = []

@@ -23,6 +23,7 @@ from .report.rca import (
 )
 from .intel import IntelStore
 from .agents import run_swarm, ai_analyze
+from .agents import injection
 from . import provenance
 
 
@@ -40,6 +41,9 @@ def analyze(paths, *, source_override=None, window_minutes=60,
 
     events = normalize(events)
     map_attack(events)
+    # Log text that tries to instruct the AI analyst is itself a signal: tag it
+    # (T1562, severity >= high) before scoring and correlation.
+    injection.tag_events(events)
 
     digest = compress(events, max_lines=max_digest_lines)
     incidents = correlate(events, window_minutes=window_minutes)[:max_incidents]
@@ -89,7 +93,10 @@ def analyze(paths, *, source_override=None, window_minutes=60,
                  if f["tier"] == 2 and f.get("origin") == "agent"}
         for block in incident_blocks:
             if block["id"] in tier2:
-                block["verdict"] = apply_tier2_verdict(block["verdict"], tier2[block["id"]])
+                inj = [e["event_id"] for e in block["events"]
+                       if injection.INJECTION_TAG in (e.get("tags") or [])]
+                block["verdict"] = apply_tier2_verdict(block["verdict"], tier2[block["id"]],
+                                                       injection_events=inj)
 
     # Benign incidents get a summary that does not presume an attacker.
     by_id = {inc.id: inc for inc in incidents}
@@ -139,4 +146,5 @@ def analyze(paths, *, source_override=None, window_minutes=60,
         "intel_used": intel_used,
         "swarm": swarm,
         "ai_analysis": ai_analysis,
+        "prompt_injection": injection.summarize(events),
     }
