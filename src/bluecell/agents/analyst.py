@@ -18,6 +18,7 @@ flags any indicator they cite that is not in the logs.
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 
 from .grounding import evidence_index, check_text
@@ -178,6 +179,17 @@ def _extract_json(text: str):
         return None
 
 
+_BENIGN_WORDS = {"benign", "likely-benign", "clean", "safe", "not-malicious", "false-positive"}
+
+
+def _norm_verdict(v):
+    """Fold case, separators, stray punctuation and benign synonyms to one spelling."""
+    if v is None:
+        return None
+    s = re.sub(r"[\s_-]+", "-", str(v).strip().lower()).strip(" .!-")
+    return "likely-benign" if s in _BENIGN_WORDS else s
+
+
 def tier2_context(events, tier2_verdicts, max_verdicts=5, max_cited=15,
                   envelope: Envelope | None = None) -> str:
     """Prompt section with each Tier-2 agent verdict plus the event lines it cited,
@@ -243,13 +255,15 @@ def ai_analyze(events, iocs, backbone, want_review=True, tier2_verdicts=None) ->
                               "grounded": check_text(json.dumps(review), idx)["ok"]})
 
     # Final verdict = reviewer's corrected verdict if present, else lead's.
-    final = (out.get("review", {}) or {}).get("corrected_verdict") or lead.get("verdict")
+    final = _norm_verdict((out.get("review", {}) or {}).get("corrected_verdict")
+                          or lead.get("verdict"))
     # The logs contain an attempt to steer the analysis: a "benign" call from a
-    # model that read that text is not trusted on its own.
+    # model that read that text is not trusted on its own. Anything but an exact
+    # "likely-malicious" (or "needs-review") is treated as untrusted.
     flagged = [e.event_id for e in events if is_flagged(e)]
-    if final == "likely-benign" and flagged:
+    if flagged and final not in ("likely-malicious", "needs-review"):
         out["injection_override"] = (
-            f"Model verdict 'likely-benign' downgraded to 'needs-review': "
+            f"Model verdict '{final}' downgraded to 'needs-review': "
             f"{len(flagged)} event(s) contain prompt-injection attempts.")
         final = "needs-review"
     out["final_verdict"] = final

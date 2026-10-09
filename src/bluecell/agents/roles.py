@@ -20,7 +20,7 @@ from ..pipeline.ioc import hunt_checklist
 from .runtime import AutonomousAgent
 from .toolbox import BASE_TOOLS
 from .voting import tally
-from .injection import safe_label
+from .injection import safe_label, sanitize
 
 
 # ---------------------------------------------------------------------------
@@ -49,6 +49,18 @@ class JuniorSocAnalyst(AutonomousAgent):
 
     def brief(self) -> str:
         return self.mission.format(source=safe_label(self.source))
+
+    # The hashed name hides the source from the report; record it in the run
+    # metadata (trusted side only: no model prompt reads last_run's source).
+    def run(self, ctx: AgentContext, use_llm: bool = True, session=None) -> list:
+        findings = super().run(ctx, use_llm=use_llm, session=session)
+        self.last_run = dict(self.last_run or {}, source=sanitize(self.source, 80))
+        return findings
+
+    def skip(self, ctx: AgentContext, reason: str) -> list:
+        findings = super().skip(ctx, reason)
+        self.last_run = dict(self.last_run or {}, source=sanitize(self.source, 80))
+        return findings
 
     def analyze(self, ctx: AgentContext) -> list:
         findings = []
@@ -96,6 +108,9 @@ class SeniorSocAnalyst(AutonomousAgent):
 
     # A split vote leaves the rule verdict in place at no more than this confidence.
     SPLIT_VOTE_MAX_CONFIDENCE = 0.5
+    # Incidents an earlier verifier already decided by agent verdict (set by the
+    # commander): no rule verdict is written for them, as merge_tier2 would discard it.
+    settled = frozenset()
 
     def __init__(self, *a, votes: int = 1, **kw):
         super().__init__(*a, **kw)
@@ -138,7 +153,9 @@ class SeniorSocAnalyst(AutonomousAgent):
                 f = self._apply_verdict(inc, v, cands, by_id)
                 f.votes = record or {}
                 verified.append(f)
-            elif cands:
+            elif inc.id not in self.settled and (cands or (
+                    record and (record["confirmed"] or record["dismissed"]))):
+                # A split vote needs a finding even with no Tier-1 candidates.
                 f = self._rule_verdict(inc, cands)
                 if record and (record["confirmed"] or record["dismissed"]):
                     # Split vote: the model runs disagreed, so the rules decide
@@ -152,7 +169,7 @@ class SeniorSocAnalyst(AutonomousAgent):
             by_rules = [f.incident_id for f in verified if f.origin == "rules"]
             if by_rules:
                 notes.append(f"no agent verdict for {by_rules}; rules decided those")
-            decided = {f.incident_id for f in verified}
+            decided = {f.incident_id for f in verified} | self.settled
             undecided = [i.id for i in ctx.incidents if i.id not in decided]
             if undecided:
                 notes.append(f"{undecided} got no verdict and no Tier-1 candidates")

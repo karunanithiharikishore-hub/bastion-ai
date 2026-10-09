@@ -5,19 +5,24 @@
 
 A system-prompt instruction *asks* the model not to invent indicators; it does
 not guarantee it. This module verifies it: it extracts concrete indicators
-(IPs, domains, SHA/MD5 hashes, hostnames) from any LLM-written text and checks
-each one against the real evidence (the events actually ingested). Anything the
-model mentions that is NOT in the evidence is flagged as UNVERIFIED, so a
-hallucinated IOC can never be silently presented as a finding.
+(IPv4/IPv6 addresses, domains, SHA/MD5 hashes, ATT&CK technique ids) from any
+LLM-written text and checks each one against the real evidence (the events
+actually ingested). Anything the model mentions that is NOT in the evidence is
+flagged as UNVERIFIED, so a hallucinated IOC can never be silently presented as
+a finding. Bare hostnames and usernames are indexed but NOT checked: they are
+too ambiguous to match reliably (FQDN hosts are checked as domains).
 
 This is deterministic, offline, and cheap.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
 
 _IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+# IPv6 candidates (validated with ipaddress, so "10:22:33" is rejected).
+_IP6_RE = re.compile(r"(?<![\w:.])[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}(?![\w:]|\.\d)")
 _HASH_RE = re.compile(r"\b[a-fA-F0-9]{64}\b|\b[a-fA-F0-9]{40}\b|\b[a-fA-F0-9]{32}\b")
 _DOMAIN_RE = re.compile(r"\b(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b")
 # ATT&CK technique ids the model might cite.
@@ -30,6 +35,51 @@ _FILE_EXTS = {"exe", "dll", "sys", "ps1", "psm1", "bat", "cmd", "vbs", "js", "ht
               "msi", "msu", "msp", "cab", "scr", "lnk", "jar", "py", "sh", "so", "bin",
               "log", "txt", "tmp", "dat", "doc", "docx", "docm", "xls", "xlsx", "xlsm",
               "pdf", "iso", "img"}
+# Of those, the ones that are also real TLDs: "evil.sh" may be a domain, so these
+# count as file names only in a path ("/tmp/run.sh") or when the evidence has them.
+_AMBIGUOUS_EXTS = {"sh", "py", "so"}
+
+
+def _ip6(tok: str) -> str | None:
+    """Canonical IPv6 form of `tok`, or None if it is not an IPv6 address."""
+    for cand in (tok, tok.rstrip(":")):   # "2001:db8::" is valid; "1:2:3:4:5:6:7:8:" is not
+        try:
+            return str(ipaddress.IPv6Address(cand))
+        except ValueError:
+            pass
+    return None
+
+
+def _ips(text: str) -> set[str]:
+    """All IPv4 and IPv6 addresses in `text`, IPv6 in canonical form."""
+    out = {m.lower() for m in _IP_RE.findall(text)}
+    for tok in _IP6_RE.findall(text):
+        ip = _ip6(tok)
+        if ip and ip != "::":
+            out.add(ip)
+    return out
+
+
+def _in_path(text: str, i: int) -> bool:
+    """True if the token starting at `i` follows a path separator (not a URL '//')."""
+    return i >= 1 and text[i - 1] in "/\\" and text[max(0, i - 2):i] != "//"
+
+
+def _real_ipv4(tok: str) -> bool:
+    try:
+        ipaddress.IPv4Address(tok)
+        return True
+    except ValueError:
+        return False
+
+
+# A dotted quad right after a version word or product name ("Chrome 120.0.6.99") is not
+# an address. Explicit list: a capitalised noun ("Hosts 203.0.113.250") must still count.
+_VERSION_CTX = re.compile(
+    r"\b(?i:version|ver|v|build|rev|release|chrome|chromium|firefox|edge|safari|opera|"
+    r"python|java|openssl|node|windows|office|android|ios|macos)\s+$")
+# ATT&CK id followed by a sentence join: "T1059.Then", "T1059.001.Then".
+_TECH_JOIN = re.compile(r"t\d{4}(?:\.\d{3})?\.[a-z]{2,}")
 
 
 def evidence_index(events, valid_techniques) -> dict:
@@ -50,7 +100,7 @@ def evidence_index(events, valid_techniques) -> dict:
     for e in events:
         for ip in (getattr(e, "src_ip", None), getattr(e, "dst_ip", None)):
             if ip:
-                ips.add(str(ip).lower())
+                ips.add(_ip6(str(ip)) or str(ip).lower())
         if getattr(e, "domain", None):
             domains.add(str(e.domain).lower())
         if getattr(e, "file_hash", None):
@@ -62,8 +112,7 @@ def evidence_index(events, valid_techniques) -> dict:
             _note_user_domain(e.user)
         # Mine the message text too, so IOCs embedded in messages count as evidence.
         msg = getattr(e, "message", "") or ""
-        for ip in _IP_RE.findall(msg):
-            ips.add(ip.lower())
+        ips |= _ips(msg)
         for h in _HASH_RE.findall(msg):
             hashes.add(h.lower())
         for d in _DOMAIN_RE.findall(msg):
@@ -72,8 +121,7 @@ def evidence_index(events, valid_techniques) -> dict:
         raw = getattr(e, "raw", None)
         if raw:
             raw = raw if isinstance(raw, str) else json.dumps(raw, default=str)
-            for ip in _IP_RE.findall(raw):
-                ips.add(ip.lower())
+            ips |= _ips(raw)
             for h in _HASH_RE.findall(raw):
                 hashes.add(h.lower())
             for d in _DOMAIN_RE.findall(raw):
@@ -87,12 +135,23 @@ def check_text(text: str, index: dict) -> dict:
     """Return {unverified: {...}, ok: bool} for indicators cited in `text`."""
     if not text:
         return {"unverified": {}, "ok": True}
-    found_ips = {m.lower() for m in _IP_RE.findall(text)}
+    # IPv4 only if a real address (octets 0-255) and not a version string; IPv6 as before.
+    found_ips = {ip for ip in _ips(text) if ":" in ip}
+    for m in _IP_RE.finditer(text):
+        if _real_ipv4(m.group(0)) and not _VERSION_CTX.search(text[max(0, m.start() - 32):m.start()]):
+            found_ips.add(m.group(0).lower())
     found_hashes = {m.lower() for m in _HASH_RE.findall(text)}
-    found_domains = {m.lower() for m in _DOMAIN_RE.findall(text)
-                     if m.lower() not in _DOMAIN_STOPWORDS
-                     and m.rsplit(".", 1)[-1].lower() not in _FILE_EXTS
-                     and not _IP_RE.fullmatch(m)}
+    found_domains = set()
+    for m in _DOMAIN_RE.finditer(text):
+        d = m.group(0).lower()
+        ext = d.rsplit(".", 1)[-1]
+        if d in _DOMAIN_STOPWORDS or _IP_RE.fullmatch(d) or _TECH_JOIN.fullmatch(d):
+            continue
+        if re.search(r"[a-z]\.[A-Z][a-z]+$", m.group(0)):
+            continue   # "shell.Then": a sentence boundary missing its space, not a domain
+        if ext in _FILE_EXTS and (ext not in _AMBIGUOUS_EXTS or _in_path(text, m.start())):
+            continue   # a file name, not a domain
+        found_domains.add(d)
     found_tech = {m.upper() for m in _TECH_RE.findall(text)}
 
     unverified = {}

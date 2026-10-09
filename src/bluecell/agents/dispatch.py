@@ -100,15 +100,70 @@ class CommanderToolbox(SecurityToolbox):
         return (self.DISPATCH_RESULT_CHARS if name in COMMAND_TOOLS
                 else super().result_cap(name))
 
+    # (text cap per field, findings kept per worker, evidence ids kept per item);
+    # the first level that fits the result cap wins. Verdicts are never dropped.
+    _SHRINK = ((None, None, None), (600, None, 10), (200, 10, 5), (80, 5, 3),
+               (20, 2, 2), (0, 0, 0))
+
     def _forward(self, op: str, args: dict):
         if self.dispatch is None:
             return {"error": "dispatch is not available in this session"}
-        return self._envelope(self.dispatch(op, args))
+        out = self.dispatch(op, args)
+        if not isinstance(out, dict) or not out.get("results"):
+            return self._envelope(out)
+        # toolbox.call cuts oversized text mid-JSON, so shrink the batch here instead.
+        for cap, keep, keep_ev in self._SHRINK:
+            trial = self._envelope(self._shrink(out, cap, keep, keep_ev))
+            if len(json.dumps(trial, default=str)) <= self.DISPATCH_RESULT_CHARS:
+                break
+        # shortcut: a batch whose verdicts alone exceed the cap is still cut by toolbox.call, upgrade by paging the results
+        return trial
+
+    @staticmethod
+    def _shrink(out: dict, cap, keep, keep_ev) -> dict:
+        """A copy of a batch result with worker text, findings and evidence cut.
+        Status, verdict decisions and the budget block are kept; every cut is marked."""
+        def cut(s):
+            if cap is None or len(s) <= cap:
+                return s
+            return s[:cap] + "..." if cap else ""
+
+        results = []
+        for res in out["results"]:
+            res, notes = dict(res), set()
+            for f in ("summary", "error"):
+                if isinstance(res.get(f), str) and cut(res[f]) != res[f]:
+                    res[f] = cut(res[f])
+                    notes.add("text cut")
+            findings = res.get("findings")
+            if findings is not None and keep is not None and len(findings) > keep:
+                notes.add(f"{len(findings) - keep} finding(s) omitted")
+                res["findings"] = findings[:keep]
+            for key in ("findings", "verdicts"):
+                if not res.get(key):
+                    continue
+                items = []
+                for it in res[key]:
+                    it = dict(it)
+                    for f in ("title", "rationale", "recommended_action"):
+                        if isinstance(it.get(f), str) and cut(it[f]) != it[f]:
+                            it[f] = cut(it[f])
+                            notes.add("text cut")
+                    if isinstance(it.get("evidence"), list) and keep_ev is not None \
+                            and len(it["evidence"]) > keep_ev:
+                        it["evidence"] = it["evidence"][:keep_ev]
+                        notes.add("evidence cut")
+                    items.append(it)
+                res[key] = items
+            if notes:
+                res["trimmed"] = "; ".join(sorted(notes))
+            results.append(res)
+        return dict(out, results=results)
 
     # Worker-written text (summaries, titles, rationales, actions) can echo the
     # attacker-controlled logs the workers read: it reaches the commander only
     # inside this toolbox's nonce envelope, like every other log-derived text.
-    _WORKER_TEXT = ("summary", "title", "rationale", "recommended_action")
+    _WORKER_TEXT = ("summary", "error", "title", "rationale", "recommended_action")
 
     def _envelope(self, out):
         if not isinstance(out, dict):

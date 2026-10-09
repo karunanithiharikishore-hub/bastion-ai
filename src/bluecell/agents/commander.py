@@ -31,7 +31,7 @@ from concurrent.futures import ThreadPoolExecutor
 from .. import tracing
 from .base import AgentContext
 from .dispatch import COMMAND_TOOLS, CommanderToolbox, FileDispatchServer
-from .injection import BOUNDARY_INSTRUCTION, check_agent_text, sanitize
+from .injection import BOUNDARY_INSTRUCTION, Envelope, is_injection, sanitize, scan_text
 from .roles import (
     JuniorSocAnalyst, SeniorSocAnalyst, IncidentResponder, DigitalForensicsAnalyst,
     ThreatHunter, MalwareAnalyst, ThreatIntelAnalyst, SecurityEngineer,
@@ -146,6 +146,12 @@ class Dispatcher:
                  max_agents: int = DEFAULT_MAX_AGENTS,
                  max_parallel: int = 4,
                  budget_seconds: float = DEFAULT_BUDGET_SECONDS):
+        # 0 is allowed (no time at all: every deploy is refused); anything else
+        # must leave room for at least one worker.
+        if 0 < budget_seconds <= MIN_WORKER_SECONDS:
+            raise ValueError(f"budget_seconds={budget_seconds:g} is too small: a worker needs "
+                             f"{MIN_WORKER_SECONDS}s and the commander needs time to plan; "
+                             f"use more than {MIN_WORKER_SECONDS}")
         self.orch = orch
         self.ctx = ctx
         self.session = session
@@ -153,6 +159,7 @@ class Dispatcher:
         self.max_parallel = max(1, max_parallel)
         self.budget_seconds = budget_seconds
         self.started = time.monotonic()
+        self.budget_refused = False  # a deploy was refused because the wall clock ran out
         self.deployed = 0
         self.batches = 0
         self.finished = False
@@ -160,10 +167,22 @@ class Dispatcher:
         self.plan: list = []        # decision log: deploys (with reason), refusals, finish
         self.workers: list = []     # every worker agent deployed
         self._names: dict = {}
-        self.closed = False          # set once the commander has stopped
+        self.tier1_sources: set = set()  # sources a Tier-1 analyst was deployed on this run
+        self.closed = False         # set once the commander has stopped
         self._lock = threading.Lock()        # one deploy/finish at a time
         self._state_lock = threading.Lock()  # guards merging into the orchestrator
         self.sources = sorted({e.source for e in ctx.events})
+        # Source names come from logs: the model sees them enveloped and may pass
+        # either form back to deploy_agent.
+        self._env = Envelope()
+        self._src_shown = {}
+        for s in self.sources:
+            # sanitize/200-char cap can map distinct names to one label: suffix until unique
+            label, n = self._env.wrap(s, 200), 0
+            while label in self._src_shown:
+                n += 1
+                label = self._env.wrap(f"{n}:{s}", 200)
+            self._src_shown[label] = s
         self.incident_ids = [i.id for i in ctx.incidents]
 
     # ---- budget -------------------------------------------------------------
@@ -197,17 +216,30 @@ class Dispatcher:
         if op == "list_roles":
             return {"roles": [{"role": k, "description": d}
                               for k, (_, d) in WORKER_ROLES.items()],
-                    "sources": self.sources, "incidents": self.incident_ids,
+                    "sources": list(self._src_shown), "incidents": self.incident_ids,
                     "budget": self.budget()}
         if op == "deploy":
+            agents = args.get("agents") or []
             with self._lock:
-                return self._deploy(list(args.get("agents") or []))
+                if not isinstance(agents, list):  # list(5) or list(True) would raise
+                    return self._refuse([agents], "deploy rejected", problems=[
+                        "'agents' must be a list of {role, reason, ...} objects"])
+                agents = [dict(a, source=self._src_shown[a["source"]])
+                          if isinstance(a, dict) and isinstance(a.get("source"), str)
+                          and a["source"] in self._src_shown else a for a in agents]
+                return self._deploy(agents)
         if op == "finish":
             with self._lock:
                 self.finished = True
-                self.summary = sanitize(str(args.get("summary") or "").strip(),
-                                        MAX_SUMMARY_CHARS)
-                self.plan.append({"action": "finish", "t": round(self.elapsed(), 1)})
+                text = str(args.get("summary") or "").strip()
+                # The summary is commander prose written from log-derived text:
+                # when it carries injected steering it is stored enveloped, so the
+                # report shows it as quoted untrusted text, not as the conclusion.
+                flagged = is_injection(scan_text(text))
+                self.summary = (Envelope().wrap(text, MAX_SUMMARY_CHARS) if flagged
+                                else sanitize(text, MAX_SUMMARY_CHARS))
+                self.plan.append({"action": "finish", "t": round(self.elapsed(), 1),
+                                  "flagged": flagged})
             return {"closed": True, "budget": self.budget()}
         return {"error": f"unknown dispatch op {op!r}"}
 
@@ -215,8 +247,8 @@ class Dispatcher:
     def _refuse(self, items: list, error: str, **extra) -> dict:
         with self._state_lock:
             if not self.closed:
-                self.plan.append({"action": "refused", "t": round(self.elapsed(), 1),
-                                  "request": items, "error": error})
+                self.plan.append(dict({"action": "refused", "t": round(self.elapsed(), 1),
+                                       "request": items, "error": error}, **extra))
         return dict({"error": error, "budget": self.budget()}, **extra)
 
     def _validate(self, item) -> list:
@@ -224,20 +256,20 @@ class Dispatcher:
             return ["each agent must be an object {role, reason, ...}"]
         problems = []
         role = item.get("role")
-        if role not in WORKER_ROLES:
+        if not isinstance(role, str) or role not in WORKER_ROLES:  # unhashable role must not crash
             problems.append(f"unknown role {role!r}; use one of {list(WORKER_ROLES)}")
         if not str(item.get("reason") or "").strip():
             problems.append(f"{role}: give a reason for the deploy")
         if role == "tier1-analyst" and item.get("source") not in self.sources:
-            problems.append(f"tier1-analyst needs 'source', one of {self.sources}")
+            problems.append(f"tier1-analyst needs 'source', one of {list(self._src_shown)}")
         if role == "investigator" and not str(item.get("objective") or "").strip():
             problems.append("investigator needs an 'objective'")
         for field in ("objective", "reason"):
-            # The objective becomes part of a worker's system prompt: text that
-            # reads as instructions to an AI (e.g. echoed from a log line) is
-            # refused, exactly like a board note or finding would be.
-            hits = check_agent_text(item.get(field))
-            if hits:
+            # The objective reaches a worker's prompt: text that reads as
+            # instructions to an AI is refused. Every category applies, steering
+            # included, since a commander has no reason to say "treat as benign".
+            hits = scan_text(item.get(field))
+            if is_injection(hits):
                 problems.append(f"{field} contains text that reads as instructions to "
                                 f"an AI ({', '.join(h['code'] for h in hits)}); describe "
                                 f"the task in your own words")
@@ -252,6 +284,12 @@ class Dispatcher:
                and it.get("role") == "tier2-verifier") > 1:
             problems.append("deploy at most one tier2-verifier per batch (verdicts "
                             "from parallel verifiers would race)")
+        srcs = [it.get("source") for it in items if isinstance(it, dict)
+                and it.get("role") == "tier1-analyst" and isinstance(it.get("source"), str)]
+        dupes = {s for s in srcs if srcs.count(s) > 1 or s in self.tier1_sources}
+        if dupes:
+            problems.append(f"tier1-analyst already deployed for source(s) {sorted(dupes, key=str)}; "
+                            "one Tier-1 analyst per source")
         return problems
 
     def _name(self, base: str) -> str:
@@ -275,8 +313,10 @@ class Dispatcher:
             agent = cls(name=self._name(cls.role))
         lines = []
         if item.get("objective"):
-            lines.append("Direction from the Incident Commander: "
-                         + sanitize(item["objective"], MAX_DIRECTIVE_CHARS))
+            # Enveloped, so the worker's boundary rule treats it as data, not as
+            # system authority (the label sits inside the envelope with the text).
+            lines.append(Envelope().wrap("Direction from the Incident Commander: "
+                                         + str(item["objective"]), MAX_DIRECTIVE_CHARS))
         if item.get("incident_id"):
             lines.append(f"Focus on incident {item['incident_id']}.")
         agent.directive = "\n".join(lines)
@@ -286,11 +326,7 @@ class Dispatcher:
         """Incidents a Tier-3 worker's rule fallback works (mirrors the fixed flow)."""
         if item.get("incident_id"):
             return [i for i in self.ctx.incidents if i.id == item["incident_id"]]
-        confirmed = self.orch.confirmed_ids()
-        dismissed = {f.incident_id for f in self.orch.tier2
-                     if f.status == "dismissed" and f.origin == "agent"}
-        return [i for i in self.ctx.incidents if i.id in confirmed] or \
-               [i for i in self.ctx.incidents if i.id not in dismissed]
+        return self.orch.tier3_scope(self.orch.confirmed_ids())
 
     def _run_worker(self, agent, item: dict) -> list:
         # Workers queued behind the parallel cap start later: size each one's
@@ -304,9 +340,16 @@ class Dispatcher:
                               "tier": agent.tier, "mode": "skipped", "error": why,
                               "findings_filed": 0}
             return []
+        if isinstance(agent, SeniorSocAnalyst) and agent.votes > 1:
+            # The K vote runs share this deploy's time: fewer votes rather than
+            # a per-run timeout under MIN_WORKER_SECONDS (shortcut: K shrinks, no vote tiebreak).
+            agent.votes = min(agent.votes, max(1, int(left) // MIN_WORKER_SECONDS))
+            left = left / agent.votes
         agent.timeout = max(MIN_WORKER_SECONDS, min(agent.timeout, left))  # float: int() turned sub-second budgets into 0
         ctx = self.ctx
         if isinstance(agent, SeniorSocAnalyst):
+            # Incidents an earlier verifier decided keep that verdict (see SeniorSocAnalyst.settled).
+            agent.settled = frozenset(f.incident_id for f in self.orch.tier2 if f.origin == "agent")
             return self.orch.traced_verify(agent, ctx, list(self.orch.tier1),
                                            session=self.session)
         if agent.tier == 3:
@@ -322,6 +365,7 @@ class Dispatcher:
             return self._refuse(items, "the case is closed (finish was called); "
                                        "no further deploys")
         if self.remaining_seconds() < MIN_WORKER_SECONDS:
+            self.budget_refused = True
             return self._refuse(items, "wall-clock budget exhausted "
                                        f"({int(self.budget_seconds)}s); call finish")
         problems = self._validate_batch(items)
@@ -336,6 +380,7 @@ class Dispatcher:
         self.batches += 1
         batch = self.batches
         agents = [self._build(it) for it in items]
+        self.tier1_sources.update(it["source"] for it in items if it["role"] == "tier1-analyst")
         self.deployed += len(agents)
         # Every worker in the batch sees all conclusions filed so far.
         orch = self.orch
@@ -404,7 +449,7 @@ class Dispatcher:
             what = f"{len(findings)} finding(s)"
         out = f"{run.get('mode', '?')}: {what}"
         if run.get("error"):
-            out += f" · error: {run['error'][:120]}"
+            out += f" · error: {Envelope().wrap(run['error'], 120)}"  # worker text is untrusted
         return out
 
     @staticmethod
@@ -503,4 +548,10 @@ class IncidentCommander(AutonomousAgent):
                 note = ("a dispatch request was still running when the commander "
                         "stopped; its results were discarded")
                 self.last_run = dict(self.last_run or {}, dispatch_warning=note)
-        return err or (self.last_run or {}).get("error")
+        err = err or (self.last_run or {}).get("error")
+        if self.dispatcher.budget_refused and self.dispatcher.deployed == 0:
+            # The orchestrator falls back to the fixed flow, which has no run-wide wall clock.
+            note = ("the wall-clock budget left no time for any worker; the fixed "
+                    "fallback ran on the rules only, with no model agents")
+            err = f"{err}; {note}" if err else note
+        return err

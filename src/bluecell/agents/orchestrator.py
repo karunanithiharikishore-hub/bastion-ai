@@ -35,17 +35,20 @@ ran in.
 from __future__ import annotations
 
 import contextvars
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 from .. import tracing
 from .base import AgentContext, Finding
 from .commander import (
     Dispatcher, IncidentCommander, DEFAULT_MAX_AGENTS, DEFAULT_COMMANDER_TURNS,
-    DEFAULT_BUDGET_SECONDS,
+    DEFAULT_BUDGET_SECONDS, MIN_WORKER_SECONDS,
 )
 from .roles import JuniorSocAnalyst, SeniorSocAnalyst, SPECIALISTS
 from .runtime import SwarmSession
 from .budget import active_tier1_sources
+from .injection import is_flagged
 
 MAX_PARALLEL_AGENTS = 4
 ORCHESTRATIONS = ("auto", "commander", "fixed")
@@ -72,6 +75,9 @@ class SwarmOrchestrator:
         self.max_commander_turns = max_commander_turns
         self.budget_seconds = budget_seconds
         self.commander = None     # commander record (plan, summary, fallback reason)
+        self._fallback_llm = True  # False when a failed commander left no budget
+        self._cap = None          # fallback only: {"agents": left, "deadline": monotonic}
+        self._cap_lock = threading.Lock()
         self._reset()
 
     def _reset(self) -> None:
@@ -81,6 +87,7 @@ class SwarmOrchestrator:
         self.tier3 = []
         self.agent_runs = []      # per-agent run record (mode, tools, errors)
         self.tier3_skipped = None  # reason string when Tier-3 did not run
+        self.tier3_note = None     # why Tier-3 ran despite an all-dismissal
         self.used = "fixed"       # orchestration that produced the result
 
     def _register(self, agent) -> None:
@@ -112,7 +119,7 @@ class SwarmOrchestrator:
                     "requested": "commander", "plan": [], "summary": None,
                     "fallback_reason": ("no model backbone available" if not autonomous
                                         else "no events were ingested")}
-        return self._run_fixed()
+        return self._run_fixed(llm=self._fallback_llm)
 
     # ---- commander-led ------------------------------------------------------
     def _run_commander(self):
@@ -151,7 +158,16 @@ class SwarmOrchestrator:
                 reason += f" (commander error: {error})"
             self.commander["fallback_reason"] = reason
             self.commander["run"] = {k: v for k, v in run.items() if k != "trace"}
+            # The fixed flow re-runs the case, so `plan` did not produce the result.
+            self.commander["plan_discarded"] = True
             self._reset()
+            # The fallback gets what the commander left: with no wall clock for a
+            # worker, or no agents left, it runs on the rules and spends nothing more.
+            # The fallback may use only the agents and wall clock the commander left.
+            self._cap = {"agents": self.max_agents - dispatcher.deployed,
+                         "deadline": time.monotonic() + dispatcher.remaining_seconds()}
+            self._fallback_llm = (dispatcher.remaining_seconds() >= MIN_WORKER_SECONDS
+                                  and dispatcher.deployed < self.max_agents)
             return None
 
         self.used = "commander"
@@ -161,16 +177,52 @@ class SwarmOrchestrator:
             self.tier3_skipped = "The Incident Commander deployed no Tier-3 specialists."
         return self._reconcile(self.confirmed_ids())
 
-    # ---- fixed tiered flow --------------------------------------------------
-    def _run_fixed(self) -> dict:
+    def tier3_scope(self, confirmed_ids) -> list:
+        """Incidents Tier-3 works; shared by the fixed flow and the commander."""
         ctx = self.ctx
-        autonomous = self.use_llm and ctx.backbone is not None
+        agent_dismissed = {f.incident_id for f in self.tier2
+                           if f.status == "dismissed" and f.origin == "agent"}
+        scope = [i for i in ctx.incidents if i.id in confirmed_ids] or \
+                [i for i in ctx.incidents if i.id not in agent_dismissed]
+        if ctx.incidents and not scope and any(is_flagged(e) for e in ctx.events):
+            # An all-dismissal is exactly what an injection aims for: keep Tier-3.
+            scope = list(ctx.incidents)
+            self.tier3_note = ("Tier-2 agent dismissed every incident, but the case has "
+                               "injection-flagged events; Tier-3 ran anyway and needs review.")
+        return scope
+
+    # ---- fixed tiered flow --------------------------------------------------
+    def _run_fixed(self, llm: bool = True) -> dict:
+        ctx = self.ctx
+        autonomous = self.use_llm and ctx.backbone is not None and llm
         session = SwarmSession(ctx, seed=[]) if autonomous else None
         try:
             return self._run_tiers(ctx, session)
         finally:
             if session is not None:
                 session.close()
+
+    def _admit(self, agent) -> bool:
+        """Fallback cap: may this agent make model calls? Takes one of the
+        agents left and bounds its timeout by the wall clock left."""
+        if self._cap is None:
+            return True
+        with self._cap_lock:
+            left = self._cap["deadline"] - time.monotonic()
+            if self._cap["agents"] <= 0 or left < MIN_WORKER_SECONDS:
+                return False
+            self._cap["agents"] -= 1
+        agent.timeout = min(agent.timeout, left)
+        return True
+
+    def _run_one(self, agent, ctx: AgentContext, session) -> list:
+        if session is not None and not self._admit(agent):
+            if agent.tier == 3:   # specialists are skipped, other tiers run on rules
+                self.tier3_note = ("Fallback ran out of agents or wall-clock budget; "
+                                   "some specialists were skipped.")
+                return agent.skip(ctx, "agent or wall-clock budget exhausted")
+            session = None
+        return agent.run(ctx, use_llm=session is not None, session=session)
 
     def _run_all(self, agents: list, ctx: AgentContext, session) -> list:
         """Run one tier's agents (in parallel when they are model agents)."""
@@ -180,11 +232,13 @@ class SwarmOrchestrator:
             results = [a.run(ctx, use_llm=False) for a in agents]
         else:
             with ThreadPoolExecutor(max_workers=self.max_parallel) as pool:
-                # Pool threads don't inherit contextvars; carry the active
-                # trace run into each agent thread.
+                # Pool threads don't inherit contextvars; copy the caller's
+                # context here (one per agent: a Context can't be entered twice)
+                # so each agent's spans and usage land in this run's trace.
+                ctxs = [contextvars.copy_context() for _ in agents]
                 results = list(pool.map(
-                    lambda a: contextvars.copy_context().run(
-                        a.run, ctx, use_llm=True, session=session), agents))
+                    lambda cx: cx[0].run(self._run_one, cx[1], ctx, session),
+                    zip(ctxs, agents)))
         self.agent_runs.extend(a.last_run for a in agents)
         return [f for findings in results for f in findings]
 
@@ -208,7 +262,8 @@ class SwarmOrchestrator:
             self._register(senior)
         if session is not None:
             session.stage(ctx, seed=self._seed(self.tier1))
-        self.tier2 = self.traced_verify(senior, ctx, self.tier1, session=session)
+        sess2 = session if session is not None and self._admit(senior) else None
+        self.tier2 = self.traced_verify(senior, ctx, self.tier1, session=sess2)
         if ctx.incidents:
             self.agent_runs.append(senior.last_run)
 
@@ -220,10 +275,7 @@ class SwarmOrchestrator:
         # Scope: the confirmed incidents; if none, everything a Tier-2 *agent*
         # did not dismiss (rule-only dismissals are advisory, like the headline).
         # If the agent dismissed every incident there is nothing left to work.
-        agent_dismissed = {f.incident_id for f in self.tier2
-                           if f.status == "dismissed" and f.origin == "agent"}
-        scope = [i for i in ctx.incidents if i.id in confirmed_ids] or \
-                [i for i in ctx.incidents if i.id not in agent_dismissed]
+        scope = self.tier3_scope(confirmed_ids)
         if not ctx.events:
             self.tier3_skipped = "No events were ingested; specialists not deployed."
             return self._reconcile(confirmed_ids)
@@ -286,7 +338,11 @@ class SwarmOrchestrator:
 
         return {
             "roster": self.roster,
+            # agent_count includes the commander; worker_count is the --max-agents
+            # quantity (deployed workers) and orchestrator is the commander's entry.
             "agent_count": len(self.roster),
+            "worker_count": len(self.roster) - (self.used == "commander"),
+            "orchestrator": self.roster[0] if self.used == "commander" else None,
             "counts": {
                 "tier1_findings": len(self.tier1),
                 "tier2_findings": len(self.tier2),
@@ -297,6 +353,7 @@ class SwarmOrchestrator:
             },
             "agent_runs": self.agent_runs,
             "tier3_skipped": self.tier3_skipped,
+            "tier3_note": self.tier3_note,
             "settings": {"votes": self.votes, "tier1_model": self.tier1_model,
                          "skip_idle_tier1": self.skip_idle_tier1,
                          "orchestration": self.orchestration,

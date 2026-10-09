@@ -162,7 +162,8 @@ def test_sanitize_strips_control_characters_and_caps_length():
         assert ch not in out
     long = inj.sanitize("x" * 5000, 100)
     assert long.startswith("x" * 100) and "truncated 4900" in long
-    assert inj.safe_label("web 01;rm -rf /\n<x>") == "web_01_rm_-rf_x"
+    assert inj.safe_label("edr") == "edr"
+    assert inj.safe_label("web 01;rm -rf /\n<x>").startswith("src-")
 
 
 # --------------------------------------------------------------------------- tool outputs

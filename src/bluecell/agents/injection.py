@@ -32,6 +32,8 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
+import html
 import re
 import secrets
 import unicodedata
@@ -73,9 +75,11 @@ _ZERO_WIDTH = "​‌⁠⁡⁢⁣⁤᠎﻿"
 _ZWJ = "‍"            # legitimate inside emoji sequences
 _BIDI_OVERRIDE = "‪‫‬‭‮⁦⁧⁨⁩"
 _BIDI_MARK = "‎‏؜"
-_HIDDEN_RE = re.compile(f"[{_ZERO_WIDTH}{_BIDI_OVERRIDE}\U000e0000-\U000e007f]")
-_ZWJ_IN_WORD_RE = re.compile(r"[A-Za-z0-9]‍[A-Za-z0-9]")
-_STRIP_RE = re.compile(f"[{_ZERO_WIDTH}{_ZWJ}{_BIDI_OVERRIDE}{_BIDI_MARK}"
+# Invisible default-ignorable and blank code points (soft hyphen, CGJ, variation
+# selectors, Hangul/braille blanks, ...): an attacker can split a keyword with them.
+_INVISIBLE = (r"\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180b-\u180f\u2800\u3164"
+              r"\uffa0\ufe00-\ufe0f\ufff0-\ufff8\U000e0100-\U000e01ef")
+_STRIP_RE = re.compile(f"[{_ZERO_WIDTH}{_ZWJ}{_BIDI_OVERRIDE}{_BIDI_MARK}{_INVISIBLE}"
                        r"\U000e0000-\U000e007f]")
 _CTRL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 _TAG_CHARS_RE = re.compile(r"[\U000e0020-\U000e007e]")
@@ -99,11 +103,16 @@ def sanitize(text, max_len: int | None = DEFAULT_FIELD_CAP) -> str:
     return s
 
 
-def safe_label(text, max_len: int = 40) -> str:
-    """A log-derived value reduced to a short identifier-like label, for the
-    few places it must appear outside an envelope (agent names, mission text)."""
-    s = re.sub(r"[^A-Za-z0-9_.:@-]+", "_", sanitize(text, None)).strip("_")
-    return s[:max_len] or "unknown"
+def safe_label(text, max_len: int = 12) -> str:
+    """Short, stable, collision-free id for a log-derived value, for the few
+    places it must appear outside an envelope (agent names, file names, mission
+    text). Only a short lowercase-alnum name passes through as-is (readable,
+    no room for a sentence); anything else becomes ``src-<hash of the raw
+    value>`` so no attacker words survive and distinct values never collide."""
+    raw = "" if text is None else str(text)
+    if re.fullmatch(r"[a-z0-9]{1,%d}" % max_len, raw):
+        return raw
+    return "src-" + hashlib.sha1(raw.encode("utf-8", "replace")).hexdigest()[:8]
 
 
 # ---------------------------------------------------------------------------
@@ -150,34 +159,43 @@ def outside_envelopes(text: str) -> str:
 # ---------------------------------------------------------------------------
 _DET = r"(?:all\s+|any\s+|of\s+)*(?:the\s+|your\s+|my\s+|these\s+|those\s+)?"
 _TARGET = (r"(?:instructions?|prompts?|rules|directives|guidelines|context|"
-           r"messages?|guardrails|constraints|programming)")
+           r"guardrails|constraints|programming)")
+# Qualified override needs an AI-directed target; "override existing rules" (GPO)
+# and "bypass security rules" (firewall) are ordinary admin text.
+_AI_TARGET = (r"(?:instructions?|prompts?|directives|guidelines|context|guardrails|"
+              r"constraints|programming)")
 _AI = (r"(?:ai|a\.i\.|llm|language\s+model|assistant|analysts?|soc\s+analyst|"
        r"security\s+analyst|reviewer|claude|gpt|chatgpt|copilot)")
 _OBJ = (r"(?:incident|alert|event|finding|detection|activity|case|log|entry|"
         r"alerts|events|incidents|logs|entries|findings)")
+_CASE_OBJ = r"(?:incident|alert|detection|finding|case)s?"
 
 # (code, category, pattern). Category "steering" is not applied to analyst-
 # written text, because analysts legitimately write "dismiss this incident".
 _PATTERNS = [
     ("ignore-instructions", "override", re.compile(
         r"\b(?:ignore|disregard|forget|override|bypass|skip)\s+" + _DET +
-        r"(?:previous|prior|above|earlier|preceding|original|system|initial|"
-        r"existing|safety|security)\s+" + _TARGET + r"\b", re.I)),
+        r"(?:(?:previous|prior|above|earlier|preceding|original|initial)\s+" + _TARGET +
+        r"|(?:system|existing|safety|security)\s+" + _AI_TARGET + r")\b", re.I)),
     ("ignore-instructions", "override", re.compile(
         r"\b(?:ignore|disregard|forget)\s+(?:all|your|any)\s+(?:of\s+)?(?:your\s+)?"
         + _TARGET + r"\b", re.I)),
     ("new-instructions", "override", re.compile(
         r"\b(?:new|updated|revised|real|actual)\s+(?:system\s+)?instructions?\s*[:\-]", re.I)),
     ("system-prompt", "override", re.compile(
-        r"\b(?:system|developer|hidden)\s+prompt\b", re.I)),
+        r"\byour\s+(?:system|developer|hidden)\s+prompt\b|"
+        r"\b(?:system|developer|hidden)\s+prompt\s*[:=]", re.I)),
     ("reveal-prompt", "override", re.compile(
         r"\b(?:reveal|print|show|repeat|output|leak)\s+(?:your|the)\s+"
         r"(?:system\s+prompt|instructions|hidden\s+prompt)\b", re.I)),
-    ("persona", "persona", re.compile(r"\byou\s+are\s+now\b", re.I)),
+    ("persona", "persona", re.compile(
+        r"\byou\s+are\s+now\s+(?:an?\s+|the\s+)?(?:\w+\s+){0,2}?"
+        r"(?:unrestricted|unfiltered|uncensored|jailbroken|evil|" + _AI + r")\b", re.I)),
     ("persona", "persona", re.compile(
         r"\bfrom\s+now\s+on,?\s+(?:you|the\s+" + _AI + r")\b", re.I)),
     ("persona", "persona", re.compile(
-        r"\b(?:act|behave|respond)\s+as\s+(?:an?\s+|the\s+)?" + _AI + r"\b", re.I)),
+        r"\b(?:act|behave|respond)\s+as\s+(?:an?\s+|the\s+)?"
+        r"(?:ai|a\.i\.|llm|language\s+model|claude|gpt|chatgpt|copilot|reviewer)\b", re.I)),
     ("persona", "persona", re.compile(r"\bpretend\s+(?:to\s+be|you\s+are)\b", re.I)),
     ("as-an-ai", "persona", re.compile(
         r"\bas\s+an?\s+(?:ai|a\.i\.|large\s+language\s+model|language\s+model|llm)\b", re.I)),
@@ -185,7 +203,7 @@ _PATTERNS = [
         r"\b(?:note|message|instructions?|attention|memo)\s+(?:to|for)\s+(?:the\s+|any\s+)?"
         + _AI + r"s?\b", re.I)),
     ("addresses-ai", "persona", re.compile(
-        r"\b(?:dear|hey|hello|hi)\s+(?:ai|llm|claude|chatgpt|gpt|assistant|analyst)\b", re.I)),
+        r"\b(?:dear|hey|hello|hi)\s+(?:ai|llm|claude|chatgpt|gpt)\b", re.I)),
     ("addresses-ai", "persona", re.compile(
         r"\b(?:ai|llm)\s+(?:analyst|agent|assistant|reviewer|model)s?\s*[:,]", re.I)),
     ("dismiss-request", "steering", re.compile(
@@ -200,23 +218,21 @@ _PATTERNS = [
         r"\b(?:mark|classify|label|treat)\s+as\s+(?:an?\s+)?(?:benign|safe|harmless|"
         r"false[\s-]+positive|non-?malicious|not\s+malicious)\b", re.I)),
     ("suppress-report", "steering", re.compile(
-        r"\b(?:do\s+not|don'?t|never|no\s+need\s+to)\s+(?:report|flag|escalate|alert\s+on|"
+        r"\b(?:do\s+not|don'?t|never)\s+(?:report|flag|escalate|alert\s+on|"
         r"mention|investigate|analy[sz]e)\b", re.I)),
     ("claims-approved", "steering", re.compile(
-        r"\b(?:this|the|these)\s+(?:\w+\s+)?" + _OBJ + r"s?\s+(?:is|are|was|were)\s+"
+        r"\b(?:this|the|these)\s+(?:\w+\s+)?" + _CASE_OBJ + r"\s+(?:is|are|was|were)\s+"
         r"(?:an?\s+|all\s+)?(?:approved|authori[sz]ed|sanctioned|benign|harmless|"
         r"legitimate|known[\s-]+good|false[\s-]+positives?|not\s+malicious)\b", re.I)),
     ("verdict-token", "steering", re.compile(
-        r"\b(?:likely-benign|likely-malicious|needs-review)\b|\bverdict\s*(?::|=|should\s+be|is)\s*"
-        r"(?:benign|dismiss\w*|safe|clean)\b", re.I)),
+        r"\bverdict\s*(?::|=|should\s+be|is)\s*(?:likely[\s-]+)?(?:benign|dismiss\w*)\b", re.I)),
     ("jailbreak", "jailbreak", re.compile(
         r"\bjailbreak\s+(?:prompt|mode)\b|\bDAN\s+mode\b|\bdo\s+anything\s+now\b", re.I)),
     ("chat-template", "jailbreak", re.compile(
         r"<\|\s*(?:im_start|im_end|system|user|assistant|endoftext)\s*\|>|\[/?INST\]|"
         r"<</?SYS>>|</?(?:assistant|human)>", re.I)),
     ("envelope-forgery", "envelope", re.compile(
-        r"<\s*/?\s*log_data|untrusted_log_data|\b(?:end|begin|start)\s+(?:of\s+)?"
-        r"(?:untrusted\s+)?(?:log\s+data|tool\s+output|evidence\s+block)\b", re.I)),
+        r"<\s*/?\s*log_data|untrusted_log_data", re.I)),
 ]
 
 # A role tag ("SYSTEM:", "assistant:") only counts when the text after it talks
@@ -224,29 +240,62 @@ _PATTERNS = [
 _ROLE_RE = re.compile(r"(?:^|[\s\[\]|\"'>(;,{])(system|assistant|developer|human)\s*:\s*",
                       re.I | re.M)
 _ROLE_CUE_RE = re.compile(
-    r"\b(?:ignore|disregard|dismiss|classify|do\s+not\s+report|analyst|assistant|ai|"
-    r"llm|instructions?|verdict|benign|false\s+positive|override|you\s+are|you\s+must|"
-    r"you\s+will|you\s+should)\b",
+    r"\b(?:ignore|disregard|dismiss|classify|do\s+not\s+report|analyst|assistant|"
+    r"instructions?|verdict|benign|false\s+positive|"
+    r"you\s+(?:must|will|should)\s+(?:comply|obey|approve|dismiss|ignore|report|mark|"
+    r"classify|follow))\b",
     re.I)
 _B64_RE = re.compile(r"[A-Za-z0-9+/_-]{24,}={0,2}")
 
 _STRONG_CATEGORIES = {"override", "persona", "steering", "jailbreak", "hidden",
-                      "encoded", "envelope", "role", "terminal"}
+                      "encoded", "envelope", "role", "terminal", "unscanned"}
 AGENT_TEXT_CATEGORIES = _STRONG_CATEGORIES - {"steering"}
 
 
-def _normalize(text: str) -> str:
-    """Fold obfuscation so patterns see what a model would read."""
-    s = _TAG_CHARS_RE.sub(lambda m: chr(ord(m.group(0)) - 0xE0000), text)
-    s = _ANSI_RE.sub("", s)
-    s = _STRIP_RE.sub("", s)
-    s = unicodedata.normalize("NFKC", s)
+# Latin-lookalike Cyrillic/Greek letters (shortcut: common ones only, not the full
+# Unicode confusables table; extend when a new lookalike shows up).
+_CONFUSABLES = str.maketrans(
+    "аеорсхуіјѕԁԛѵАЕОРСХУІЈЅВКМНТαεορυνιτκχΑΒΕΖΗΙΚΜΝΟΡΤΥΧ",
+    "aeopcxyijsdqvAEOPCXYIJSBKMHTaeopyvitkxABEZHIKMNOPTYX")
+_JSON_ESC_RE = re.compile(r"\\u([0-9a-fA-F]{4})|\\x([0-9a-fA-F]{2})|\\[nrt]")
+_SEP_RE = re.compile(r"(?<=[A-Za-z])[_.\-/]+(?=[A-Za-z])")
+_SPACED_RE = re.compile(r"\b(?:[A-Za-z] ){2,}[A-Za-z]\b")
+
+
+def _decode_once(s: str) -> str:
     if "%" in s:
-        try:
-            s = s + " " + unquote(s)
-        except Exception:
-            pass
-    return re.sub(r"[ \t]+", " ", s)
+        s = unquote(s)
+    if "&" in s:
+        s = html.unescape(s)
+    if "\\" in s:
+        s = _JSON_ESC_RE.sub(lambda m: chr(int(m.group(1) or m.group(2), 16))
+                             if m.group(1) or m.group(2) else " ", s)
+    return s
+
+
+def _normalize(text: str, strip: bool = True) -> str:
+    """Fold obfuscation so patterns see what a model would read. ``strip=False``
+    keeps hidden characters in place (used to tell whether they hide a phrase).
+    Returns the text plus its decoded and separator-folded variants, for
+    scanning only; stored evidence is never changed."""
+    def clean(s: str) -> str:
+        s = _TAG_CHARS_RE.sub(lambda m: chr(ord(m.group(0)) - 0xE0000), s) if strip else s
+        s = _ANSI_RE.sub("", s)
+        s = _STRIP_RE.sub("", s) if strip else s
+        s = unicodedata.normalize("NFKC", s).translate(_CONFUSABLES)
+        return re.sub(r"[ \t]+", " ", s)
+
+    d = text
+    for _ in range(3):  # bounded: double/triple URL-encoding, entities inside escapes
+        n = _decode_once(d)
+        if n == d:
+            break
+        d = n
+    out = clean(text)
+    if d != text:
+        out += " " + clean(d)
+    folded = _SPACED_RE.sub(lambda m: m.group(0).replace(" ", ""), _SEP_RE.sub(" ", clean(d)))
+    return out + " " + folded if folded != clean(d) else out
 
 
 def _phrases(norm: str, out: list) -> None:
@@ -260,6 +309,19 @@ def _phrases(norm: str, out: list) -> None:
             out.append({"code": "role-tag", "category": "role",
                         "match": sanitize(m.group(0).strip() + " " + tail[:60], 80)})
             break
+
+
+def _phrase_codes(norm: str) -> set:
+    out: list = []
+    _phrases(norm, out)
+    return {h["code"] for h in out}
+
+
+def _hidden_hides_phrase(text: str) -> bool:
+    """Invisible or bidi characters count only when they hide or split a phrase:
+    a phrase shows up once they are removed and not while they are in place.
+    Persian ZWNJ, a BOM or a U+202A in a path leave the phrases unchanged."""
+    return bool(_phrase_codes(_normalize(text)) - _phrase_codes(_normalize(text, strip=False)))
 
 
 def _decode_b64(blob: str):
@@ -291,9 +353,9 @@ def scan_text(text, *, categories=None, _depth: int = 0) -> list:
     if not text.strip():
         return []
     hits: list = []
-    if _HIDDEN_RE.search(text) or _ZWJ_IN_WORD_RE.search(text):
+    if _STRIP_RE.search(text) and _hidden_hides_phrase(text):
         hits.append({"code": "hidden-characters", "category": "hidden",
-                     "match": "zero-width / bidi / tag characters"})
+                     "match": "zero-width / bidi / tag characters split a phrase"})
     if _ANSI_RE.search(text):
         hits.append({"code": "terminal-escape", "category": "terminal",
                      "match": "ANSI escape sequence"})
@@ -344,28 +406,37 @@ _EVENT_FIELDS = ("message", "host", "user", "process", "domain", "file_path",
                  "file_hash", "action", "source")
 
 
-def _raw_strings(obj, out: list, depth: int = 0, budget: list | None = None):
-    budget = budget if budget is not None else [500]
-    if budget[0] <= 0 or depth > 6:
-        return out
-    if isinstance(obj, str):
-        budget[0] -= 1
-        out.append(obj)
-    elif isinstance(obj, dict):
-        for k, v in obj.items():
-            if isinstance(k, str) and len(k) > 20:
-                out.append(k)
-            _raw_strings(v, out, depth + 1, budget)
-    elif isinstance(obj, (list, tuple)):
-        for v in obj:
-            _raw_strings(v, out, depth + 1, budget)
-    return out
+# shortcut: a raw record with more values than this is flagged unscanned, not scanned past it; raise if real EDR records hit it.
+_RAW_NODE_CAP = 10000
+
+
+def _raw_strings(obj) -> tuple:
+    """Every string in a raw record, dict keys of any length included, walked
+    iteratively with no depth limit. Returns (strings, complete); complete is
+    False when the node cap cut the walk short."""
+    out, stack, nodes = [], [obj], 0
+    while stack:
+        cur = stack.pop()
+        nodes += 1
+        if nodes > _RAW_NODE_CAP:
+            return out, False
+        if isinstance(cur, str):
+            out.append(cur)
+        elif isinstance(cur, dict):
+            for k, v in cur.items():
+                if isinstance(k, str):
+                    out.append(k)
+                stack.append(v)
+        elif isinstance(cur, (list, tuple)):
+            stack.extend(cur)
+    return out, True
 
 
 def scan_event(e) -> list:
     """Injection hits across an event's fields and its raw source record."""
     texts = [getattr(e, f, None) for f in _EVENT_FIELDS]
-    texts += _raw_strings(getattr(e, "raw", None) or {}, [])
+    raw_texts, complete = _raw_strings(getattr(e, "raw", None) or {})
+    texts += raw_texts
     seen, out = set(), []
     for t in texts:
         if not t:
@@ -374,6 +445,9 @@ def scan_event(e) -> list:
             if h["code"] not in seen:
                 seen.add(h["code"])
                 out.append(h)
+    if not complete:
+        out.append({"code": "raw-unscanned", "category": "unscanned",
+                    "match": f"raw record has more than {_RAW_NODE_CAP} values"})
     return out
 
 

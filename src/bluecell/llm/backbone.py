@@ -28,6 +28,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 import urllib.request
 import urllib.error
 
@@ -46,6 +47,14 @@ DEFAULT_TEMPERATURE = 0.0
 
 class BackboneUnavailable(RuntimeError):
     pass
+
+
+_RETRIES = 2   # extra attempts on 429/529; backoff 2s, 4s unless Retry-After says more
+
+
+class _Retryable(Exception):
+    def __init__(self, err, wait):
+        self.err, self.wait = err, wait
 
 
 class LLMBackbone:
@@ -126,8 +135,15 @@ class LLMBackbone:
                     cmd, input=prompt, capture_output=True, text=True,
                     timeout=self.timeout, cwd=cwd,
                 )
-        except (subprocess.TimeoutExpired, OSError) as exc:
-            raise BackboneUnavailable(f"claude CLI failed: {exc}") from exc
+        except subprocess.TimeoutExpired as exc:   # str(exc) embeds the full argv
+            # shortcut: stderr tail only, no argv/prompt; upgrade if callers need more
+            tail = exc.stderr or b""
+            tail = (tail.decode("utf-8", "replace") if isinstance(tail, bytes) else tail).strip()
+            raise BackboneUnavailable(f"claude CLI timed out after {self.timeout}s"
+                                      + (f" ({tail[-200:]})" if tail else "")) from exc
+        except OSError as exc:
+            raise BackboneUnavailable(
+                f"claude CLI failed: {exc.strerror or type(exc).__name__}") from exc
         if proc.returncode != 0:
             # The CLI prints some failures (e.g. usage limits) on stdout.
             reason = (proc.stderr or "").strip() or (proc.stdout or "").strip()
@@ -165,8 +181,24 @@ class LLMBackbone:
         parts = payload.get("content", [])
         return "".join(p.get("text", "") for p in parts if p.get("type") == "text").strip()
 
-    def messages(self, body: dict) -> dict:
-        """Raw Messages API call (used by the tool-using agent loop)."""
+    def messages(self, body: dict, timeout: float | None = None) -> dict:
+        """Raw Messages API call (used by the tool-using agent loop).
+
+        429/529 are retried up to _RETRIES times with backoff (honouring
+        Retry-After), but never past ``timeout`` (the caller's remaining budget).
+        A persistent 429 still raises, so the swarm halts cleanly."""
+        timeout = self.timeout if timeout is None else timeout
+        end = time.monotonic() + timeout
+        for attempt in range(_RETRIES + 1):
+            try:
+                return self._messages_once(body, max(end - time.monotonic(), 0.001))
+            except _Retryable as exc:
+                wait = min(exc.wait if exc.wait is not None else 2 ** (attempt + 1), 30)
+                if attempt == _RETRIES or time.monotonic() + wait >= end:
+                    raise exc.err from None
+                time.sleep(wait)
+
+    def _messages_once(self, body: dict, timeout: float) -> dict:
         key = os.environ["ANTHROPIC_API_KEY"]
         if self.temperature is not None and "temperature" not in body:
             body = dict(body, temperature=self.temperature)
@@ -180,11 +212,20 @@ class LLMBackbone:
             },
         )
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 payload = json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")[:200]
-            raise BackboneUnavailable(f"API HTTP {exc.code}: {detail}") from exc
+            err = BackboneUnavailable(f"API HTTP {exc.code}: {detail}")
+            if exc.code in (429, 529):
+                try:
+                    wait = float(exc.headers.get("retry-after"))
+                except (AttributeError, TypeError, ValueError):
+                    wait = None
+                if wait is not None and not 0 <= wait < float("inf"):  # negative/NaN/inf
+                    wait = None
+                raise _Retryable(err, wait) from exc
+            raise err from exc
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             raise BackboneUnavailable(f"API request failed: {exc}") from exc
         return payload

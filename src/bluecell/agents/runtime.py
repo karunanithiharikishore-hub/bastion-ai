@@ -30,14 +30,17 @@ own process. The way to avoid per-agent processes is the API driver.
 """
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import pickle
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 
 from .. import tracing
 from .base import Agent, AgentContext, Finding
@@ -50,7 +53,9 @@ DEFAULT_MAX_TURNS = 24
 DEFAULT_TIMEOUT = 900   # seconds per agent
 
 # Agent errors that will hit every later agent too (account usage/session limits).
-_LIMIT_RE = re.compile(r"\b(?:usage|session|rate)[ _-]?limit|limit reached", re.I)
+# Matched only against the CLI/API's own error text (run["limit_text"]), never our
+# composed error, which can carry the prompt; the lookahead keeps "rate limiting" out.
+_LIMIT_RE = re.compile(r"\b(?:usage|session|rate)[ _-]?limit(?:ed|s)?(?![a-z])|limit reached", re.I)
 
 _SRC_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -106,6 +111,8 @@ class SwarmSession:
         # Set once an agent hits a usage/session limit: later agents skip the
         # model and fall back to rules instead of launching doomed processes.
         self.halted: str | None = None
+        self.procs: set = set()     # live worker `claude` processes, killed on close
+        self.closed = False
         self.stage(ctx, seed)
 
     def stage(self, ctx: AgentContext, seed: list) -> None:
@@ -132,7 +139,13 @@ class SwarmSession:
             fh.write(snapshot)
         os.replace(tmp, self.board.path)
 
+    def kill_procs(self) -> None:
+        for proc in list(self.procs):
+            _kill(proc)
+
     def close(self) -> None:
+        self.closed = True
+        self.kill_procs()
         if not os.environ.get("BLUECELL_KEEP_SESSION"):
             shutil.rmtree(self.dir, ignore_errors=True)
 
@@ -140,6 +153,54 @@ class SwarmSession:
 # ---------------------------------------------------------------------------
 # Drivers
 # ---------------------------------------------------------------------------
+def _tail(data, n: int = 200) -> str:
+    """Short tail of a subprocess's captured output, for an error message."""
+    if isinstance(data, bytes):
+        data = data.decode("utf-8", "replace")
+    data = (data or "").strip()
+    return f" ({data[-n:]})" if data else ""
+
+
+def _streamed_usage(stdout: str):
+    """Usage and model from the assistant lines a killed worker streamed before its result line."""
+    usage, model, seen = {}, None, set()
+    for line in stdout.splitlines():
+        try:
+            msg = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(msg, dict) or msg.get("type") != "assistant":
+            continue
+        m = msg.get("message") or {}
+        model = model or m.get("model")
+        # One API response is split over several lines that repeat its message id and usage.
+        key = m.get("id") or line
+        if key in seen:
+            continue
+        seen.add(key)
+        for k, v in (m.get("usage") or {}).items():
+            if isinstance(v, int):
+                usage[k] = usage.get(k, 0) + v
+    return usage or None, model
+
+
+def _cli_text(stdout, stderr) -> str:
+    """The CLI's own failure text: stderr, else its plain (non-JSON) stdout lines.
+    Stream-json lines echo tool results, which is log text, so they never count."""
+    stdout = stdout.decode("utf-8", "replace") if isinstance(stdout, bytes) else (stdout or "")
+    stderr = stderr.decode("utf-8", "replace") if isinstance(stderr, bytes) else (stderr or "")
+    plain = [ln for ln in stdout.splitlines() if ln.strip() and not ln.lstrip().startswith("{")]
+    return stderr.strip() or "\n".join(plain).strip()
+
+
+def _kill(proc) -> None:
+    """Kill a worker's whole process group (it was started as its own session)."""
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except OSError:
+        pass
+
+
 def _run_cli(agent, session: SwarmSession, backbone, max_turns: int,
              timeout: int, model: str | None = None) -> dict:
     cfg = {"mcpServers": {MCP_SERVER: {
@@ -147,7 +208,7 @@ def _run_cli(agent, session: SwarmSession, backbone, max_turns: int,
         "args": ["-m", "bluecell.agents.mcp_server", "--session", session.dir,
                  "--agent", agent.name, "--role", agent.role,
                  "--tools", ",".join(agent.tools)]
-                + (["--source-scope", agent.source_scope] if agent.source_scope else [])
+                + ([f"--source-scope={agent.source_scope}"] if agent.source_scope else [])
                 + list(agent.mcp_args),
         "env": {"PYTHONPATH": _SRC_ROOT},
     }}}
@@ -170,17 +231,36 @@ def _run_cli(agent, session: SwarmSession, backbone, max_turns: int,
     if os.path.exists(out_path):     # an earlier run (e.g. a previous vote)
         os.remove(out_path)
     error = None
+    limit_text = ""     # the CLI's own error text; the only text halt detection sees
     summary, turns, cost, truncated = "", None, None, False
     try:
         # cwd = session dir: no project settings/hooks/CLAUDE.md leak into the agent.
-        proc = subprocess.run(cmd, input=agent.task(),
-                              capture_output=True, text=True, timeout=timeout,
-                              cwd=session.dir,
-                              env=dict(os.environ, **agent.cli_env) if agent.cli_env else None)
+        # Popen, not run(): the session must be able to kill a worker the commander abandoned.
+        with subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, text=True, cwd=session.dir,
+                              start_new_session=True,
+                              env=dict(os.environ, **agent.cli_env) if agent.cli_env else None) as p:
+            session.procs.add(p)
+            try:
+                if session.closed:      # the case closed while this worker was starting
+                    _kill(p)
+                out, err = p.communicate(agent.task(), timeout=timeout)
+            except subprocess.TimeoutExpired as exc:
+                _kill(p)
+                exc.stdout, exc.stderr = p.communicate()
+                raise
+            except BaseException:   # SIGTERM/Ctrl-C: Popen.__exit__ would otherwise wait out the worker
+                _kill(p)
+                raise
+            finally:
+                session.procs.discard(p)
+        proc = subprocess.CompletedProcess(cmd, p.returncode, out, err)
         for line in proc.stdout.splitlines():
             try:
                 msg = json.loads(line)
             except json.JSONDecodeError:
+                continue
+            if not isinstance(msg, dict):  # a stray `42` line must not discard the result
                 continue
             if msg.get("type") == "result":
                 text = msg.get("result") or ""
@@ -191,15 +271,22 @@ def _run_cli(agent, session: SwarmSession, backbone, max_turns: int,
                 if msg.get("is_error") and subtype != "error_max_turns":
                     kind = f" ({subtype})" if subtype and subtype != "success" else ""
                     error = f"agent error{kind}: {text[:200]}"
+                    limit_text = text
                 else:
                     summary = text
         if proc.returncode != 0 and not summary and error is None:
-            # The CLI prints some failures (e.g. usage limits) on stdout.
-            reason = (proc.stderr or "").strip() or (proc.stdout or "").strip()
+            reason = _cli_text(proc.stdout, proc.stderr)
             error = f"claude exited {proc.returncode}: {reason[:300]}"
+            limit_text = reason
         stream = tracing.parse_stream_json(proc.stdout)
-    except (subprocess.TimeoutExpired, OSError) as exc:
-        error = f"{type(exc).__name__}: {exc}"
+    except subprocess.TimeoutExpired as exc:
+        error = f"claude CLI timed out after {timeout}s" + _tail(_cli_text(exc.stdout, exc.stderr))
+        # Killed before the result line: record the usage streamed so far (cost unknown if none).
+        usage, seen_model = _streamed_usage(exc.stdout or "")
+        tracing.record_llm(usage, model=seen_model or backbone.model, source="cli-agent")
+        stream = None
+    except OSError as exc:
+        error = f"claude CLI failed: {exc.strerror or type(exc).__name__}"
         stream = None
 
     result = {"findings": [], "verdicts": [], "calls": []}
@@ -218,7 +305,7 @@ def _run_cli(agent, session: SwarmSession, backbone, max_turns: int,
     return {"findings": result["findings"], "verdicts": result.get("verdicts", []),
             "calls": result["calls"],
             "summary": summary.strip(), "turns": turns, "cost_usd": cost,
-            "error": error, "truncated": truncated}
+            "error": error, "limit_text": limit_text, "truncated": truncated}
 
 
 def _run_api(agent, session: SwarmSession, backbone, max_turns: int,
@@ -228,16 +315,25 @@ def _run_api(agent, session: SwarmSession, backbone, max_turns: int,
               "input_schema": t["input_schema"]} for t in box.specs()]
     system = agent.system_prompt()
     messages = [{"role": "user", "content": agent.task()}]
-    summary, error, turns, finished = "", None, 0, False
+    summary, error, turns, finished, timed_out = "", None, 0, False, False
+    limit_text = ""
     temperature = getattr(backbone, "temperature", 0.0)
+    # The agent's wall-clock budget: checked before every model call and tool
+    # round, and each request gets only the time left (when the backbone takes it).
+    deadline = time.monotonic() + timeout
+    per_request = _takes_timeout(backbone.messages)
     try:
         while turns < max_turns:
+            if time.monotonic() >= deadline:
+                timed_out = True
+                break
             turns += 1
             body = {"model": model or backbone.model, "max_tokens": 4000,
                     "system": system, "tools": tools, "messages": messages}
             if temperature is not None:
                 body["temperature"] = temperature
-            payload = backbone.messages(body)
+            kw = {"timeout": deadline - time.monotonic()} if per_request else {}
+            payload = backbone.messages(body, **kw)
             tracing.record_llm(payload.get("usage"),
                                model=payload.get("model") or body["model"],
                                source="api-agent")
@@ -249,6 +345,9 @@ def _run_api(agent, session: SwarmSession, backbone, max_turns: int,
                                   if c.get("type") == "text")
                 finished = True
                 break
+            if time.monotonic() >= deadline:
+                timed_out = True
+                break
             results = []
             for u in uses:
                 text = box.call(u["name"], u.get("input") or {})
@@ -257,12 +356,29 @@ def _run_api(agent, session: SwarmSession, backbone, max_turns: int,
                                 "is_error": text.startswith('{"error"')})
             messages.append({"role": "user", "content": results})
     except Exception as exc:
-        error = f"{type(exc).__name__}: {exc}"
+        # A request cut short by the budget is a timeout, not a backbone fault.
+        if time.monotonic() >= deadline:
+            timed_out = True
+        else:
+            error = f"{type(exc).__name__}: {exc}"
+            limit_text = str(exc)     # provider's own error body (e.g. HTTP 429)
+    if timed_out:
+        error = f"timed out: {timeout}s budget exhausted after {turns} turns"
+    if not box.calls and error is None:   # refusal / empty reply: same as the CLI driver
+        error = "agent made no tool calls"
     tracing.record_tool_calls(box.calls, agent=agent.name)
     return {"findings": box.findings, "verdicts": list(box.verdicts.values()),
             "calls": box.calls, "summary": summary.strip(),
-            "turns": turns, "cost_usd": None, "error": error,
-            "truncated": error is None and not finished}
+            "turns": turns, "cost_usd": None, "error": error, "limit_text": limit_text,
+            "truncated": timed_out or (error is None and not finished)}
+
+
+def _takes_timeout(fn) -> bool:
+    """True when a backbone's messages() accepts a per-request ``timeout``."""
+    try:
+        return "timeout" in inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -315,7 +431,7 @@ class AutonomousAgent(Agent):
         driver = _run_cli if backbone.resolved == "cli" else _run_api
         model = self.llm_model or backbone.model
         run = driver(self, session, backbone, self.max_turns, self.timeout, model=model)
-        if run["error"] and _LIMIT_RE.search(run["error"]):
+        if run["error"] and _LIMIT_RE.search(run.get("limit_text") or ""):
             session.halted = f"model limit hit by {self.name} ({run['error'][:200]})"
         findings = [Finding(agent=self.name, role=self.role, tier=self.tier,
                             title=f["title"], severity=f["severity"],
