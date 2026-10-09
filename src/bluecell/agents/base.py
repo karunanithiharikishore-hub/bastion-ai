@@ -33,6 +33,7 @@ class Finding:
     verified_by: list = field(default_factory=list)  # agent names that reviewed
     intel_refs: list = field(default_factory=list)
     origin: str = "rules"           # rules | agent (model-driven, tool-using)
+    votes: dict = field(default_factory=dict)        # Tier-2 self-consistency tally
 
     @property
     def id(self) -> str:

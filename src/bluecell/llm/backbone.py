@@ -13,6 +13,13 @@ Two execution paths, selected automatically (override with mode=):
 If neither path is available the backbone raises BackboneUnavailable, and
 callers fall back to the deterministic storyline. The pipeline NEVER requires
 the LLM to produce a result.
+
+Auto mode prefers the API when ANTHROPIC_API_KEY is set: the agent swarm then
+runs every agent as an in-process tool loop (no ``claude`` process or MCP
+server per agent), and decoding is pinned to temperature 0. Without a key it
+uses the keyless CLI. The ``claude`` CLI exposes no temperature / seed /
+sampling option (checked against ``claude --help``, Claude Code 2.1.x), so CLI
+runs use the CLI's default sampling; see README "Repeatability & cost".
 """
 from __future__ import annotations
 
@@ -30,6 +37,9 @@ DEFAULT_MODEL = "claude-sonnet-5"
 DEFAULT_TIMEOUT = 300
 _API_URL = "https://api.anthropic.com/v1/messages"
 _API_VERSION = "2023-06-01"
+# Deterministic-as-possible decoding for every API call (agent loops, analyst,
+# narrative). Temperature 0 is greedy-ish, not a bit-identical guarantee.
+DEFAULT_TEMPERATURE = 0.0
 
 
 class BackboneUnavailable(RuntimeError):
@@ -38,11 +48,21 @@ class BackboneUnavailable(RuntimeError):
 
 class LLMBackbone:
     def __init__(self, mode: str = "auto", model: str = DEFAULT_MODEL,
-                 timeout: int = DEFAULT_TIMEOUT):
+                 timeout: int = DEFAULT_TIMEOUT,
+                 temperature: float | None = DEFAULT_TEMPERATURE):
         self.mode = mode
         self.model = model
         self.timeout = timeout
+        self.temperature = temperature   # API path only; None = API default
         self.resolved = self._resolve()
+
+    @property
+    def sampling(self) -> str:
+        """How decoding is controlled on the resolved path (for the run record)."""
+        if self.resolved == "api":
+            return ("default" if self.temperature is None
+                    else f"temperature={self.temperature:g}")
+        return "cli default (the claude CLI has no temperature/seed option)"
 
     # ---- availability -------------------------------------------------------
     def _cli_available(self) -> bool:
@@ -60,11 +80,12 @@ class LLMBackbone:
             if not self._api_available():
                 raise BackboneUnavailable("ANTHROPIC_API_KEY not set")
             return "api"
-        # auto: prefer CLI (keyless) then API.
-        if self._cli_available():
-            return "cli"
+        # auto: prefer the API when a key is set (in-process agent loop, no
+        # per-agent process, temperature 0), else the keyless CLI.
         if self._api_available():
             return "api"
+        if self._cli_available():
+            return "cli"
         raise BackboneUnavailable(
             "No Claude backbone available (no `claude` CLI and no ANTHROPIC_API_KEY)")
 
@@ -115,6 +136,8 @@ class LLMBackbone:
             "max_tokens": max_tokens,
             "messages": [{"role": "user", "content": prompt}],
         }
+        if self.temperature is not None:
+            body["temperature"] = self.temperature
         if system:
             body["system"] = system
         payload = self.messages(body)
@@ -124,6 +147,8 @@ class LLMBackbone:
     def messages(self, body: dict) -> dict:
         """Raw Messages API call (used by the tool-using agent loop)."""
         key = os.environ["ANTHROPIC_API_KEY"]
+        if self.temperature is not None and "temperature" not in body:
+            body = dict(body, temperature=self.temperature)
         data = json.dumps(body).encode("utf-8")
         req = urllib.request.Request(
             _API_URL, data=data, method="POST",

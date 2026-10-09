@@ -23,7 +23,9 @@ from .report.rca import (
 )
 from .intel import IntelStore
 from .agents import run_swarm, ai_analyze
+from .agents import budget
 from . import provenance
+from . import cache as run_cache
 
 
 _VERDICT_RANK = {"likely-malicious": 0, "needs-review": 1, "likely-benign": 2}
@@ -31,8 +33,17 @@ _VERDICT_RANK = {"likely-malicious": 0, "needs-review": 1, "likely-benign": 2}
 
 def analyze(paths, *, source_override=None, window_minutes=60,
             max_incidents=10, backbone=None, intel_store=None,
-            max_digest_lines=400, run_agents=True, use_llm=True):
-    """Run the pipeline (and, by default, the agent swarm). Returns a result dict."""
+            max_digest_lines=400, run_agents=True, use_llm=True,
+            cache=None, votes=1, tier1_model=None, skip_idle_tier1=True):
+    """Run the pipeline (and, by default, the agent swarm). Returns a result dict.
+
+    cache: None/"off" (no cache), "use" (return a stored result for the same
+    inputs + config, store complete new runs) or "refresh" (always run, then
+    overwrite). Only LLM runs are cached; see cache.py.
+    votes: Tier-2 self-consistency runs (majority vote per incident).
+    tier1_model: model for Tier-1 triage agents (None = the backbone's model).
+    skip_idle_tier1: no Tier-1 model agent for sources with no incident events.
+    """
     import time
     _t0 = time.perf_counter()
     events = ingest_paths(paths, source_override)
@@ -55,6 +66,26 @@ def analyze(paths, *, source_override=None, window_minutes=60,
 
     iocs = extract_iocs(events)
     checklist = hunt_checklist(incidents, iocs)
+
+    llm_on = use_llm and backbone is not None
+    swarm_options = {"votes": max(1, int(votes or 1)), "tier1_model": tier1_model,
+                     "skip_idle_tier1": skip_idle_tier1}
+    cache_mode = cache if cache in run_cache.MODES else "off"
+    cache_key = material = None
+    cache_note = "n/a (deterministic run)" if not llm_on else cache_mode
+    if llm_on and cache_mode != "off":
+        material = run_cache.key_material(events, backbone=backbone, intel_store=intel_store,
+                                          settings=dict(
+            swarm_options, source_override=source_override, window_minutes=window_minutes,
+            max_incidents=max_incidents, max_digest_lines=max_digest_lines,
+            run_agents=run_agents, tier_max_turns=budget.TIER_MAX_TURNS,
+            max_tool_result_chars=budget.MAX_TOOL_RESULT_CHARS))
+        cache_key = run_cache.cache_key(material)
+        if cache_mode == "use":
+            entry = run_cache.load(cache_key)
+            if entry is not None:
+                return run_cache.mark_hit(entry, cache_key,
+                                          int((time.perf_counter() - _t0) * 1000))
 
     incident_blocks = []
     for inc in incidents:
@@ -79,7 +110,7 @@ def analyze(paths, *, source_override=None, window_minutes=60,
     if run_agents:
         swarm = run_swarm(events, incidents, iocs, digest,
                           intel_store=intel_store, backbone=backbone,
-                          use_llm=use_llm)
+                          use_llm=use_llm, **swarm_options)
     swarm_ms = int((time.perf_counter() - _t_swarm0) * 1000)
 
     # The headline follows the Tier-2 agent's confirm/dismiss decision when there
@@ -117,7 +148,7 @@ def analyze(paths, *, source_override=None, window_minutes=60,
 
     total_ms = int((time.perf_counter() - _t0) * 1000)
 
-    return {
+    result = {
         "meta": {
             "generated": datetime.now(timezone.utc).isoformat(),
             "events_ingested": ingested,
@@ -135,6 +166,17 @@ def analyze(paths, *, source_override=None, window_minutes=60,
                 "total": total_ms,
             },
             "agents_deployed": (swarm["agent_count"] if swarm else 0),
+            "repeatability": {
+                "sampling": getattr(backbone, "sampling", None) if llm_on else "n/a (no LLM)",
+                "votes": swarm_options["votes"],
+                "tier1_model": tier1_model,
+                "skip_idle_tier1": skip_idle_tier1,
+            },
+            "cost_plan": (budget.plan_swarm(events, incidents,
+                                            votes=swarm_options["votes"],
+                                            skip_idle_tier1=skip_idle_tier1)
+                          if run_agents and llm_on else None),
+            "cache": cache_note,
         },
         "incidents": incident_blocks,
         "iocs": iocs,
@@ -143,3 +185,12 @@ def analyze(paths, *, source_override=None, window_minutes=60,
         "swarm": swarm,
         "ai_analysis": ai_analysis,
     }
+    if cache_key is not None:
+        result["meta"]["cache_key"] = cache_key
+        reason = run_cache.uncacheable_reason(result, backbone)
+        if reason is None:
+            run_cache.store(cache_key, material, result)
+            result["meta"]["cache"] = "refreshed" if cache_mode == "refresh" else "miss (stored)"
+        else:
+            result["meta"]["cache"] = f"miss (not stored: {reason})"
+    return result

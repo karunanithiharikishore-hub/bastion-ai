@@ -29,6 +29,7 @@ from datetime import datetime, timedelta, timezone
 
 from .grounding import evidence_index, check_text, _DOMAIN_RE
 from ..pipeline.attack import ATTACK_TECHNIQUES
+from .budget import MAX_TOOL_RESULT_CHARS, MAX_BOARD_ENTRIES
 
 _SEVERITIES = ("low", "medium", "high", "critical")
 _EVENT_FIELDS = ("source", "category", "action", "host", "user", "process",
@@ -245,7 +246,13 @@ class SecurityToolbox:
         except Exception as exc:  # a tool bug must not kill the agent loop
             result, ok = {"error": f"{type(exc).__name__}: {exc}"}, False
         self.calls.append({"tool": name, "args": args, "ok": ok})
-        return result if isinstance(result, str) else json.dumps(result, default=str)
+        text = result if isinstance(result, str) else json.dumps(result, default=str)
+        if len(text) > MAX_TOOL_RESULT_CHARS:
+            # Oversized results cost tokens on every later turn; narrow the query.
+            text = (text[:MAX_TOOL_RESULT_CHARS]
+                    + f" ...(truncated {len(text) - MAX_TOOL_RESULT_CHARS} chars; "
+                      "use filters or a smaller limit)")
+        return text
 
     # ---- helpers ------------------------------------------------------------
     @staticmethod
@@ -400,7 +407,9 @@ class SecurityToolbox:
                             for r in store.search(terms, limit=8)]}
 
     def t_read_board(self):
-        return {"entries": self.board.read()}
+        entries = self.board.read()
+        return {"entries": entries[-MAX_BOARD_ENTRIES:],
+                "older_entries_omitted": max(0, len(entries) - MAX_BOARD_ENTRIES)}
 
     def t_post_note(self, message):
         message = str(message or "").strip()

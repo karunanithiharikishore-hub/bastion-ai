@@ -18,6 +18,15 @@ Two drivers, matching the backbone:
 
 If no backbone is available, or the agent process fails, the agent falls back
 to its rule-based logic and the run record says so.
+
+Why not one long-lived ``claude`` process for several agents? A CLI session
+fixes its system prompt, MCP servers (BlueCell's server is bound to one agent
+name, tool set and source scope) and tool allow-list at launch, and a
+multi-turn ``--input-format stream-json`` session carries the whole earlier
+conversation into every later turn. Sharing one process would leak one agent's
+reasoning into the next (breaking independent Tier-2 votes and the per-agent
+grounding scope) and grow every later agent's context, so each agent keeps its
+own process. The way to avoid per-agent processes is the API driver.
 """
 from __future__ import annotations
 
@@ -32,6 +41,7 @@ import tempfile
 
 from .base import Agent, AgentContext, Finding
 from .toolbox import Blackboard, SecurityToolbox, BASE_TOOLS, file_slug, tool_specs
+from .budget import TIER_MAX_TURNS
 
 MCP_SERVER = "bluecell"
 DEFAULT_MAX_TURNS = 24
@@ -101,6 +111,17 @@ class SwarmSession:
         with open(os.path.join(self.dir, "ctx.pkl"), "wb") as fh:
             pickle.dump({"ctx": shared, "seed": seed}, fh)
 
+    def board_snapshot(self) -> bytes:
+        with open(self.board.path, "rb") as fh:
+            return fh.read()
+
+    def board_restore(self, snapshot: bytes) -> None:
+        """Reset the board (used between independent Tier-2 votes)."""
+        tmp = self.board.path + ".tmp"
+        with open(tmp, "wb") as fh:
+            fh.write(snapshot)
+        os.replace(tmp, self.board.path)
+
     def close(self) -> None:
         if not os.environ.get("BLUECELL_KEEP_SESSION"):
             shutil.rmtree(self.dir, ignore_errors=True)
@@ -110,7 +131,7 @@ class SwarmSession:
 # Drivers
 # ---------------------------------------------------------------------------
 def _run_cli(agent, session: SwarmSession, backbone, max_turns: int,
-             timeout: int) -> dict:
+             timeout: int, model: str | None = None) -> dict:
     cfg = {"mcpServers": {MCP_SERVER: {
         "command": sys.executable,
         "args": ["-m", "bluecell.agents.mcp_server", "--session", session.dir,
@@ -125,7 +146,7 @@ def _run_cli(agent, session: SwarmSession, backbone, max_turns: int,
 
     allowed = ",".join(f"mcp__{MCP_SERVER}__{n}" for n in agent.tools)
     cmd = ["claude", "-p",
-           "--model", backbone.model,
+           "--model", model or backbone.model,
            "--system-prompt", build_system_prompt(agent.role, agent.brief()),
            "--mcp-config", cfg_path, "--strict-mcp-config",
            "--tools", "",
@@ -135,8 +156,10 @@ def _run_cli(agent, session: SwarmSession, backbone, max_turns: int,
            "--no-session-persistence",
            "--output-format", "stream-json", "--verbose"]
     out_path = os.path.join(session.dir, f"{file_slug(agent.name)}.out.json")
+    if os.path.exists(out_path):     # an earlier run (e.g. a previous vote)
+        os.remove(out_path)
     error = None
-    summary, turns, cost = "", None, None
+    summary, turns, cost, truncated = "", None, None, False
     try:
         # cwd = session dir: no project settings/hooks/CLAUDE.md leak into the agent.
         proc = subprocess.run(cmd, input=task_prompt(agent.name, agent.role),
@@ -152,6 +175,7 @@ def _run_cli(agent, session: SwarmSession, backbone, max_turns: int,
                 turns = msg.get("num_turns")
                 cost = msg.get("total_cost_usd")
                 subtype = msg.get("subtype")
+                truncated = subtype == "error_max_turns"
                 if msg.get("is_error") and subtype != "error_max_turns":
                     kind = f" ({subtype})" if subtype and subtype != "success" else ""
                     error = f"agent error{kind}: {text[:200]}"
@@ -173,11 +197,11 @@ def _run_cli(agent, session: SwarmSession, backbone, max_turns: int,
     return {"findings": result["findings"], "verdicts": result.get("verdicts", []),
             "calls": result["calls"],
             "summary": summary.strip(), "turns": turns, "cost_usd": cost,
-            "error": error}
+            "error": error, "truncated": truncated}
 
 
 def _run_api(agent, session: SwarmSession, backbone, max_turns: int,
-             timeout: int) -> dict:
+             timeout: int, model: str | None = None) -> dict:
     box = SecurityToolbox(session.ctx, agent.name, agent.role, session.board,
                           board_seed=session.seed, tools=agent.tools,
                           source_scope=agent.source_scope)
@@ -185,20 +209,23 @@ def _run_api(agent, session: SwarmSession, backbone, max_turns: int,
               "input_schema": t["input_schema"]} for t in tool_specs(agent.tools)]
     system = build_system_prompt(agent.role, agent.brief())
     messages = [{"role": "user", "content": task_prompt(agent.name, agent.role)}]
-    summary, error, turns = "", None, 0
+    summary, error, turns, finished = "", None, 0, False
+    temperature = getattr(backbone, "temperature", 0.0)
     try:
         while turns < max_turns:
             turns += 1
-            payload = backbone.messages({
-                "model": backbone.model, "max_tokens": 4000, "system": system,
-                "tools": tools, "messages": messages,
-            })
+            body = {"model": model or backbone.model, "max_tokens": 4000,
+                    "system": system, "tools": tools, "messages": messages}
+            if temperature is not None:
+                body["temperature"] = temperature
+            payload = backbone.messages(body)
             content = payload.get("content", [])
             messages.append({"role": "assistant", "content": content})
             uses = [c for c in content if c.get("type") == "tool_use"]
             if not uses:
                 summary = "".join(c.get("text", "") for c in content
                                   if c.get("type") == "text")
+                finished = True
                 break
             results = []
             for u in uses:
@@ -211,7 +238,8 @@ def _run_api(agent, session: SwarmSession, backbone, max_turns: int,
         error = f"{type(exc).__name__}: {exc}"
     return {"findings": box.findings, "verdicts": list(box.verdicts.values()),
             "calls": box.calls, "summary": summary.strip(),
-            "turns": turns, "cost_usd": None, "error": error}
+            "turns": turns, "cost_usd": None, "error": error,
+            "truncated": error is None and not finished}
 
 
 # ---------------------------------------------------------------------------
@@ -224,13 +252,15 @@ class AutonomousAgent(Agent):
     mission = ""
     tools = BASE_TOOLS
     source_scope = None
-    default_max_turns = DEFAULT_MAX_TURNS
+    default_max_turns = None        # None = the tier's cap (budget.TIER_MAX_TURNS)
 
     def __init__(self, *a, max_turns: int | None = None,
-                 timeout: int = DEFAULT_TIMEOUT, **kw):
+                 timeout: int = DEFAULT_TIMEOUT, llm_model: str | None = None, **kw):
         super().__init__(*a, **kw)
-        self.max_turns = max_turns or self.default_max_turns
+        self.max_turns = (max_turns or self.default_max_turns
+                          or TIER_MAX_TURNS.get(self.tier, DEFAULT_MAX_TURNS))
         self.timeout = timeout
+        self.llm_model = llm_model      # None = the backbone's model
         self.last_run: dict = {}
         self.verdicts: list = []          # Tier-2 submit_verdict results
 
@@ -242,7 +272,8 @@ class AutonomousAgent(Agent):
             raise RuntimeError(f"skipped: {session.halted}")
         backbone = ctx.backbone
         driver = _run_cli if backbone.resolved == "cli" else _run_api
-        run = driver(self, session, backbone, self.max_turns, self.timeout)
+        model = self.llm_model or backbone.model
+        run = driver(self, session, backbone, self.max_turns, self.timeout, model=model)
         if run["error"] and _LIMIT_RE.search(run["error"]):
             session.halted = f"model limit hit by {self.name} ({run['error'][:200]})"
         findings = [Finding(agent=self.name, role=self.role, tier=self.tier,
@@ -256,7 +287,8 @@ class AutonomousAgent(Agent):
         self.verdicts = run["verdicts"]
         self.last_run = {
             "agent": self.name, "role": self.role, "tier": self.tier,
-            "mode": "autonomous", "backbone": backbone.resolved, "model": backbone.model,
+            "mode": "autonomous", "backbone": backbone.resolved, "model": model,
+            "max_turns": self.max_turns, "truncated": bool(run.get("truncated")),
             "turns": run["turns"], "tool_calls": len(run["calls"]),
             "tools_used": sorted({c["tool"] for c in run["calls"]}),
             "rejected_submissions": sum(1 for c in run["calls"]
@@ -276,6 +308,10 @@ class AutonomousAgent(Agent):
                              tier=self.tier, mode=mode, error=error,
                              findings_filed=len(findings))
         return findings
+
+    def skip(self, ctx: AgentContext, reason: str) -> list:
+        """Do not start a model agent; the rules cover this one (cost saving)."""
+        return self._rules(ctx, f"skipped ({reason})")
 
     def run(self, ctx: AgentContext, use_llm: bool = True,
             session: SwarmSession | None = None) -> list:
