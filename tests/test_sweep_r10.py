@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from bluecell.llm.backbone import BackboneUnavailable, LLMBackbone
+from bastion.llm.backbone import BackboneUnavailable, LLMBackbone
 
 
 def _alive(pid: int) -> bool:
@@ -30,8 +30,8 @@ def test_timeout_kills_cli_helper_processes(tmp_path, monkeypatch):
                    "wait\n")
     exe.chmod(exe.stat().st_mode | stat.S_IEXEC)
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
-    monkeypatch.setenv("BLUECELL_CACHE_DIR", str(tmp_path / "cache"))
-    monkeypatch.setenv("BLUECELL_RUNS_DIR", str(tmp_path / "runs"))
+    monkeypatch.setenv("BASTION_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("BASTION_RUNS_DIR", str(tmp_path / "runs"))
 
     backbone = LLMBackbone(mode="cli", timeout=2)
     helpers = []

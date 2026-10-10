@@ -1,6 +1,6 @@
 """ITEM-1: a Sentinel SecurityEvent export with Status/IpAddress columns must not be parsed as Azure sign-ins."""
-from bluecell.ingest.loader import ingest_file
-from bluecell.pipeline.attack import map_attack
+from bastion.ingest.loader import ingest_file
+from bastion.pipeline.attack import map_attack
 
 
 def test_securityevent_with_status_column_is_windows_event_not_azure_signin(tmp_path):

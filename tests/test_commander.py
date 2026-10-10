@@ -1,6 +1,6 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """Self-organising swarm: the Incident Commander deploys worker agents, reads
 their results, follows up, respects its budget, and the orchestrator falls back
 to the fixed tiered flow when it fails. Every model is a scripted fake (API
@@ -14,10 +14,10 @@ import threading
 import time
 
 from test_autonomous_agents import _ctx, SRC
-from bluecell.agents import SwarmOrchestrator
-from bluecell.agents.dispatch import FileDispatchServer
-from bluecell.agents.runtime import SwarmSession
-from bluecell.report.render import _render_swarm
+from bastion.agents import SwarmOrchestrator
+from bastion.agents.dispatch import FileDispatchServer
+from bastion.agents.runtime import SwarmSession
+from bastion.report.render import _render_swarm
 
 COMMANDER = "SOC Lead / Incident Commander"
 
@@ -348,7 +348,7 @@ def test_orchestration_modes_without_backbone():
 
 def test_cli_flag_reaches_the_swarm(tmp_path):
     from conftest import SAMPLES
-    from bluecell.cli import build_parser, main
+    from bastion.cli import build_parser, main
     args = build_parser().parse_args(["analyze", SAMPLES, "--orchestration", "fixed"])
     assert args.orchestration == "fixed"
     assert build_parser().parse_args(["serve", SAMPLES]).orchestration == "auto"
@@ -390,7 +390,7 @@ def test_mcp_dispatch_round_trip_through_file_ipc():
     try:
         with FileDispatchServer(session.dir, handler):
             proc = subprocess.run(
-                [sys.executable, "-m", "bluecell.agents.mcp_server", "--session",
+                [sys.executable, "-m", "bastion.agents.mcp_server", "--session",
                  session.dir, "--agent", "soc-lead", "--role", COMMANDER,
                  "--tools", tools, "--commander", "--dispatch-timeout", "30"],
                 input="\n".join(map(json.dumps, msgs)) + "\n", capture_output=True,
@@ -420,7 +420,7 @@ opt = lambda name: args[args.index(name) + 1]
 with open(os.environ["FAKE_CLAUDE_LOG"], "a") as fh:
     fh.write(json.dumps({{"argv": args,
                          "mcp_timeout": os.environ.get("MCP_TOOL_TIMEOUT")}}) + "\n")
-srv = json.load(open(opt("--mcp-config")))["mcpServers"]["bluecell"]
+srv = json.load(open(opt("--mcp-config")))["mcpServers"]["bastion"]
 system, prompt = opt("--system-prompt"), sys.stdin.read()
 p = subprocess.Popen([srv["command"]] + srv["args"], stdin=subprocess.PIPE,
                      stdout=subprocess.PIPE, text=True,
@@ -506,8 +506,8 @@ def test_cli_commander_end_to_end_with_fake_claude(tmp_path, monkeypatch):
         assert argv[argv.index("--tools") + 1] == ""
     lead_argv = runs[0]["argv"]
     allowed = lead_argv[lead_argv.index("--allowedTools") + 1].split(",")
-    assert "mcp__bluecell__deploy_agents" in allowed
-    assert "mcp__bluecell__submit_finding" not in allowed
+    assert "mcp__bastion__deploy_agents" in allowed
+    assert "mcp__bastion__submit_finding" not in allowed
     assert runs[0]["mcp_timeout"] == str((600 + 300) * 1000)
     assert runs[1]["mcp_timeout"] is None
 
@@ -516,7 +516,7 @@ def test_cli_commander_end_to_end_with_fake_claude(tmp_path, monkeypatch):
 # Robustness: IPC races, cleanup, hung/late workers, thread safety
 # ---------------------------------------------------------------------------
 def test_dispatch_client_withdraws_request_on_timeout(tmp_path):
-    from bluecell.agents.dispatch import FileDispatchClient
+    from bastion.agents.dispatch import FileDispatchClient
     client = FileDispatchClient(str(tmp_path), timeout=0.5)
     out = client("deploy", {"agents": []})          # nobody is serving
     assert "timed out" in out["error"] and "may still be running" not in out["error"]
@@ -530,7 +530,7 @@ def test_dispatch_client_withdraws_request_on_timeout(tmp_path):
 
 def test_dispatch_client_returns_when_session_is_closed(tmp_path):
     import shutil
-    from bluecell.agents.dispatch import FileDispatchClient
+    from bastion.agents.dispatch import FileDispatchClient
     client = FileDispatchClient(str(tmp_path), timeout=30)
     threading.Timer(0.3, shutil.rmtree, args=(tmp_path / "dispatch",)).start()
     t0 = time.monotonic()
@@ -539,7 +539,7 @@ def test_dispatch_client_returns_when_session_is_closed(tmp_path):
 
 
 def test_dispatch_server_survives_bad_requests_and_handler_errors(tmp_path):
-    from bluecell.agents.dispatch import FileDispatchClient, dispatch_dir
+    from bastion.agents.dispatch import FileDispatchClient, dispatch_dir
 
     def handler(op, args):
         if op == "boom":
@@ -561,7 +561,7 @@ def test_dispatch_server_survives_bad_requests_and_handler_errors(tmp_path):
 def test_dispatch_server_stop_rejects_queued_requests(tmp_path):
     """Parallel MCP calls queue behind a running deploy; when the commander
     stops, the queued ones get an error instead of hanging their callers."""
-    from bluecell.agents.dispatch import FileDispatchClient
+    from bastion.agents.dispatch import FileDispatchClient
     release = threading.Event()
 
     def handler(op, args):
@@ -588,7 +588,7 @@ def test_dispatch_server_stop_rejects_queued_requests(tmp_path):
 def test_late_worker_results_are_discarded_after_close():
     """If the commander stops while a deploy is running (CLI: its process timed
     out), the workers' results must not be merged into the finished swarm."""
-    from bluecell.agents.commander import Dispatcher
+    from bastion.agents.commander import Dispatcher
     ctx = _ctx()
     started, release = threading.Event(), threading.Event()
 
@@ -622,7 +622,7 @@ def test_late_worker_results_are_discarded_after_close():
 def test_queued_worker_is_skipped_when_budget_runs_out(monkeypatch):
     """Timeouts are sized when a worker starts, not when the batch is queued; a
     worker still waiting behind the parallel cap when time runs out is skipped."""
-    from bluecell.agents import commander
+    from bastion.agents import commander
     monkeypatch.setattr(commander, "MIN_WORKER_SECONDS", 0.6)
     ctx = _ctx()
     model = SwarmModel(ctx, [

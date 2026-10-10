@@ -1,7 +1,7 @@
 """BUG-INGEST-12 loader warning: unrecognised non-blank records are counted per file on stderr."""
 import json
 
-from bluecell.ingest.loader import ingest_file
+from bastion.ingest.loader import ingest_file
 
 
 def test_csv_unrecognized_rows_warn_once_per_file(tmp_path, capsys):
@@ -9,7 +9,7 @@ def test_csv_unrecognized_rows_warn_once_per_file(tmp_path, capsys):
     p.write_text("foo,bar\n1,2\n3,4\n", encoding="utf-8")
     assert ingest_file(str(p)) == []
     err = capsys.readouterr().err
-    assert f"bluecell: skipped 2 unrecognized record(s) in {p}" in err
+    assert f"bastion: skipped 2 unrecognized record(s) in {p}" in err
 
 
 def test_json_unrecognized_record_warns_and_blank_stays_silent(tmp_path, capsys):

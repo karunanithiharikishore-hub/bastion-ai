@@ -2,10 +2,10 @@ import json
 import os
 
 from conftest import SAMPLES, FEEDS
-from bluecell.intel import IntelStore
-from bluecell.analyzer import analyze
-from bluecell.report import render_markdown, render_json
-from bluecell.llm import LLMBackbone
+from bastion.intel import IntelStore
+from bastion.analyzer import analyze
+from bastion.report import render_markdown, render_json
+from bastion.llm import LLMBackbone
 
 
 def test_intel_add_dedup_and_search(tmp_path):

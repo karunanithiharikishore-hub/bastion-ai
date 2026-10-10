@@ -1,13 +1,13 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """BUG-FEAT-9: an empty suite and a case with a misnamed label file must not pass."""
 import json
 
 import pytest
 
-from bluecell import evals
-from bluecell.cli import main
+from bastion import evals
+from bastion.cli import main
 
 
 def _fake(files, **kw):

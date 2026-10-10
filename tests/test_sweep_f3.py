@@ -1,6 +1,6 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """ITEM-3: a cache hit must report this run's events_ingested and show its
 agents as cached (0 deployed), not inherit the stored run's numbers."""
 import os
@@ -9,7 +9,7 @@ import pytest
 
 from conftest import BENIGN_SAMPLES
 from test_repeatability import VerdictBackbone
-from bluecell import analyzer, cache as run_cache
+from bastion import analyzer, cache as run_cache
 
 
 @pytest.fixture

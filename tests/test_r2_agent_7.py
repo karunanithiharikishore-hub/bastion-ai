@@ -1,6 +1,6 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """BUG-AGENT-7: a log source name starting with "-" must not break the Tier-1
 agent's MCP server argv (argparse read it as an option). Offline: `claude` is
 stubbed, and the captured MCP server argv is run through the real parser."""
@@ -10,8 +10,8 @@ import subprocess
 import sys
 import types
 
-from bluecell.agents import runtime
-from bluecell.agents.roles import JuniorSocAnalyst
+from bastion.agents import runtime
+from bastion.agents.roles import JuniorSocAnalyst
 
 _real_run = subprocess.run  # the stub below replaces subprocess.run globally
 
@@ -49,7 +49,7 @@ def test_dash_source_name_reaches_mcp_server_as_one_option(tmp_path, monkeypatch
 
     # The real parser must accept the argv: exit code 2 is argparse rejecting it.
     proc = _real_run(
-        [sys.executable, "-m", "bluecell.agents.mcp_server"] + server_args[2:],
+        [sys.executable, "-m", "bastion.agents.mcp_server"] + server_args[2:],
         capture_output=True, text=True, timeout=60,
         env=dict(os.environ, PYTHONPATH=runtime._SRC_ROOT))
     assert proc.returncode != 2, proc.stderr.strip().splitlines()[-1:]

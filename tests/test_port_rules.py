@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
-from bluecell.models import Event
-from bluecell.pipeline.attack import map_attack
+from bastion.models import Event
+from bastion.pipeline.attack import map_attack
 
 
 def _ev(dst_ip, port, action="allow", msg="conn"):

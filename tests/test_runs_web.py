@@ -1,6 +1,6 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """Runs dashboard: /api/runs, /api/runs/<id>, static page, host checks."""
 import http.client
 import json
@@ -15,17 +15,17 @@ from http.server import ThreadingHTTPServer
 import pytest
 
 from conftest import BENIGN_SAMPLES
-from bluecell import tracing
-from bluecell.analyzer import analyze
-from bluecell.web.server import _State, _make_handler
+from bastion import tracing
+from bastion.analyzer import analyze
+from bastion.web.server import _State, _make_handler
 
 STATIC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                      "src", "bluecell", "web", "static")
+                      "src", "bastion", "web", "static")
 
 
 @pytest.fixture()
 def server(tmp_path, monkeypatch):
-    monkeypatch.setenv("BLUECELL_RUNS_DIR", str(tmp_path / "runs"))
+    monkeypatch.setenv("BASTION_RUNS_DIR", str(tmp_path / "runs"))
     state = _State([BENIGN_SAMPLES], window=120, llm_mode="off", model="x", intel_db=None)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(state))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()

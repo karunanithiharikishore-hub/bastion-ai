@@ -1,6 +1,6 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """ITEM-6 regression: a parent ATT&CK id (T1059) must be grounded by a
 sub-technique tagged on the evidence (T1059.001), in attack_lookup,
 submit_finding and the grounding check. A sibling (T1059.003) must not."""
@@ -9,11 +9,11 @@ import json
 import tempfile
 
 from conftest import SAMPLES  # noqa: F401  (sets sys.path to src)
-from bluecell.agents.base import AgentContext
-from bluecell.agents.grounding import check_text, evidence_index, technique_matches
-from bluecell.agents.toolbox import Blackboard, SecurityToolbox, BASE_TOOLS
-from bluecell.models import Event
-from bluecell.pipeline.correlate import Incident
+from bastion.agents.base import AgentContext
+from bastion.agents.grounding import check_text, evidence_index, technique_matches
+from bastion.agents.toolbox import Blackboard, SecurityToolbox, BASE_TOOLS
+from bastion.models import Event
+from bastion.pipeline.correlate import Incident
 
 
 def _events():

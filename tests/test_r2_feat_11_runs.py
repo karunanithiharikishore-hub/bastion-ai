@@ -3,7 +3,7 @@ No model calls: a Tracer is driven directly and persisted into tmp_path."""
 import os
 import time
 
-from bluecell import tracing
+from bastion import tracing
 
 
 def _run(d):
@@ -23,7 +23,7 @@ def _fake_run(d, i, age_s):
 
 def test_runs_pruned_to_env_keep(tmp_path, monkeypatch):
     d = tmp_path / "runs"
-    monkeypatch.setenv("BLUECELL_RUNS_KEEP", "5")
+    monkeypatch.setenv("BASTION_RUNS_KEEP", "5")
     ids = [_run(d) for _ in range(12)]
     left = sorted(os.listdir(d))
     assert len(left) == 5
@@ -33,7 +33,7 @@ def test_runs_pruned_to_env_keep(tmp_path, monkeypatch):
 def test_default_keep_is_200(tmp_path, monkeypatch):
     d = tmp_path / "runs"
     d.mkdir()
-    monkeypatch.delenv("BLUECELL_RUNS_KEEP", raising=False)
+    monkeypatch.delenv("BASTION_RUNS_KEEP", raising=False)
     for i in range(210):
         _fake_run(d, i, age_s=10_000 - i)
     rid = _run(d)
@@ -45,7 +45,7 @@ def test_default_keep_is_200(tmp_path, monkeypatch):
 def test_stale_tmp_swept_and_foreign_dirs_untouched(tmp_path, monkeypatch):
     d = tmp_path / "runs"
     d.mkdir()
-    monkeypatch.delenv("BLUECELL_RUNS_KEEP", raising=False)
+    monkeypatch.delenv("BASTION_RUNS_KEEP", raising=False)
     old = d / "orphan.tmp"
     old.write_text("x")
     os.utime(old, (time.time() - 3600, time.time() - 3600))

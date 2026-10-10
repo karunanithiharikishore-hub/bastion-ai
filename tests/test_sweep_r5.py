@@ -1,7 +1,7 @@
 """ITEM-5: the commander path shrinks --votes K under time pressure; the run must say so."""
 import time
 
-from bluecell.agents import commander
+from bastion.agents import commander
 from test_autonomous_agents import _ctx
 
 

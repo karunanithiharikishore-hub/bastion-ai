@@ -2,9 +2,9 @@
 No real model calls: a fake backbone that sleeps."""
 import time
 
-from bluecell.agents import AgentContext
-from bluecell.agents.roles import ThreatHunter
-from bluecell.agents.runtime import SwarmSession
+from bastion.agents import AgentContext
+from bastion.agents.roles import ThreatHunter
+from bastion.agents.runtime import SwarmSession
 
 from test_autonomous_agents import _ctx
 from test_commander import _use

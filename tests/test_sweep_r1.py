@@ -5,12 +5,12 @@ import os
 import stat
 
 from conftest import SAMPLES
-from bluecell.ingest import ingest_path
-from bluecell.pipeline import normalize, map_attack, correlate, extract_iocs, compress
-from bluecell.agents import AgentContext
-from bluecell.agents.roles import ThreatHunter
-from bluecell.agents.runtime import SwarmSession
-from bluecell.llm.backbone import LLMBackbone
+from bastion.ingest import ingest_path
+from bastion.pipeline import normalize, map_attack, correlate, extract_iocs, compress
+from bastion.agents import AgentContext
+from bastion.agents.roles import ThreatHunter
+from bastion.agents.runtime import SwarmSession
+from bastion.llm.backbone import LLMBackbone
 
 
 def _ctx(backbone=None):

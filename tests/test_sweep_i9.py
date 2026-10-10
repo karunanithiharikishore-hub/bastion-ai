@@ -1,7 +1,7 @@
 """ITEM-9: Azure MFA/KMSI interrupts (50074, 50140, ...) are not password
 failures: no login_failed, no T1110, tagged azure:mfa-interrupt."""
-from bluecell.ingest.parsers import parse_azure_signin
-from bluecell.pipeline.attack import map_attack
+from bastion.ingest.parsers import parse_azure_signin
+from bastion.pipeline.attack import map_attack
 
 
 def test_mfa_interrupt_codes_are_not_login_failed_or_t1110():

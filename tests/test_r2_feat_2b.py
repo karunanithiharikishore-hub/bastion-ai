@@ -5,7 +5,7 @@ import pytest
 
 from conftest import BENIGN_SAMPLES
 from test_repeatability import FakeBackbone
-from bluecell import analyzer, cache as run_cache
+from bastion import analyzer, cache as run_cache
 
 
 @pytest.fixture

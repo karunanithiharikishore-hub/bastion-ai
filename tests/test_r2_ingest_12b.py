@@ -1,8 +1,8 @@
 """BUG-INGEST-12 follow-up: records with only unrecognised keys must not become edr_event noise."""
 import json
 
-from bluecell.ingest.loader import ingest_file
-from bluecell.ingest.parsers import parse_edr
+from bastion.ingest.loader import ingest_file
+from bastion.ingest.parsers import parse_edr
 
 
 def test_parse_edr_returns_none_for_unknown_keys_only():

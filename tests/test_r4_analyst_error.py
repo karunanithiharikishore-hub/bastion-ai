@@ -1,14 +1,14 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """BUG-R4-ANALYST-ERROR: when the `claude` CLI exits non-zero with a JSON result line
 (e.g. an expired login), the exception must carry the result text, not the raw JSON.
 Offline: `claude` is a fake shell script on PATH."""
 import os
 import stat
 
-from bluecell.agents.analyst import ai_analyze
-from bluecell.llm.backbone import BackboneUnavailable, LLMBackbone
+from bastion.agents.analyst import ai_analyze
+from bastion.llm.backbone import BackboneUnavailable, LLMBackbone
 
 _EXPIRED = ("cat >/dev/null\n"
             "echo '{\"duration_api_ms\":0,\"stop_reason\":null,\"is_error\":true,"

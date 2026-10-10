@@ -1,8 +1,8 @@
-"""BUG-WEB-10 -- `bluecell intel` must report bad feeds and unwritable/corrupt stores as a
-clean "[bluecell] ..." message with rc 2, never a Python traceback."""
+"""BUG-WEB-10 -- `bastion intel` must report bad feeds and unwritable/corrupt stores as a
+clean "[bastion] ..." message with rc 2, never a Python traceback."""
 import json
 
-from bluecell.cli import main
+from bastion.cli import main
 
 
 def _run(argv, capsys):
@@ -26,7 +26,7 @@ def test_import_object_without_list_is_clean_error(tmp_path, capsys):
     feed.write_text(json.dumps({"vulnerabilities": "nope"}))
     rc, io = _run(["intel", "--intel-db", str(tmp_path / "db.json"), "import", str(feed)], capsys)
     assert rc == 2
-    assert io.err.startswith("[bluecell] expected a JSON list")
+    assert io.err.startswith("[bastion] expected a JSON list")
 
 
 def test_add_on_corrupt_store_is_clean_error(tmp_path, capsys):
@@ -35,7 +35,7 @@ def test_add_on_corrupt_store_is_clean_error(tmp_path, capsys):
     rc, io = _run(["intel", "--intel-db", str(db), "add", "--id", "N", "--title", "new"], capsys)
     assert rc == 2
     assert "Traceback" not in io.err
-    assert io.err.count("[bluecell] intel add failed: refusing to overwrite") == 1
+    assert io.err.count("[bastion] intel add failed: refusing to overwrite") == 1
     assert db.read_text() == '{"a":1,}'  # untouched
     assert not (tmp_path / "db.json.tmp").exists()
 
@@ -47,7 +47,7 @@ def test_add_on_directory_store_is_clean_error(tmp_path, capsys):
                   capsys)
     assert rc == 2
     assert "Traceback" not in io.err
-    assert "[bluecell] intel add failed" in io.err
+    assert "[bastion] intel add failed" in io.err
     assert not (tmp_path / "adir.tmp").exists()
 
 
@@ -59,5 +59,5 @@ def test_import_on_corrupt_store_is_clean_error(tmp_path, capsys):
     rc, io = _run(["intel", "--intel-db", str(db), "import", str(feed)], capsys)
     assert rc == 2
     assert "Traceback" not in io.err
-    assert "[bluecell] intel import failed: refusing to overwrite" in io.err
+    assert "[bastion] intel import failed: refusing to overwrite" in io.err
     assert db.read_text() == "not json"

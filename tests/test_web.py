@@ -1,6 +1,6 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 import json
 import threading
 import urllib.request
@@ -9,7 +9,7 @@ import urllib.error
 import pytest
 
 from conftest import SAMPLES
-from bluecell.web.server import _State, _make_handler
+from bastion.web.server import _State, _make_handler
 from http.server import ThreadingHTTPServer
 
 
@@ -34,7 +34,7 @@ def _get(url):
 def test_index_served_with_watermark(server):
     status, body, _ = _get(server + "/")
     assert status == 200
-    assert "BlueCell" in body
+    assert "Bastion AI" in body
     assert "Harikishore Karunanithi" in body   # watermark in page
 
 
@@ -45,7 +45,7 @@ def test_api_report_shape(server):
     assert data["meta"]["author"] == "Harikishore Karunanithi"
     assert data["swarm"]["agent_count"] >= 10
     assert data["incidents"]
-    assert headers.get("X-BlueCell-Author") == "Harikishore Karunanithi"
+    assert headers.get("X-Bastion-Author") == "Harikishore Karunanithi"
 
 
 def test_ir_report_markdown_download(server):
@@ -67,7 +67,7 @@ def test_api_meta(server):
     status, body, _ = _get(server + "/api/meta")
     data = json.loads(body)
     assert data["author"] == "Harikishore Karunanithi"
-    assert "BLUECELL::AUTHOR" in data["watermark"]
+    assert "BASTION::AUTHOR" in data["watermark"]
 
 
 def test_static_js_and_css(server):
@@ -182,7 +182,7 @@ def test_bad_post_bodies_return_400(server):
 
 def test_static_sibling_directory_not_served(server, tmp_path):
     import os
-    from bluecell.web import server as srv
+    from bastion.web import server as srv
     sibling = srv._STATIC + "_x"
     os.makedirs(sibling, exist_ok=True)
     try:

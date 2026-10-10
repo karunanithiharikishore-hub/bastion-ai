@@ -1,8 +1,8 @@
 """Cisco ASA message ids beyond 106023/302013 parse to network or authentication events."""
 import pytest
 
-from bluecell.ingest.parsers import parse_syslog_line
-from bluecell.pipeline.attack import map_attack
+from bastion.ingest.parsers import parse_syslog_line
+from bastion.pipeline.attack import map_attack
 
 PFX = "Oct 10 10:00:00 fw01 "
 

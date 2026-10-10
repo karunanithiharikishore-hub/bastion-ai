@@ -1,13 +1,13 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """BUG-INJ-1 follow-up: the analyzer must hand apply_tier2_verdict the case-wide
 flagged events, so a Tier-2 dismissal of the real incident is downgraded even when
 the injection sits in an unrelated host's event."""
 import json
 import re
 
-import bluecell.analyzer as analyzer
+import bastion.analyzer as analyzer
 from test_r2_inj_1 import _case_with_unrelated_injection
 
 _RATIONALE = ("The injected kiosk7 text is an attempt to steer the analyst and does not "

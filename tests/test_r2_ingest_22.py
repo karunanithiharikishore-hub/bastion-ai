@@ -2,8 +2,8 @@
 so brute-force grouping and attacker-IP logic keyed on src_ip saw no source."""
 import json
 
-from bluecell.ingest.loader import ingest_file
-from bluecell.ingest.parsers import parse_edr
+from bastion.ingest.loader import ingest_file
+from bastion.ingest.parsers import parse_edr
 
 
 def test_logon_remote_ip_is_src_ip_and_local_ip_is_dst_ip(tmp_path):

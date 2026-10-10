@@ -7,9 +7,9 @@ from http.server import ThreadingHTTPServer
 import pytest
 
 from conftest import SAMPLES
-import bluecell.web.server as server_mod
-from bluecell.cli import build_parser, cmd_serve
-from bluecell.web.server import _State, _make_handler
+import bastion.web.server as server_mod
+from bastion.cli import build_parser, cmd_serve
+from bastion.web.server import _State, _make_handler
 
 
 def test_serve_parser_accepts_commander_limits():
@@ -20,9 +20,9 @@ def test_serve_parser_accepts_commander_limits():
 
 
 def test_serve_passes_commander_limits_to_server(monkeypatch):
-    import bluecell.web
+    import bastion.web
     seen = {}
-    monkeypatch.setattr(bluecell.web, "serve", lambda paths, **kw: seen.update(kw) or None)
+    monkeypatch.setattr(bastion.web, "serve", lambda paths, **kw: seen.update(kw) or None)
     args = build_parser().parse_args(
         ["serve", SAMPLES, "--max-agents", "3", "--max-commander-turns", "4",
          "--budget-seconds", "120"])

@@ -1,7 +1,7 @@
 """ITEM-30: CSV preamble lines are skipped, duplicate headers warn, and the
 delimiter is chosen from the header's field count (a ';' file with a comma in a
 header parses)."""
-from bluecell.ingest.loader import ingest_file
+from bastion.ingest.loader import ingest_file
 
 
 def test_preamble_line_before_header_is_skipped(tmp_path):

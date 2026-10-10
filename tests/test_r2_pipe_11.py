@@ -1,6 +1,6 @@
 """BUG-PIPE-11 -- IntelStore.add() must keep string keywords/techniques whole (not
 exploded into characters) and coerce non-string items to str so search() never crashes."""
-from bluecell.intel import IntelStore
+from bastion.intel import IntelStore
 
 
 def test_string_keywords_and_techniques_are_single_items(tmp_path):

@@ -4,7 +4,7 @@ be tagged instead of silently becoming now(). A zone name we do not know
 """
 from datetime import datetime, timezone
 
-from bluecell.models import Event, _parse_ts
+from bastion.models import Event, _parse_ts
 
 JAN1 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 

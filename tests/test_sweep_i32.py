@@ -2,7 +2,7 @@
 and read the common client/qname field names, so DNS events link to firewall events.
 Sample: a DGA-like domain resolved by a LAN client to a TEST-NET-3 address, followed by
 a 443 connection to that same address (likely real C2 beaconing)."""
-from bluecell.ingest.parsers import parse_dns
+from bastion.ingest.parsers import parse_dns
 
 
 def test_dns_client_and_answer_become_src_and_dst_ip():

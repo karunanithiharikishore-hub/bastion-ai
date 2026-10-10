@@ -2,8 +2,8 @@
 src_ip/dst_ip; Event.source comes from the device type, not from an address."""
 import os
 
-from bluecell.ingest.loader import ingest_file
-from bluecell.ingest.parsers import parse_auth, parse_network
+from bastion.ingest.loader import ingest_file
+from bastion.ingest.parsers import parse_auth, parse_network
 
 
 def test_firewall_csv_source_destination_addresses_map_to_ips(tmp_path):

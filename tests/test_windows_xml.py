@@ -1,6 +1,6 @@
 """Windows event XML (Save as XML / wevtutil /f:xml) is parsed as EDR events; DOCTYPE/ENTITY is refused."""
-from bluecell.ingest.loader import ingest_file
-from bluecell.pipeline.attack import map_attack
+from bastion.ingest.loader import ingest_file
+from bastion.pipeline.attack import map_attack
 
 NS = 'xmlns="http://schemas.microsoft.com/win/2004/08/events/event"'
 

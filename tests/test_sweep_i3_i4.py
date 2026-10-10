@@ -1,9 +1,9 @@
 from datetime import datetime, timezone
 
-from bluecell.models import Event
-from bluecell.pipeline.attack import map_attack
-from bluecell.pipeline.correlate import correlate
-from bluecell.report.rca import _assess_rules as assess
+from bastion.models import Event
+from bastion.pipeline.attack import map_attack
+from bastion.pipeline.correlate import correlate
+from bastion.report.rca import _assess_rules as assess
 
 _T = datetime(2026, 1, 1, tzinfo=timezone.utc)
 

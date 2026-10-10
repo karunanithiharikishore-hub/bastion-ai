@@ -6,11 +6,11 @@ from conftest import SAMPLES  # noqa: F401  (sets sys.path to src)
 import tempfile
 from datetime import datetime, timedelta, timezone
 
-from bluecell.models import Event
-from bluecell.agents.base import AgentContext
-from bluecell.agents.toolbox import SecurityToolbox, Blackboard
-from bluecell.pipeline import extract_iocs
-from bluecell.pipeline.correlate import Incident
+from bastion.models import Event
+from bastion.agents.base import AgentContext
+from bastion.agents.toolbox import SecurityToolbox, Blackboard
+from bastion.pipeline import extract_iocs
+from bastion.pipeline.correlate import Incident
 
 T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 

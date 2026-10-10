@@ -6,15 +6,15 @@ import urllib.request
 import pytest
 
 from conftest import SAMPLES
-from bluecell.llm.backbone import LLMBackbone
-from bluecell.web import server
+from bastion.llm.backbone import LLMBackbone
+from bastion.web import server
 
 
 @pytest.fixture(autouse=True)
 def _isolated_env(tmp_path, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setenv("BLUECELL_CACHE_DIR", str(tmp_path / "cache"))
-    monkeypatch.setenv("BLUECELL_RUNS_DIR", str(tmp_path / "runs"))
+    monkeypatch.setenv("BASTION_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("BASTION_RUNS_DIR", str(tmp_path / "runs"))
     # no `claude` CLI either: the backbone must be genuinely unavailable
     monkeypatch.setattr(LLMBackbone, "_cli_available", lambda self: False)
 

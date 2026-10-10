@@ -1,6 +1,6 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """Eval suite: case format, scoring, aggregation, runner, CLI. Offline only."""
 import ipaddress
 import json
@@ -10,8 +10,8 @@ import shutil
 
 import pytest
 
-from bluecell import evals
-from bluecell.cli import main
+from bastion import evals
+from bastion.cli import main
 
 CASES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                      "evals", "cases")
@@ -177,7 +177,7 @@ def test_cli_exit_code_and_json(tmp_path, capsys):
     rc = main(["eval", "--cases", CASES, "--llm", "off", "--no-trace", "--json", str(out)])
     assert rc == 0
     data = json.loads(out.read_text())
-    assert data["schema"] == "bluecell.eval/1" and data["summary"]["cases_failed"] == 0
+    assert data["schema"] == "bastion.eval/1" and data["summary"]["cases_failed"] == 0
     assert len(data["summary"]["skipped_requires_llm"]) == 5
     assert "accuracy" in capsys.readouterr().out
     rc = main(["eval", "--cases", CASES, "--case", "apt_chain_web01", "--no-trace"])

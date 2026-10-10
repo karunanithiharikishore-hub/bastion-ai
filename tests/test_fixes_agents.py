@@ -1,6 +1,6 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """Regression tests for agent-layer fixes (A1-A7, M1-M3). Offline: every
 `claude` here is a fake shell script on PATH."""
 import json
@@ -12,16 +12,16 @@ import sys
 import pytest
 
 from conftest import SAMPLES
-from bluecell.ingest import ingest_path
-from bluecell.models import Event
-from bluecell.pipeline import normalize, map_attack, correlate, extract_iocs, compress
-from bluecell.agents import AgentContext
-from bluecell.agents.grounding import evidence_index, check_text
-from bluecell.agents.mcp_server import handle
-from bluecell.agents.roles import JuniorSocAnalyst, SeniorSocAnalyst, ThreatHunter
-from bluecell.agents.runtime import SwarmSession, _run_cli
-from bluecell.agents.toolbox import Blackboard, SecurityToolbox
-from bluecell.llm.backbone import LLMBackbone, BackboneUnavailable
+from bastion.ingest import ingest_path
+from bastion.models import Event
+from bastion.pipeline import normalize, map_attack, correlate, extract_iocs, compress
+from bastion.agents import AgentContext
+from bastion.agents.grounding import evidence_index, check_text
+from bastion.agents.mcp_server import handle
+from bastion.agents.roles import JuniorSocAnalyst, SeniorSocAnalyst, ThreatHunter
+from bastion.agents.runtime import SwarmSession, _run_cli
+from bastion.agents.toolbox import Blackboard, SecurityToolbox
+from bastion.llm.backbone import LLMBackbone, BackboneUnavailable
 
 SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
 LIMIT = "You've hit your session limit · resets 5pm"
@@ -227,7 +227,7 @@ def test_a6_mcp_server_survives_bad_lines(tmp_path):
                              "params": {"name": None}}),
                  json.dumps({"jsonrpc": "2.0", "id": 2, "method": "ping"})]
         proc = subprocess.run(
-            [sys.executable, "-m", "bluecell.agents.mcp_server", "--session",
+            [sys.executable, "-m", "bastion.agents.mcp_server", "--session",
              session.dir, "--agent", "x", "--role", "r"],
             input="\n".join(lines) + "\n", capture_output=True, text=True,
             env=dict(os.environ, PYTHONPATH=SRC), timeout=60)

@@ -1,8 +1,8 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """ITEM-16: IDN and punycode-TLD domains are grounded; common-word TLDs after a period are not domains."""
-from bluecell.agents.grounding import evidence_index, check_text
+from bastion.agents.grounding import evidence_index, check_text
 
 PUNY = "xn--80ak6aa92e.xn--p1ai"      # an analyst-pasted punycode domain, no Unicode anywhere
 IDN = "пример.рф"
@@ -22,7 +22,7 @@ def test_unicode_idn_domain_is_flagged_as_punycode():
 
 
 def test_grounded_idn_domain_passes():
-    from bluecell.models import Event
+    from bastion.models import Event
     e = Event(ts="2026-10-03T22:00:00Z", source="dns", category="dns",
               action="dns_query", message=f"DNS query {IDN} from 10.0.0.5", src_ip="10.0.0.5")
     idx = evidence_index([e], [])

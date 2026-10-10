@@ -1,6 +1,6 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """BUG-CMD-5: a second verifier that files no agent verdict must not change
 Tier-1 statuses. Its rule verdict is discarded by merge_tier2 (the first
 verifier's agent verdict stands), so Tier-1 and Tier-2 must still agree."""

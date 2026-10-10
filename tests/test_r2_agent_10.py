@@ -1,9 +1,9 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """BUG-AGENT-10: grounding must cover IPv6 and treat .sh/.py/.so consistently."""
-from bluecell.models import Event
-from bluecell.agents.grounding import evidence_index, check_text
+from bastion.models import Event
+from bastion.agents.grounding import evidence_index, check_text
 
 
 def _ev(**kw):

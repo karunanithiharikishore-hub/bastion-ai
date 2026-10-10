@@ -1,7 +1,7 @@
 """ITEM-24: CEF/auditd/CLF/Squid/VPC/Zeek/UFW lines yield real IPs, ts and categories."""
 import pytest
 
-from bluecell.ingest.loader import ingest_file
+from bastion.ingest.loader import ingest_file
 
 TAB = "\t"
 CASES = {

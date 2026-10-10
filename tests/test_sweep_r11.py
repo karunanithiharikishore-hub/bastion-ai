@@ -24,7 +24,7 @@ sleep 120
 
 CHILD = """
 import sys
-from bluecell import cli
+from bastion import cli
 print("ready", flush=True)
 sys.exit(cli.main(["analyze", sys.argv[1], "--llm", "cli", "--orchestration", "commander",
                    "--no-cache", "--budget-seconds", "600", "-o", sys.argv[2]]))

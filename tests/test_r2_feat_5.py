@@ -1,7 +1,7 @@
 """BUG-FEAT-5: unlisted model versions must get no price (cost unknown)."""
 import pytest
 
-from bluecell import tracing
+from bastion import tracing
 
 
 @pytest.mark.parametrize("model", [
@@ -14,7 +14,7 @@ def test_unlisted_versions_have_no_price(model):
 
 
 def test_unlisted_version_usage_is_unknown_not_estimated(tmp_path, monkeypatch):
-    monkeypatch.setenv("BLUECELL_RUNS_DIR", str(tmp_path))
+    monkeypatch.setenv("BASTION_RUNS_DIR", str(tmp_path))
     rec = tracing.Tracer(persist=False).record_usage(
         {"input_tokens": 1000, "output_tokens": 1000}, model="claude-opus-4-9")
     assert rec["cost_usd"] is None and rec["cost_basis"] == "unknown"

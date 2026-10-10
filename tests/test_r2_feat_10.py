@@ -1,11 +1,11 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """BUG-FEAT-10: crashed eval runs count as wrong answers, never as passes."""
 import json
 import os
 
-from bluecell import evals
+from bastion import evals
 
 
 def _fake(files, **kw):

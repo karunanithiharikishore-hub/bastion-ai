@@ -8,12 +8,12 @@ import sys
 import time
 
 from conftest import SAMPLES
-from bluecell.ingest import ingest_path
-from bluecell.pipeline import normalize, map_attack, correlate, extract_iocs, compress
-from bluecell.agents import AgentContext
-from bluecell.agents.roles import ThreatHunter
-from bluecell.agents.runtime import SwarmSession, _run_cli
-from bluecell.llm.backbone import LLMBackbone
+from bastion.ingest import ingest_path
+from bastion.pipeline import normalize, map_attack, correlate, extract_iocs, compress
+from bastion.agents import AgentContext
+from bastion.agents.roles import ThreatHunter
+from bastion.agents.runtime import SwarmSession, _run_cli
+from bastion.llm.backbone import LLMBackbone
 
 
 def _alive(pid: int) -> bool:
@@ -46,8 +46,8 @@ def test_escaped_descendant_does_not_block_timeout(tmp_path, monkeypatch):
                    "sleep 25\n")
     exe.chmod(exe.stat().st_mode | stat.S_IEXEC)
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
-    monkeypatch.setenv("BLUECELL_CACHE_DIR", str(tmp_path / "cache"))
-    monkeypatch.setenv("BLUECELL_RUNS_DIR", str(tmp_path / "runs"))
+    monkeypatch.setenv("BASTION_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("BASTION_RUNS_DIR", str(tmp_path / "runs"))
 
     session = SwarmSession(_ctx(), seed=[])
     helpers = []

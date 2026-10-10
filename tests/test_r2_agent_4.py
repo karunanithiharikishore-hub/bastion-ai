@@ -4,8 +4,8 @@ import urllib.error
 
 import pytest
 
-from bluecell.llm import backbone as bb
-from bluecell.llm.backbone import LLMBackbone, BackboneUnavailable
+from bastion.llm import backbone as bb
+from bastion.llm.backbone import LLMBackbone, BackboneUnavailable
 
 
 def _err(code, retry_after=None):

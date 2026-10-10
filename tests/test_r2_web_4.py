@@ -6,8 +6,8 @@ from http.server import ThreadingHTTPServer
 
 import pytest
 
-from bluecell.web import server as web
-from bluecell.web.server import _State, _make_handler, _int_or
+from bastion.web import server as web
+from bastion.web.server import _State, _make_handler, _int_or
 
 
 @pytest.fixture

@@ -14,7 +14,7 @@ Drop PNGs here with these exact names so the README/GITHUB embeds resolve:
 
 1. Start the dashboard:
    ```bash
-   cd .. && bluecell serve samples --window 120 --open
+   cd .. && bastion serve samples --window 120 --open
    ```
 2. In the browser, use **Cmd+Shift+4** then **Space** to capture the window, or
    **Cmd+Shift+4** to select a region.

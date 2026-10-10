@@ -3,8 +3,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from bluecell.models import Event
-from bluecell.pipeline.correlate import correlate
+from bastion.models import Event
+from bastion.pipeline.correlate import correlate
 
 TS = datetime(2026, 1, 1, tzinfo=timezone.utc)
 

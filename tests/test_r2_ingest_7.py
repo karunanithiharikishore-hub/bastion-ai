@@ -2,7 +2,7 @@
 unparseable timestamps, while distinct unparsed lines stay distinct."""
 import time
 
-from bluecell.models import Event
+from bastion.models import Event
 
 
 def _unparsed(line):

@@ -1,8 +1,8 @@
 """BUG-INJ-10 follow-up: an all-dismissed case that holds injection-flagged events
 must still reach Tier-3 (the injection attempt is itself an indicator)."""
 from test_injection import _attack_ctx
-from bluecell.agents.orchestrator import SwarmOrchestrator
-from bluecell.agents.injection import is_flagged
+from bastion.agents.orchestrator import SwarmOrchestrator
+from bastion.agents.injection import is_flagged
 
 
 class DismissAllWithDenial:

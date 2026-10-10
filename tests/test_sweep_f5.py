@@ -4,9 +4,9 @@ import os
 
 import pytest
 
-from bluecell import evals
-from bluecell.cli import main
-from bluecell.llm.backbone import LLMBackbone
+from bastion import evals
+from bastion.cli import main
+from bastion.llm.backbone import LLMBackbone
 
 CASES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                      "evals", "cases")
@@ -15,8 +15,8 @@ CASES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 @pytest.fixture(autouse=True)
 def _isolated_env(tmp_path, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setenv("BLUECELL_CACHE_DIR", str(tmp_path / "cache"))
-    monkeypatch.setenv("BLUECELL_RUNS_DIR", str(tmp_path / "runs"))
+    monkeypatch.setenv("BASTION_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("BASTION_RUNS_DIR", str(tmp_path / "runs"))
     # no `claude` CLI either: the backbone must be genuinely unavailable
     monkeypatch.setattr(LLMBackbone, "_cli_available", lambda self: False)
 

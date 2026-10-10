@@ -1,8 +1,8 @@
 from conftest import SAMPLES
-from bluecell.ingest import ingest_path
-from bluecell.pipeline import normalize, map_attack, correlate, extract_iocs, compress
-from bluecell.pipeline.ioc import hunt_checklist
-from bluecell.models import Event
+from bastion.ingest import ingest_path
+from bastion.pipeline import normalize, map_attack, correlate, extract_iocs, compress
+from bastion.pipeline.ioc import hunt_checklist
+from bastion.models import Event
 
 
 def _loaded():
@@ -97,8 +97,8 @@ def test_compress_collapses_bursts_and_estimates_tokens():
 # ---- from-scratch review fixes ---------------------------------------------
 
 def test_correlate_links_ip_across_source_and_destination():
-    from bluecell.models import Event
-    from bluecell.pipeline import correlate
+    from bastion.models import Event
+    from bastion.pipeline import correlate
     login = Event(ts="2026-09-26T09:01:00Z", source="syslog", category="authentication",
                   action="login_failed", message="x", src_ip="203.0.113.66")
     fw = Event(ts="2026-09-26T09:05:00Z", source="firewall", category="network",
@@ -109,7 +109,7 @@ def test_correlate_links_ip_across_source_and_destination():
 
 
 def test_public_ip_check_handles_ipv6_and_special_ranges():
-    from bluecell.pipeline.ioc import is_public_ip
+    from bastion.pipeline.ioc import is_public_ip
     for ip in ("::1", "fe80::1", "fd00::1", "100.64.1.1", "224.0.0.1", "10.1.1.1",
                "172.20.0.1", "999.1.1.1", "not-an-ip"):
         assert not is_public_ip(ip), ip
@@ -118,8 +118,8 @@ def test_public_ip_check_handles_ipv6_and_special_ranges():
 
 
 def test_hash_counted_once_per_event_case_insensitive():
-    from bluecell.models import Event
-    from bluecell.pipeline import extract_iocs
+    from bastion.models import Event
+    from bastion.pipeline import extract_iocs
     h = "A3F5C1E2B4D6789012345678901234567890ABCDEF1234567890ABCDEF123456"
     e = Event(ts="2026-09-26T09:07:02Z", source="edr", category="process", action="x",
               message=f"dropped {h.lower()}", file_hash=h)
@@ -128,8 +128,8 @@ def test_hash_counted_once_per_event_case_insensitive():
 
 
 def test_routine_cron_run_is_not_a_scheduled_task_technique():
-    from bluecell.ingest.parsers import parse_syslog_line
-    from bluecell.pipeline import map_attack
+    from bastion.ingest.parsers import parse_syslog_line
+    from bastion.pipeline import map_attack
     run = parse_syslog_line("Oct  3 10:00:01 h1 CRON[42]: (root) CMD (run-parts /etc/cron.hourly)")
     edit = parse_syslog_line("Oct  3 10:00:01 h1 sudo[1]: bob : TTY=pts/0 ; PWD=/ ; USER=root ; COMMAND=/usr/bin/crontab -e")
     map_attack([run, edit])
@@ -138,7 +138,7 @@ def test_routine_cron_run_is_not_a_scheduled_task_technique():
 
 def test_storyline_phases_are_chronological():
     from conftest import SAMPLES
-    from bluecell.analyzer import analyze
+    from bastion.analyzer import analyze
     r = analyze([SAMPLES], use_llm=False)
     phases = r["incidents"][0]["storyline"]["structured"]["phases"]
     firsts = [p["first_seen"] for p in phases]

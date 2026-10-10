@@ -1,5 +1,5 @@
 """ITEM-9: `intel add --keywords "a, b"` must not store keywords with a leading space."""
-from bluecell.intel import IntelStore
+from bastion.intel import IntelStore
 
 
 def test_comma_space_keywords_are_stripped_and_searchable(tmp_path):

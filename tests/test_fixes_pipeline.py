@@ -2,14 +2,14 @@
 import json
 
 from conftest import SAMPLES
-from bluecell.analyzer import analyze
-from bluecell.ingest import ingest_path
-from bluecell.intel import IntelStore
-from bluecell.models import Event
-from bluecell.pipeline import normalize, map_attack, correlate, extract_iocs, compress
-from bluecell.pipeline.ioc import hunt_checklist
-from bluecell.report import render_markdown
-from bluecell.report.rca import deterministic_storyline, assess_incident
+from bastion.analyzer import analyze
+from bastion.ingest import ingest_path
+from bastion.intel import IntelStore
+from bastion.models import Event
+from bastion.pipeline import normalize, map_attack, correlate, extract_iocs, compress
+from bastion.pipeline.ioc import hunt_checklist
+from bastion.report import render_markdown
+from bastion.report.rca import deterministic_storyline, assess_incident
 
 T = "2026-09-26T09:%02d:00Z"
 
@@ -210,7 +210,7 @@ def test_p9_patient_zero_is_first_tagged_event():
 
 
 def test_p9_untagged_incident_uses_neutral_wording():
-    from bluecell.pipeline.correlate import Incident
+    from bastion.pipeline.correlate import Incident
     evs = [_ev(0, category="other", action="log", message="a", user="x"),
            _ev(1, category="other", action="log", message="b", user="x")]
     map_attack(evs)

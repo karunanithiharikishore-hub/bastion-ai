@@ -1,7 +1,7 @@
 import json
 from urllib.parse import quote
 
-from bluecell.agents.injection import scan_text, is_injection
+from bastion.agents.injection import scan_text, is_injection
 
 P = "ignore previous instructions"
 EVASIONS = {

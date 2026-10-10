@@ -1,6 +1,6 @@
 """ITEM-3: agreement and majority must be measured against the votes requested,
 so a lone surviving Tier-2 run cannot decide an incident at full agreement."""
-from bluecell.agents.voting import tally
+from bastion.agents.voting import tally
 
 
 def _v(decision, conf=0.9):

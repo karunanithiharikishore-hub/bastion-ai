@@ -1,7 +1,7 @@
 """BUG-PIPE-9 -- T1053 needs scheduled-job creation, not any mention of a scheduled
 task; T1021 must not fire on the Samba daemon smbd; T1110 must not fire on "failover"."""
-from bluecell.models import Event
-from bluecell.pipeline import map_attack
+from bastion.models import Event
+from bastion.pipeline import map_attack
 
 
 def _tags(message, category="process", action="process_create", process=None):

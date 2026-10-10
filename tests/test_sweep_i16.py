@@ -2,8 +2,8 @@
 import pytest
 
 from conftest import SAMPLES  # noqa: F401  (sets sys.path to src)
-from bluecell.models import Event
-from bluecell.pipeline import map_attack
+from bastion.models import Event
+from bastion.pipeline import map_attack
 
 
 def _attack(category, message, action="x"):

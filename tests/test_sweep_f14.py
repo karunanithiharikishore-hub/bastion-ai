@@ -1,6 +1,6 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """ITEM-14: runs chart must not say 'rules-only' when runs had unknown-cost LLM calls; unknown bars differ from $0 bars."""
 import json
 import re
@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-RUNS_JS = Path(__file__).resolve().parents[1] / "src/bluecell/web/static/runs.js"
+RUNS_JS = Path(__file__).resolve().parents[1] / "src/bastion/web/static/runs.js"
 HARNESS = """
 const els = {};
 globalThis.document = { getElementById(id) {

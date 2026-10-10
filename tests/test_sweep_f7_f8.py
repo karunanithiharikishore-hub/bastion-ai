@@ -3,8 +3,8 @@ ITEM-8: rules mode skips requires_llm cases and exits 0 when the rest pass."""
 import json
 import os
 
-from bluecell import evals
-from bluecell.cli import main
+from bastion import evals
+from bastion.cli import main
 
 CASES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                      "evals", "cases")

@@ -1,8 +1,8 @@
 import os
 
 from conftest import SAMPLES
-from bluecell.ingest import ingest_path, ingest_paths, detect_source
-from bluecell.ingest.parsers import parse_syslog_line, parse_dns, parse_cloud
+from bastion.ingest import ingest_path, ingest_paths, detect_source
+from bastion.ingest.parsers import parse_syslog_line, parse_dns, parse_cloud
 
 
 def test_detect_source_from_filename():
@@ -105,7 +105,7 @@ def test_syslog_user_skips_filler_words():
 
 def test_timestamps_epoch_text_utc_and_year_rollover():
     from datetime import datetime, timezone, timedelta
-    from bluecell.models import _parse_ts
+    from bastion.models import _parse_ts
     assert _parse_ts("1700000000").year == 2023                      # CSV epoch text
     assert _parse_ts("1700000000000") == _parse_ts(1700000000)       # millis text
     dt = _parse_ts("2026-10-03T22:00:00+05:30")
@@ -116,7 +116,7 @@ def test_timestamps_epoch_text_utc_and_year_rollover():
 
 
 def test_event_coerces_non_string_entities_and_bad_severity():
-    from bluecell.models import Event
+    from bastion.models import Event
     e = Event(ts="2026-10-03T22:00:00Z", source="edr", category="process", action="x",
               message=None, host=1234, user="  ", src_ip=["10.0.0.1"], severity=float("nan"))
     assert e.host == "1234" and e.user is None and isinstance(e.src_ip, str)
@@ -124,8 +124,8 @@ def test_event_coerces_non_string_entities_and_bad_severity():
 
 
 def test_dedup_keeps_events_that_differ_only_by_source_ip():
-    from bluecell.models import Event
-    from bluecell.pipeline import normalize
+    from bastion.models import Event
+    from bastion.pipeline import normalize
     a = Event(ts="2026-10-03T22:00:00Z", source="firewall", category="network", action="allow",
               message="c2 beacon", src_ip="10.0.0.11", dst_ip="198.51.100.7")
     b = Event(ts="2026-10-03T22:00:00Z", source="firewall", category="network", action="allow",
@@ -156,7 +156,7 @@ def test_cloudtrail_user_from_identity_and_assumed_role():
 
 
 def test_csv_with_byte_order_mark_keeps_timestamp(tmp_path):
-    from bluecell.ingest import ingest_path
+    from bastion.ingest import ingest_path
     p = tmp_path / "firewall.csv"
     p.write_bytes(b"\xef\xbb\xbftimestamp,action,src_ip,dst_ip,message\n"
                   b"2026-09-26T09:07:05Z,allow,10.0.0.11,203.0.113.90,dl\n")
@@ -164,7 +164,7 @@ def test_csv_with_byte_order_mark_keeps_timestamp(tmp_path):
 
 
 def test_json_lines_inside_a_log_file_are_structured(tmp_path):
-    from bluecell.ingest import ingest_path
+    from bastion.ingest import ingest_path
     p = tmp_path / "dns_export.log"
     p.write_text('{"timestamp": "2026-10-03T22:01:45Z", "query": "evil.top", "host": "h1"}\n'
                  "Oct  3 22:02:00 h1 sshd[1]: Failed password for root from 192.0.2.9 port 22 ssh2\n")

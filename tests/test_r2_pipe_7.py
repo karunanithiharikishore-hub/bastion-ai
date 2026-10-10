@@ -5,8 +5,8 @@ should tag T1486. Benign words containing those substrings must not.
 """
 from datetime import datetime, timezone
 
-from bluecell.models import Event
-from bluecell.pipeline import map_attack
+from bastion.models import Event
+from bastion.pipeline import map_attack
 
 T0 = datetime(2026, 9, 26, 9, 0, tzinfo=timezone.utc)
 

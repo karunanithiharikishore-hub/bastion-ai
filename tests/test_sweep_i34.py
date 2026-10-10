@@ -2,7 +2,7 @@
 text formats parse to their real instant, and _port accepts float/proto forms."""
 from datetime import datetime, timezone
 
-from bluecell.models import Event, _parse_ts_or_none, _port
+from bastion.models import Event, _parse_ts_or_none, _port
 
 UTC = timezone.utc
 

@@ -1,14 +1,14 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """ITEM-17: a domain with more than 11 labels is matched whole, not in part, and stays linear."""
 import time
 from types import SimpleNamespace
 
 import pytest
 
-from bluecell.agents.grounding import check_text, evidence_index
-from bluecell.models import Event
+from bastion.agents.grounding import check_text, evidence_index
+from bastion.models import Event
 
 
 def _name(n):

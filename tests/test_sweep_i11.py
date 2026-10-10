@@ -1,7 +1,7 @@
 """ITEM-11: parse_auth must read status/result/outcome/success so failed and
 successful logins are not identical."""
-from bluecell.ingest.parsers import parse_auth
-from bluecell.pipeline.attack import map_attack
+from bastion.ingest.parsers import parse_auth
+from bastion.pipeline.attack import map_attack
 
 
 def test_failed_login_variants_become_login_failed_and_tag_t1110():

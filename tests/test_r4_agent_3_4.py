@@ -6,10 +6,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from conftest import SAMPLES
-from bluecell.agents.analyst import ai_analyze
-from bluecell.agents.injection import outside_envelopes
-from bluecell.ingest import ingest_path
-from bluecell.pipeline import normalize, map_attack, extract_iocs
+from bastion.agents.analyst import ai_analyze
+from bastion.agents.injection import outside_envelopes
+from bastion.ingest import ingest_path
+from bastion.pipeline import normalize, map_attack, extract_iocs
 
 
 class BB:

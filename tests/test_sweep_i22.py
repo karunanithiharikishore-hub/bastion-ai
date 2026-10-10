@@ -3,7 +3,7 @@ line, hash, destination IP/port, file path and DNS query through parse_edr."""
 from conftest import SAMPLES  # noqa: F401  (sets sys.path to src)
 from datetime import datetime, timezone
 
-from bluecell.ingest.parsers import parse_edr
+from bastion.ingest.parsers import parse_edr
 
 SYSMON_1 = {"UtcTime": "2026-10-03 22:00:00.123", "EventID": 1, "Computer": "wks1",
             "Image": "C:\\Windows\\System32\\cmd.exe", "CommandLine": "cmd /c net user evil /add",

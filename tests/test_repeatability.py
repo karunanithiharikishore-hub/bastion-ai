@@ -1,6 +1,6 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """Repeatability & cost: run cache, Tier-2 self-consistency voting, Tier-1
 skipping, per-tier models, deterministic decoding. All offline: fake
 backbones and a fake ``claude`` script stand in for the model."""
@@ -13,19 +13,19 @@ from datetime import timedelta
 import pytest
 
 from conftest import SAMPLES, BENIGN_SAMPLES
-from bluecell import analyzer, cache as run_cache
-from bluecell.cli import build_parser
-from bluecell.ingest import ingest_path
-from bluecell.llm.backbone import LLMBackbone
-from bluecell.pipeline import normalize, map_attack, correlate, extract_iocs, compress
-from bluecell.agents import AgentContext, SwarmOrchestrator, toolbox
-from bluecell.agents import roles
-from bluecell.agents.budget import (
+from bastion import analyzer, cache as run_cache
+from bastion.cli import build_parser
+from bastion.ingest import ingest_path
+from bastion.llm.backbone import LLMBackbone
+from bastion.pipeline import normalize, map_attack, correlate, extract_iocs, compress
+from bastion.agents import AgentContext, SwarmOrchestrator, toolbox
+from bastion.agents import roles
+from bastion.agents.budget import (
     active_tier1_sources, plan_swarm, plan_before_after, TIER_MAX_TURNS,
 )
-from bluecell.agents.roles import JuniorSocAnalyst, SeniorSocAnalyst
-from bluecell.agents.runtime import SwarmSession
-from bluecell.agents.voting import tally
+from bastion.agents.roles import JuniorSocAnalyst, SeniorSocAnalyst
+from bastion.agents.runtime import SwarmSession
+from bastion.agents.voting import tally
 
 
 def _events(path=SAMPLES):
@@ -78,7 +78,7 @@ class VerdictBackbone(FakeBackbone):
 
     def __init__(self, path, model="fake-main"):
         super().__init__(model)
-        from bluecell.agents import injection
+        from bastion.agents import injection
         events = _events(path)
         injection.tag_events(events)
         self.incidents = correlate(events, window_minutes=60)

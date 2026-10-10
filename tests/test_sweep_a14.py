@@ -1,11 +1,11 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """ITEM-14 regression: defanged / Unicode-dot indicators must be checked, while
 ordinary prose that uses the word "dot" must not create IOCs."""
 import pytest
 
-from bluecell.agents.grounding import check_text, evidence_index
+from bastion.agents.grounding import check_text, evidence_index
 
 
 def _unverified(text):

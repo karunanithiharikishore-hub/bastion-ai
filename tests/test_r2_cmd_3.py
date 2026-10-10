@@ -1,13 +1,13 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """BUG-CMD-3: a large deploy_agents result must stay valid JSON, keep every
 worker's status, verdicts and the budget block; trimming is marked."""
 import json
 
 from test_autonomous_agents import _ctx
-from bluecell.agents.dispatch import CommanderToolbox
-from bluecell.agents.budget import MAX_TOOL_RESULT_CHARS
+from bastion.agents.dispatch import CommanderToolbox
+from bastion.agents.budget import MAX_TOOL_RESULT_CHARS
 
 
 def _batch(n_workers, n_findings, n_verdicts=0):

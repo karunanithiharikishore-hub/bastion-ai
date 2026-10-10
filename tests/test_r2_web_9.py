@@ -2,7 +2,7 @@
 time (exit 2, clean message) instead of a bind traceback or a silent coercion to 1 MB."""
 import pytest
 
-from bluecell.cli import build_parser
+from bastion.cli import build_parser
 
 SAMPLES = "samples"
 

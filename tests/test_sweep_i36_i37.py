@@ -4,9 +4,9 @@ authentication success, and the root identity's user is "root"."""
 import json
 
 from conftest import SAMPLES  # noqa: F401  (sets sys.path to src)
-from bluecell.ingest.loader import ingest_path
-from bluecell.ingest.parsers import parse_cloud
-from bluecell.pipeline import normalize, map_attack, correlate
+from bastion.ingest.loader import ingest_path
+from bastion.ingest.parsers import parse_cloud
+from bastion.pipeline import normalize, map_attack, correlate
 
 ROOT = {"type": "Root", "arn": "arn:aws:iam::123456789012:root"}
 

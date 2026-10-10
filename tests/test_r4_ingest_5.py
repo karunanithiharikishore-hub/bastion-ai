@@ -5,7 +5,7 @@ import tempfile
 
 import pytest
 
-from bluecell.ingest.loader import ingest_file
+from bastion.ingest.loader import ingest_file
 
 CASES = {
     "traffic.csv": ("Receive Time,Source address,Destination address,Application,Action,Device Name\n"

@@ -1,6 +1,6 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """BUG-FEAT-3 -- the run cache must not store a result whose model output was
 unusable: an analyst/reviewer answer that was not JSON, or a Tier-2 agent run
 that filed no verdict for an incident. Offline: fake backbones only."""
@@ -9,7 +9,7 @@ import json
 import pytest
 
 from conftest import SAMPLES
-from bluecell import analyzer, cache as run_cache
+from bastion import analyzer, cache as run_cache
 
 BB = object()   # any non-None backbone: the LLM was on
 

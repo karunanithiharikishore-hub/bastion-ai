@@ -2,9 +2,9 @@
 ConsoleLogin (a cloud_api event) must not be judged "no successful compromise"."""
 import json
 
-from bluecell.ingest.loader import ingest_path
-from bluecell.pipeline import normalize, map_attack, correlate
-from bluecell.report.rca import assess_incident
+from bastion.ingest.loader import ingest_path
+from bastion.pipeline import normalize, map_attack, correlate
+from bastion.report.rca import assess_incident
 
 
 def _ct(t, ok, name="ConsoleLogin"):

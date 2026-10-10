@@ -1,5 +1,5 @@
 """BUG-FEAT-6 (evals part): unknown eval cost is n/a or ">= x", never a fake 0.0000."""
-from bluecell import evals
+from bastion import evals
 
 CFG = {"backbone": "off", "repeat": 1}
 

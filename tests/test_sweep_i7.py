@@ -5,9 +5,9 @@ loop from one IP into 'password spray'.
 """
 from datetime import datetime, timedelta, timezone
 
-from bluecell.models import Event
-from bluecell.pipeline import correlate, map_attack, normalize
-from bluecell.report.rca import assess_incident
+from bastion.models import Event
+from bastion.pipeline import correlate, map_attack, normalize
+from bastion.report.rca import assess_incident
 
 T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 

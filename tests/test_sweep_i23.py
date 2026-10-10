@@ -3,7 +3,7 @@ keep ts, an IP pair and their summary text instead of falling to the EDR fallbac
 import json
 from conftest import SAMPLES  # noqa: F401  (sets sys.path to src)
 
-from bluecell.ingest.loader import ingest_file
+from bastion.ingest.loader import ingest_file
 
 RECS = {
     "okta": {"published": "2026-10-03T22:00:00.123Z", "eventType": "user.session.start",

@@ -1,6 +1,6 @@
 """ITEM-13: a usage limit that halted the commander session must stop the
 fixed-flow fallback from calling the model again. Fake backbone only."""
-from bluecell.llm.backbone import BackboneUnavailable
+from bastion.llm.backbone import BackboneUnavailable
 from test_autonomous_agents import _ctx
 from test_commander import SwarmModel, _orch
 

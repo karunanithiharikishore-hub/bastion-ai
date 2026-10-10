@@ -3,10 +3,10 @@ against the events that have no port at all."""
 import json
 
 from conftest import SAMPLES
-from bluecell.ingest import ingest_path
-from bluecell.pipeline import normalize, map_attack, correlate, extract_iocs, compress
-from bluecell.agents import AgentContext
-from bluecell.agents.toolbox import Blackboard, SecurityToolbox
+from bastion.ingest import ingest_path
+from bastion.pipeline import normalize, map_attack, correlate, extract_iocs, compress
+from bastion.agents import AgentContext
+from bastion.agents.toolbox import Blackboard, SecurityToolbox
 
 
 def _box(tmp_path):

@@ -5,8 +5,8 @@ fingerprint on every load (the volatile `added` stamp must not be hashed)."""
 import json
 import time
 
-from bluecell import cache
-from bluecell.intel.store import IntelStore
+from bastion import cache
+from bastion.intel.store import IntelStore
 
 
 def _write(tmp_path, data):

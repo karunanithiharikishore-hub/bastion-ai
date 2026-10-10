@@ -1,6 +1,6 @@
 """ITEM-28: a firewall-shaped CSV (src_ip/dst_ip/dst_port) must parse as network traffic
 even when its filename contains an earlier-listed hint (azure, cloud, auth, dns)."""
-from bluecell.ingest.loader import ingest_file
+from bastion.ingest.loader import ingest_file
 
 CSV = ("timestamp,src_ip,dst_ip,dst_port,action\n"
        "2026-10-03T22:00:00Z,203.0.113.5,10.0.0.5,22,deny\n")

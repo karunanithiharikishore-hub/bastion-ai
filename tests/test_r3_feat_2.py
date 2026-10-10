@@ -2,8 +2,8 @@
 The run-cache fingerprint must not include that guessed time, or the cache never hits."""
 import time
 
-from bluecell import cache
-from bluecell.models import Event
+from bastion import cache
+from bastion.models import Event
 
 
 def _event():

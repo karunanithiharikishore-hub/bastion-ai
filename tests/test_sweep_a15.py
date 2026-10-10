@@ -1,9 +1,9 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """ITEM-15: a title-cased known TLD after a lowercase label is a domain, not a sentence join."""
-from bluecell.models import Event
-from bluecell.agents.grounding import evidence_index, check_text
+from bastion.models import Event
+from bastion.agents.grounding import evidence_index, check_text
 
 
 def _idx():

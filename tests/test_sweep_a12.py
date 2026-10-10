@@ -1,6 +1,6 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """ITEM-12 regression: the verdict guard for dismissing an injection-flagged case must
 not accept keyword salad. The rationale has to say the injected text is ignored or does
 not change the call, not merely contain 'injection' and 'attacker'."""
@@ -9,7 +9,7 @@ import json
 import pytest
 
 from test_injection import _attack_ctx, _box
-import bluecell.agents.injection as inj
+import bastion.agents.injection as inj
 
 
 def _dismissal(tmp_path, rationale):

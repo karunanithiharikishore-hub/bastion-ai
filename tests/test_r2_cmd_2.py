@@ -1,16 +1,16 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """BUG-CMD-2: a voting Tier-2 deploy shares the budget left at its start.
 
 The K vote runs go one after another, so their timeouts must add up to no
 more than the time left: fewer votes when each run could not get
 MIN_WORKER_SECONDS.
 """
-import bluecell.agents.runtime as R
-from bluecell.agents import AgentContext, SwarmOrchestrator
-from bluecell.agents.commander import Dispatcher
-from bluecell.agents.runtime import SwarmSession
+import bastion.agents.runtime as R
+from bastion.agents import AgentContext, SwarmOrchestrator
+from bastion.agents.commander import Dispatcher
+from bastion.agents.runtime import SwarmSession
 
 from test_integration import _pipeline
 from conftest import SAMPLES

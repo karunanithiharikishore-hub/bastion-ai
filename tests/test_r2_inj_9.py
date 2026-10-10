@@ -1,13 +1,13 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """BUG-INJ-9: ordinary log text must not trip the injection detector, while the
 real attacks (including split and hidden phrases) stay detected."""
 from types import SimpleNamespace
 
 import pytest
 
-from bluecell.agents import injection as inj
+from bastion.agents import injection as inj
 
 # Ordinary operational text. "Dismiss this alert" (a Defender UI action) is left out:
 # it is the same phrase test_r2_inj_2 requires to be detected as a bare key.

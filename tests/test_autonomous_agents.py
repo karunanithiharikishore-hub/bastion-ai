@@ -1,6 +1,6 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """Autonomous Tier-3 agents: toolbox, grounding of submissions, MCP server,
 and the tool-use loop (driven by a scripted fake model, so tests are offline)."""
 import copy
@@ -10,14 +10,14 @@ import subprocess
 import sys
 
 from conftest import SAMPLES
-from bluecell.ingest import ingest_path
-from bluecell.pipeline import normalize, map_attack, correlate, extract_iocs, compress
-from bluecell.agents import AgentContext, SwarmOrchestrator
-from bluecell.agents.roles import (
+from bastion.ingest import ingest_path
+from bastion.pipeline import normalize, map_attack, correlate, extract_iocs, compress
+from bastion.agents import AgentContext, SwarmOrchestrator
+from bastion.agents.roles import (
     ThreatHunter, SecurityEngineer, JuniorSocAnalyst, SeniorSocAnalyst,
 )
-from bluecell.agents.runtime import SwarmSession
-from bluecell.agents.toolbox import Blackboard, SecurityToolbox, file_slug
+from bastion.agents.runtime import SwarmSession
+from bastion.agents.toolbox import Blackboard, SecurityToolbox, file_slug
 
 SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
 
@@ -87,13 +87,13 @@ def test_mcp_server_protocol(tmp_path):
              "params": {"name": "case_overview", "arguments": {}}},
         ]
         proc = subprocess.run(
-            [sys.executable, "-m", "bluecell.agents.mcp_server", "--session", session.dir,
+            [sys.executable, "-m", "bastion.agents.mcp_server", "--session", session.dir,
              "--agent", "Security Engineer / Architect", "--role", "r"],
             input="\n".join(map(json.dumps, msgs)) + "\n", capture_output=True,
             text=True, env=dict(os.environ, PYTHONPATH=SRC), timeout=60)
         replies = {r["id"]: r for r in map(json.loads, proc.stdout.splitlines())}
         assert set(replies) == {1, 2, 3}           # notification gets no reply
-        assert replies[1]["result"]["serverInfo"]["name"] == "bluecell"
+        assert replies[1]["result"]["serverInfo"]["name"] == "bastion"
         names = {t["name"] for t in replies[2]["result"]["tools"]}
         assert {"search_events", "submit_finding", "read_board"} <= names
         overview = json.loads(replies[3]["result"]["content"][0]["text"])
@@ -262,7 +262,7 @@ def test_benign_sample_is_a_real_false_positive_test_case():
 
 
 def test_headline_follows_tier2_agent_verdict():
-    from bluecell.report.rca import apply_tier2_verdict
+    from bastion.report.rca import apply_tier2_verdict
     rule = {"level": "likely-malicious", "confidence": 0.8, "headline": "Likely a real attack.",
             "why": "rules", "recommended_checks": ["isolate"]}
     dismissed = apply_tier2_verdict(rule, {"status": "dismissed", "confidence": 0.85,
@@ -279,9 +279,9 @@ def test_headline_follows_tier2_agent_verdict():
 def test_analyzer_headline_uses_agent_dismissal(monkeypatch):
     """End to end through analyze(): an agent dismissal flips the headline, and the
     markdown report says the rule score was overruled."""
-    import bluecell.analyzer as analyzer
+    import bastion.analyzer as analyzer
     from conftest import BENIGN_SAMPLES
-    from bluecell.report.render import render_markdown
+    from bastion.report.render import render_markdown
 
     rules_only = analyzer.analyze([BENIGN_SAMPLES], use_llm=False)
     assert rules_only["incidents"][0]["verdict"]["level"] == "likely-malicious"
@@ -341,13 +341,13 @@ def test_tier3_skipped_when_tier2_agent_dismisses_everything():
     assert {r["tier"] for r in out["agent_runs"]} == {1, 2}
     assert all(a["tier"] != 3 for a in out["roster"])
     assert model.roles_called == {"Tier-1 SOC Analyst", "Tier-2 SOC Analyst"}
-    from bluecell.report.render import _render_swarm
+    from bastion.report.render import _render_swarm
     assert "Tier-3 specialists skipped" in _render_swarm(out)
 
 
 def test_rule_only_dismissal_still_runs_specialists():
     """Without a model, a rule-based Tier-2 dismissal is advisory: Tier-3 still runs."""
-    from bluecell.models import Event
+    from bastion.models import Event
     e = Event(ts="2026-09-26T09:00:00Z", source="syslog", category="other",
               action="log", message="benign", host="h1")
     e.attack.append("T1059")
@@ -361,9 +361,9 @@ def test_rule_only_dismissal_still_runs_specialists():
 
 def test_benign_verdict_reframes_the_summary(monkeypatch):
     """A likely-benign final verdict must not leave 'The attacker ...' wording."""
-    import bluecell.analyzer as analyzer
+    import bastion.analyzer as analyzer
     from conftest import BENIGN_SAMPLES
-    from bluecell.report.render import render_markdown
+    from bastion.report.render import render_markdown
 
     attack = analyzer.analyze([BENIGN_SAMPLES], use_llm=False)
     asum = attack["incidents"][0]["storyline"]["structured"]["attack_summary"]
@@ -441,7 +441,7 @@ def test_overall_verdict_is_the_most_serious_incident(monkeypatch, tmp_path):
     """Dismissing the top-scoring incident must not make the headline 'benign'
     while another incident is still open."""
     import shutil
-    import bluecell.analyzer as analyzer
+    import bastion.analyzer as analyzer
     from conftest import BENIGN_SAMPLES
     for d in (SAMPLES, BENIGN_SAMPLES):
         for name in os.listdir(d):

@@ -4,8 +4,8 @@ events. Also: Sentinel SigninLogs IPAddress -> src_ip (already served by the cas
 "ipAddress" alias; guard test only)."""
 import json
 
-from bluecell.ingest.loader import ingest_file
-from bluecell.ingest.parsers import parse_azure_signin
+from bastion.ingest.loader import ingest_file
+from bastion.ingest.parsers import parse_azure_signin
 
 _NET = {"Timestamp": "2026-01-01T00:00:00Z", "DeviceName": "pc1",
         "ActionType": "ConnectionSuccess", "RemoteIP": "8.8.8.8", "RemotePort": 443,

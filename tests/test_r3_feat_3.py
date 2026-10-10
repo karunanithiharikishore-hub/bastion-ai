@@ -2,7 +2,7 @@
 import json
 import os
 
-from bluecell import tracing
+from bastion import tracing
 
 
 def _mk(base, rid, summary, trace=None):
@@ -45,6 +45,6 @@ def test_load_run_non_object_summary_returns_none(tmp_path):
 
 def test_input_label_relative_files_match_dashboard():
     # R3-FEAT-4: relative multi-file inputs were labelled "/ (2 files)".
-    from bluecell.tracing import input_label
+    from bastion.tracing import input_label
     assert input_label(["a.log", "b.log"]) == "a.log +1"
     assert input_label(["/x/logs/a.log", "/x/logs/b.log"]) == "logs/ (2 files)"

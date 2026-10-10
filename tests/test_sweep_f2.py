@@ -1,6 +1,6 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """Sweep F2 (ITEM-2, 16, 18, 20): malformed targets answer, dashboard CSP/frame headers,
 socket timeout and per-slot staging quota, stale staging dirs swept at startup."""
 import os
@@ -16,8 +16,8 @@ from http.server import ThreadingHTTPServer
 import pytest
 
 from conftest import SAMPLES
-from bluecell.web import server
-from bluecell.web.server import _State, _make_handler
+from bastion.web import server
+from bastion.web.server import _State, _make_handler
 
 
 @pytest.fixture()
@@ -129,8 +129,8 @@ def _dead_pid():
 
 def _make_leftovers(tmp):
     dead = _dead_pid()
-    stale = [tmp / f"bluecell_stage_p{dead}_abcd1234", tmp / f"bluecell_upload_p{dead}_efgh5678"]
-    live = tmp / f"bluecell_stage_p{os.getpid()}_ijkl9012"
+    stale = [tmp / f"bastion_stage_p{dead}_abcd1234", tmp / f"bastion_upload_p{dead}_efgh5678"]
+    live = tmp / f"bastion_stage_p{os.getpid()}_ijkl9012"
     other = tmp / "keep_me"
     for d in (*stale, live, other):
         d.mkdir()

@@ -1,7 +1,7 @@
 """ITEM-23: listed model ids (and their dated forms) must get a list price."""
 import pytest
 
-from bluecell import tracing
+from bastion import tracing
 
 
 @pytest.mark.parametrize("model, price", [
@@ -23,12 +23,12 @@ def test_listed_and_dated_ids_have_price(model, price):
     ("claude-opus-4-5-20251101", (5.00, 25.00)),
 ])
 def test_verified_prices(model, price):
-    from bluecell import tracing
+    from bastion import tracing
     assert tracing.price_for(model) == price
 
 
 def test_haiku_5_5_long_prompt_tier():
-    from bluecell import tracing
+    from bastion import tracing
     short = tracing.estimate_cost({"input_tokens": 100_000, "output_tokens": 1_000_000}, "claude-haiku-5-5")
     assert short == round((100_000 * 0.10 + 1_000_000 * 0.50) / 1e6, 6)
     # over 100k prompt tokens (cache reads count): the whole call bills at $0.50/$2.50

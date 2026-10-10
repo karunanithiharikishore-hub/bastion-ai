@@ -1,12 +1,12 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """ITEM-10 regression: submit_finding rejects over-long titles and recommended_action
 (no silent cut after grounding), and the duplicate check ignores whitespace/case."""
 import json
 
 from test_autonomous_agents import _ctx
-from bluecell.agents.toolbox import Blackboard, SecurityToolbox
+from bastion.agents.toolbox import Blackboard, SecurityToolbox
 
 
 def _box(tmp_path):

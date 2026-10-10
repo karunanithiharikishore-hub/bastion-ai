@@ -2,7 +2,7 @@
 just because the username or host contains "fail"."""
 import pytest
 
-from bluecell.ingest.parsers import parse_syslog_line
+from bastion.ingest.parsers import parse_syslog_line
 
 
 @pytest.mark.parametrize("user", ["failover", "testfail", "failsafe", "failed"])

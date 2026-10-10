@@ -1,10 +1,10 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """BUG-INJ-3: invisible default-ignorable code points must not split keywords."""
 import pytest
 
-from bluecell.agents import injection as inj
+from bastion.agents import injection as inj
 
 INVISIBLE = [
     "­",        # soft hyphen

@@ -1,7 +1,7 @@
 """ITEM-8 follow-up: parse_auth must not turn a generic row ("service failed") into a
 sign-in failure. Only logon/auth wording or an explicit status field does."""
-from bluecell.ingest.parsers import parse_auth
-from bluecell.pipeline.attack import map_attack
+from bastion.ingest.parsers import parse_auth
+from bastion.pipeline.attack import map_attack
 
 BASE = {"timestamp": "2026-10-03T22:00:00Z", "host": "web01"}
 

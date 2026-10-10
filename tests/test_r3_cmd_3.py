@@ -8,9 +8,9 @@ import time
 
 CHILD = """
 import sys, types
-from bluecell import cli
-from bluecell.agents import runtime
-from bluecell.agents.roles import JuniorSocAnalyst
+from bastion import cli
+from bastion.agents import runtime
+from bastion.agents.roles import JuniorSocAnalyst
 def cmd(args):
     s = runtime.SwarmSession.__new__(runtime.SwarmSession)
     s.dir, s.procs, s.closed = sys.argv[1], set(), False

@@ -1,12 +1,12 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """ITEM-15: a batch with many verdicts must reach the commander with every worker
 in ``results`` (degraded, never emptied), and say how many verdicts it did not show."""
 import json
 
 from test_autonomous_agents import _ctx
-from bluecell.agents.dispatch import CommanderToolbox
+from bastion.agents.dispatch import CommanderToolbox
 
 
 def _verdicts(n, worker):

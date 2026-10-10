@@ -1,7 +1,7 @@
 """ITEM-12: generic EDR and ECS auth failures must be category authentication
 with action login_failed, so attack.map_attack tags T1110."""
-from bluecell.ingest.parsers import parse_edr
-from bluecell.pipeline.attack import map_attack
+from bastion.ingest.parsers import parse_edr
+from bastion.pipeline.attack import map_attack
 
 
 def _tagged(rec):

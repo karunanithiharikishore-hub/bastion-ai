@@ -1,7 +1,7 @@
 """ITEM-40: Windows 4776 (NTLM) / 4768 / 4769 outcomes come from Status; 4740 is a lockout (T1110)."""
-from bluecell.ingest.loader import ingest_file
-from bluecell.ingest.parsers import parse_edr
-from bluecell.pipeline.attack import map_attack
+from bastion.ingest.loader import ingest_file
+from bastion.ingest.parsers import parse_edr
+from bastion.pipeline.attack import map_attack
 
 HDR = "TimeGenerated [UTC],Computer,EventID,Account,Activity,IpAddress,Status,LogonType"
 

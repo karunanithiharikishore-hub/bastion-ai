@@ -5,7 +5,7 @@ import json
 import pytest
 
 from test_injection import _attack_ctx, _box
-import bluecell.agents.injection as inj
+import bastion.agents.injection as inj
 
 
 def _dismissal(tmp_path, rationale):

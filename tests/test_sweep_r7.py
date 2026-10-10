@@ -5,7 +5,7 @@ No model calls: use_llm=False, no backbone."""
 import pytest
 
 from conftest import BENIGN_SAMPLES
-from bluecell import analyzer
+from bastion import analyzer
 
 
 @pytest.mark.parametrize("kwargs, match", [

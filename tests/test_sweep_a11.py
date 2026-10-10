@@ -1,13 +1,13 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """ITEM-11 regression: a dismissed verdict never records an explicit severity above
 low, so it cannot raise the tied-severity vote in voting.py."""
 import json
 
 from test_autonomous_agents import _box
-from bluecell.agents.toolbox import Blackboard, SecurityToolbox
-from bluecell.agents.roles import SeniorSocAnalyst
+from bastion.agents.toolbox import Blackboard, SecurityToolbox
+from bastion.agents.roles import SeniorSocAnalyst
 
 
 def test_dismissed_verdict_ignores_explicit_critical_severity(tmp_path):

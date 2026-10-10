@@ -5,10 +5,10 @@ import json
 import pytest
 
 from conftest import SAMPLES
-from bluecell.agents import AgentContext
-from bluecell.agents.toolbox import BASE_TOOLS, Blackboard, SecurityToolbox
-from bluecell.ingest import ingest_path
-from bluecell.pipeline import normalize, map_attack, correlate, extract_iocs, compress
+from bastion.agents import AgentContext
+from bastion.agents.toolbox import BASE_TOOLS, Blackboard, SecurityToolbox
+from bastion.ingest import ingest_path
+from bastion.pipeline import normalize, map_attack, correlate, extract_iocs, compress
 
 RATIONALE_MAX = 4000  # the cap the bug report asks for
 

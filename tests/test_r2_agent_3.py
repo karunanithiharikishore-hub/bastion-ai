@@ -1,6 +1,6 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """BUG-AGENT-3: timeout/OSError text must not embed the claude argv (system
 prompt), and the usage-limit halt must only match the CLI's own error text.
 Offline: every `claude` here is a fake shell script on PATH."""
@@ -10,13 +10,13 @@ import stat
 import pytest
 
 from conftest import SAMPLES
-from bluecell.ingest import ingest_path
-from bluecell.pipeline import normalize, map_attack, correlate, extract_iocs, compress
-from bluecell.agents import AgentContext
-from bluecell.agents.roles import ThreatHunter
-from bluecell.agents.runtime import SwarmSession, _LIMIT_RE, _run_cli
-from bluecell.llm import backbone as backbone_mod
-from bluecell.llm.backbone import LLMBackbone, BackboneUnavailable
+from bastion.ingest import ingest_path
+from bastion.pipeline import normalize, map_attack, correlate, extract_iocs, compress
+from bastion.agents import AgentContext
+from bastion.agents.roles import ThreatHunter
+from bastion.agents.runtime import SwarmSession, _LIMIT_RE, _run_cli
+from bastion.llm import backbone as backbone_mod
+from bastion.llm.backbone import LLMBackbone, BackboneUnavailable
 
 SECRET_DIRECTIVE = "check whether the login endpoint lacks rate limiting (password spraying)"
 

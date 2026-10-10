@@ -7,8 +7,8 @@ import urllib.error
 
 import pytest
 
-from bluecell.llm import backbone as bb
-from bluecell.llm.backbone import BackboneUnavailable, LLMBackbone
+from bastion.llm import backbone as bb
+from bastion.llm.backbone import BackboneUnavailable, LLMBackbone
 
 
 class _Resp:

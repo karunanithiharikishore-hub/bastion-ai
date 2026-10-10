@@ -1,13 +1,13 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """ITEM-18 regression: usernames and file names that appear in the logs must be
 grounded on the AI analyst path, not only on the toolbox path."""
 import json
 
-from bluecell.agents.analyst import ai_analyze
-from bluecell.agents.grounding import check_text, evidence_index
-from bluecell.models import Event
+from bastion.agents.analyst import ai_analyze
+from bastion.agents.grounding import check_text, evidence_index
+from bastion.models import Event
 
 
 def _ev(**kw):

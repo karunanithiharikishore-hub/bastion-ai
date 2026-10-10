@@ -6,8 +6,8 @@ import json
 
 import pytest
 
-import bluecell.agents.toolbox as toolbox
-import bluecell.agents.injection as inj
+import bastion.agents.toolbox as toolbox
+import bastion.agents.injection as inj
 from test_injection import _attack_ctx, _box
 
 

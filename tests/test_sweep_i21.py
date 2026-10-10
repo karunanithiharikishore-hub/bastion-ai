@@ -1,7 +1,7 @@
 """ITEM-21: Elasticsearch hits (`_source`) and Splunk exports (`result`/`results`) must ingest as events."""
 import json
 
-from bluecell.ingest.loader import ingest_file
+from bastion.ingest.loader import ingest_file
 
 SRC = {"@timestamp": "2026-10-03T22:00:00Z", "host": {"name": "DC01"}, "user": {"name": "admin"},
        "source": {"ip": "203.0.113.9"}, "event": {"action": "logon-failed"},

@@ -5,8 +5,8 @@ faking os.name; no real process is started and no model is called."""
 import os
 import subprocess
 
-from bluecell.agents import runtime
-from bluecell.llm import backbone
+from bastion.agents import runtime
+from bastion.llm import backbone
 
 
 class _FakeProc:

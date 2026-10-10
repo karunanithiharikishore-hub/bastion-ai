@@ -3,7 +3,7 @@ import os, signal, subprocess, sys
 
 CHILD = """
 import sys, time
-from bluecell import cli
+from bastion import cli
 cli.provenance.enforce = lambda **k: None
 def blocked(args):
     print("ready", flush=True)
@@ -28,4 +28,4 @@ def test_sweep_r12_ctrl_c_one_line_exit_130():
             p.wait()
     assert p.returncode == 130
     assert b"Traceback" not in err
-    assert err.count(b"[bluecell] interrupted") == 1
+    assert err.count(b"[bastion] interrupted") == 1

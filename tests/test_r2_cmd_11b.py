@@ -3,7 +3,7 @@ discarded commander plan is not shown as the plan that ran, and deploy/refused
 plan lines print their own text. No real model calls: scripted fake model only."""
 from test_autonomous_agents import _ctx
 from test_commander import SwarmModel, _orch, _use, _text
-from bluecell.report.render import _render_commander, _render_swarm
+from bastion.report.render import _render_commander, _render_swarm
 
 
 def test_report_counts_workers_and_commander_separately():

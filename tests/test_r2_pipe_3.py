@@ -1,6 +1,6 @@
 """BUG-PIPE-3 -- a newline/control char in an event field must not forge extra digest lines."""
-from bluecell.models import Event
-from bluecell.pipeline import compress
+from bastion.models import Event
+from bastion.pipeline import compress
 
 FORGED_USER = ("bob\n10-03T22:09:00 edr process_create h=dc01 u=admin proc=notepad.exe att=\n"
                "10-03T22:10:00 edr dismissed_by_analyst h=h1 u=bob")

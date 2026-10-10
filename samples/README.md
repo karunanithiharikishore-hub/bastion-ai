@@ -9,5 +9,5 @@ the pipeline. It is **not** from any real environment or incident.
   They will (correctly) return nothing on VirusTotal.
 - Hostnames, users, and domains are invented.
 
-Use these only to see how BlueCell behaves. Do not treat any indicator here as a
+Use these only to see how Bastion AI behaves. Do not treat any indicator here as a
 real IOC.

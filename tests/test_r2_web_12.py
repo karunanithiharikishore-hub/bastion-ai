@@ -1,13 +1,13 @@
 """BUG-WEB-12 / BUG-WEB-6 (cli part) / BUG-FEAT-6 (runs column): CLI regressions."""
 import pytest
 
-from bluecell import cli, tracing
+from bastion import cli, tracing
 
 USAGE = {"input_tokens": 1000, "output_tokens": 1000}
 
 
 def test_eval_zero_cases_exits_2_and_prints_no_none_duration(tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("BLUECELL_RUNS_DIR", str(tmp_path / "runs"))
+    monkeypatch.setenv("BASTION_RUNS_DIR", str(tmp_path / "runs"))
     empty = tmp_path / "cases"
     empty.mkdir()
     rc = cli.main(["eval", "--cases", str(empty), "--no-trace", "--llm", "off"])

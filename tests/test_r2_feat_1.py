@@ -2,8 +2,8 @@
 usage in their own run's trace. No real model calls: fake agents only."""
 import threading
 
-from bluecell import tracing
-from bluecell.agents.orchestrator import SwarmOrchestrator
+from bastion import tracing
+from bastion.agents.orchestrator import SwarmOrchestrator
 
 N_AGENTS = 6
 

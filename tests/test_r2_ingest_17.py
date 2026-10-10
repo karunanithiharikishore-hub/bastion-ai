@@ -1,4 +1,4 @@
-from bluecell.ingest.loader import ingest_file
+from bastion.ingest.loader import ingest_file
 
 
 def test_stray_leading_quote_does_not_swallow_following_rows(tmp_path, capsys):

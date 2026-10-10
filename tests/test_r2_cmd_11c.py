@@ -1,7 +1,7 @@
 """BUG-CMD-11 follow-up 2: meta.agents_deployed counts worker agents only (the
 commander is excluded), matching the report and dashboard. No real model calls:
 run_swarm is stubbed with a canned swarm result."""
-import bluecell.analyzer as analyzer
+import bastion.analyzer as analyzer
 from conftest import BENIGN_SAMPLES
 from test_repeatability import FakeBackbone
 

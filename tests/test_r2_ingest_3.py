@@ -2,8 +2,8 @@
 Also BUG-INGEST-6 follow-up: Azure Activity eventTimestamp is read as ts."""
 import datetime as dt
 
-from bluecell.ingest.loader import ingest_file
-from bluecell.ingest.parsers import parse_azure_signin, parse_cloud
+from bastion.ingest.loader import ingest_file
+from bastion.ingest.parsers import parse_azure_signin, parse_cloud
 
 
 def _sentinel_csv(tmp_path, result_type, desc):

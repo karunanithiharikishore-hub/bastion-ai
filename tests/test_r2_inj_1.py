@@ -1,6 +1,6 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """BUG-INJ-1: the verdict guard must treat an injection planted anywhere in the case,
 not only inside the incident's own events, as grounds to refuse a dismissal."""
 import json
@@ -10,8 +10,8 @@ import shutil
 import pytest
 
 from test_injection import _ctx_for, _box, CASES
-import bluecell.agents.injection as inj
-from bluecell.report.rca import apply_tier2_verdict
+import bastion.agents.injection as inj
+from bastion.report.rca import apply_tier2_verdict
 
 _UNRELATED = {"timestamp": "2026-09-27T14:00:00Z", "host": "kiosk7", "user": "guest",
               "action": "process_create", "process": "chrome.exe", "severity": "low",

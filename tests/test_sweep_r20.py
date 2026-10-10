@@ -3,7 +3,7 @@ import os
 
 import pytest
 
-from bluecell import cli
+from bastion import cli
 
 
 @pytest.fixture

@@ -11,10 +11,10 @@ from pathlib import Path
 
 import pytest
 
-from bluecell.web.server import _State, _make_handler
+from bastion.web.server import _State, _make_handler
 
 ROOT = Path(__file__).resolve().parents[1]
-APP_JS = ROOT / "src/bluecell/web/static/app.js"
+APP_JS = ROOT / "src/bastion/web/static/app.js"
 SAMPLE_LINE = (ROOT / "samples/dns.jsonl").read_bytes().split(b"\n", 1)[0] + b"\n"
 CAP = 1 << 20  # --max-upload-mb 1
 

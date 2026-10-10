@@ -1,13 +1,13 @@
 # GitHub listing — copy/paste
 
 ## Repo name
-`bluecell`
+`bastion`
 
 ## About (short description — GitHub "About" field)
 > Local, grounded AI pipeline that turns gigabytes of messy multi-source security
 > logs (EDR, syslog, DNS, firewall, Microsoft 365 / Entra) into a repeatable
 > incident analysis — verdict, ATT&CK storyline, IOCs, and an IR report. The LLM
-> reasons; BlueCell ingests at scale and fact-checks the output so it can't invent IOCs.
+> reasons; Bastion AI ingests at scale and fact-checks the output so it can't invent IOCs.
 
 ## Screenshots (paste into README)
 
@@ -46,7 +46,7 @@ security-tools  python  log-analysis  bec  ir-report
 
 **For lean teams and startups with no SOC.** Most startups and SMBs have no blue
 team, no SIEM, and no way to tell whether that strange Microsoft 365 sign-in was
-an attack. BlueCell lets **one engineer, a founder, or an MSP** export their
+an attack. Bastion AI lets **one engineer, a founder, or an MSP** export their
 Entra / M365 logs, run it **locally**, and get a **grounded verdict + an IR
 report** — without standing up a SOC or pasting sensitive logs into a chatbot.
 
@@ -58,7 +58,7 @@ out weeks later. For teams that already have a SOC, it's an automation/triage
 layer, not a new source of truth.
 
 ## Pinned "why this exists" blurb (optional, for profile README or post)
-> BlueCell started as a test: how close can an AI system get to a human analyst's
+> Bastion AI started as a test: how close can an AI system get to a human analyst's
 > RCA of a real Microsoft 365 compromise? My first version confidently called a
 > genuine breach "benign." Fixing that — making the agents actually reason,
 > surfacing the right evidence (device-code flow, Unified Audit Log ops, inbox
@@ -66,7 +66,7 @@ layer, not a new source of truth.
 > is really about. The commit history shows the whole arc.
 
 ## Suggested first Release (v0.13.0) notes
-**BlueCell v0.13.0 — first public release**
+**Bastion AI v0.13.0 — first public release**
 
 A local, read-only pipeline that lets an LLM investigate large multi-source log
 sets with grounding and repeatability.

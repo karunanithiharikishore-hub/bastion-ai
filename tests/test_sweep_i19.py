@@ -4,9 +4,9 @@ IPv4-mapped IPv6 unwraps to dotted IPv4, IPv6 is the ipaddress compressed lowerc
 form, and the zone id (fe80::1%eth0) is dropped."""
 import pytest
 
-from bluecell.ingest.parsers import _clean_ip, parse_ual
-from bluecell.models import Event
-from bluecell.pipeline.correlate import correlate
+from bastion.ingest.parsers import _clean_ip, parse_ual
+from bastion.models import Event
+from bastion.pipeline.correlate import correlate
 
 
 @pytest.mark.parametrize("raw,expected", [

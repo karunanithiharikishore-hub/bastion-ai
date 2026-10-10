@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from bluecell.agents.budget import TIER_MAX_TURNS, plan_swarm
+from bastion.agents.budget import TIER_MAX_TURNS, plan_swarm
 
 
 def _ev(source):

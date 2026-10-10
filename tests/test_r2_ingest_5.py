@@ -1,4 +1,4 @@
-from bluecell.ingest.loader import ingest_file
+from bastion.ingest.loader import ingest_file
 
 
 def test_unquoted_comma_in_recipient_status_is_rejoined(tmp_path):

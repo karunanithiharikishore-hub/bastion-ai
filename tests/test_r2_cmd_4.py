@@ -4,8 +4,8 @@ import stat
 import time
 import types
 
-from bluecell.agents import runtime
-from bluecell.agents.roles import JuniorSocAnalyst
+from bastion.agents import runtime
+from bastion.agents.roles import JuniorSocAnalyst
 
 
 def _alive(pid):

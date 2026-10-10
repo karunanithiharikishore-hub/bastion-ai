@@ -10,7 +10,7 @@ files — Entra interactive/non-interactive sign-ins, the Unified Audit Log
 paste that into a chat window, and clicking through it by hand takes a day.
 
 I wanted to see how close an AI system could get to a human analyst's
-root-cause analysis — so I built **BlueCell**, a local pipeline that ingests
+root-cause analysis — so I built **Bastion AI**, a local pipeline that ingests
 raw multi-source logs and reasons over them. Then I graded it against a real,
 independent forensic RCA of the same incident.
 
@@ -49,7 +49,7 @@ and inbox rules become first-class events mapped to ATT&CK (T1078, T1114,
 T1564.008, T1566…).
 
 **3. Ground everything.** An LLM will happily invent an IP or a hash. So after
-the model writes anything, BlueCell extracts every IP / domain / hash /
+the model writes anything, Bastion AI extracts every IP / domain / hash /
 technique it cited and verifies each against the actual logs. Anything not in
 the evidence is flagged **UNVERIFIED**. A prompt *asks* the model not to
 hallucinate; this *enforces* it.

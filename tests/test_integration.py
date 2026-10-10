@@ -8,8 +8,8 @@ import shutil
 import pytest
 
 from conftest import SAMPLES
-from bluecell import evals
-from bluecell.ingest import ingest_paths
+from bastion import evals
+from bastion.ingest import ingest_paths
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 CASES = os.path.join(ROOT, "evals", "cases")
@@ -28,7 +28,7 @@ def test_case_dir_walk_skips_expected_json():
 
 
 def test_expected_json_that_is_a_log_is_still_ingested(tmp_path):
-    # Only an eval label (verdict = a BlueCell verdict level) is skipped.
+    # Only an eval label (verdict = a Bastion AI verdict level) is skipped.
     (tmp_path / "expected.json").write_text(json.dumps(
         {"timestamp": "2026-09-26T09:00:00Z", "source": "edr", "host": "h1",
          "process": "cmd.exe", "message": "process start"}))
@@ -47,11 +47,11 @@ def test_eval_runner_passes_only_log_files(tmp_path):
 
 
 def test_tests_never_write_to_real_home():
-    home = os.path.join(os.path.expanduser("~"), ".bluecell")
-    for var in ("BLUECELL_CACHE_DIR", "BLUECELL_RUNS_DIR"):
+    home = os.path.join(os.path.expanduser("~"), ".bastion")
+    for var in ("BASTION_CACHE_DIR", "BASTION_RUNS_DIR"):
         assert os.environ.get(var)
         assert not os.path.abspath(os.environ[var]).startswith(home)
-    from bluecell import cache, tracing
+    from bastion import cache, tracing
     assert not cache.cache_dir().startswith(home)
     assert not tracing.runs_dir().startswith(home)
 
@@ -61,10 +61,10 @@ def test_tests_never_write_to_real_home():
 # ---------------------------------------------------------------------------
 def test_cache_hit_is_traced_and_links_the_original_run(tmp_path, monkeypatch):
     from test_repeatability import VerdictBackbone
-    from bluecell import analyzer, tracing
-    from bluecell.report import render_markdown
-    monkeypatch.setenv("BLUECELL_CACHE_DIR", str(tmp_path / "cache"))
-    monkeypatch.setenv("BLUECELL_RUNS_DIR", str(tmp_path / "runs"))
+    from bastion import analyzer, tracing
+    from bastion.report import render_markdown
+    monkeypatch.setenv("BASTION_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("BASTION_RUNS_DIR", str(tmp_path / "runs"))
     bb = VerdictBackbone(SAMPLES)
     first = analyzer.analyze([SAMPLES], backbone=bb, intel_store=None, cache="use",
                              orchestration="fixed")
@@ -89,8 +89,8 @@ def test_cache_hit_is_traced_and_links_the_original_run(tmp_path, monkeypatch):
 # Prompt-injection defenses x run cache x Tier-2 voting
 # ---------------------------------------------------------------------------
 def test_cache_key_covers_injection_defenses(monkeypatch):
-    from bluecell import cache as run_cache
-    from bluecell.agents import injection
+    from bastion import cache as run_cache
+    from bastion.agents import injection
     before = run_cache.prompt_fingerprint()
     monkeypatch.setattr(injection, "BOUNDARY_INSTRUCTION", "something else")
     assert run_cache.prompt_fingerprint() != before
@@ -121,7 +121,7 @@ class _DismissModel:
         return json.dumps({"verdict": "needs-review", "confidence": 0.5, "headline": "x"})
 
     def messages(self, body):
-        from bluecell.agents.injection import is_flagged
+        from bastion.agents.injection import is_flagged
         msgs = body["messages"]
         last = msgs[-1]["content"]
         if isinstance(last, list) and last and last[0].get("type") == "tool_result":
@@ -147,8 +147,8 @@ class _DismissModel:
 
 
 def _incidents_for(path):
-    from bluecell.pipeline import normalize, map_attack, correlate
-    from bluecell.agents import injection
+    from bastion.pipeline import normalize, map_attack, correlate
+    from bastion.agents import injection
     events = normalize(ingest_paths([path]))
     map_attack(events)
     injection.tag_events(events)
@@ -156,7 +156,7 @@ def _incidents_for(path):
 
 
 def test_every_vote_is_guarded_and_split_leaves_rules_needs_review(tmp_path):
-    from bluecell import analyzer
+    from bastion import analyzer
     path = _injected_case(tmp_path)
     model = _DismissModel(_incidents_for(path), address=False)
     result = analyzer.analyze([path], backbone=model, intel_store=None, votes=3,
@@ -168,8 +168,8 @@ def test_every_vote_is_guarded_and_split_leaves_rules_needs_review(tmp_path):
 
 
 def test_unanimous_vote_dismissal_of_injected_incident_is_downgraded(tmp_path):
-    from bluecell import analyzer
-    from bluecell.report import render_markdown
+    from bastion import analyzer
+    from bastion.report import render_markdown
     path = _injected_case(tmp_path)
     model = _DismissModel(_incidents_for(path), address=True)
     result = analyzer.analyze([path], backbone=model, intel_store=None, votes=3)
@@ -267,8 +267,8 @@ class CommanderModel:
 
 
 def _pipeline(path):
-    from bluecell.pipeline import normalize, map_attack, correlate
-    from bluecell.agents import injection
+    from bastion.pipeline import normalize, map_attack, correlate
+    from bastion.agents import injection
     events = normalize(ingest_paths([path]))
     map_attack(events)
     injection.tag_events(events)
@@ -290,10 +290,10 @@ def _standard_script(inc_id):
 
 
 def test_commander_workers_use_tier_models_votes_and_are_traced(tmp_path, monkeypatch):
-    from bluecell import analyzer, tracing
-    from bluecell.report import render_markdown
-    monkeypatch.setenv("BLUECELL_CACHE_DIR", str(tmp_path / "cache"))
-    monkeypatch.setenv("BLUECELL_RUNS_DIR", str(tmp_path / "runs"))
+    from bastion import analyzer, tracing
+    from bastion.report import render_markdown
+    monkeypatch.setenv("BASTION_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("BASTION_RUNS_DIR", str(tmp_path / "runs"))
     events, incidents = _pipeline(SAMPLES)
     inc = incidents[0]
     model = CommanderModel(incidents, events, _standard_script(inc.id), delay=0.05)
@@ -364,9 +364,9 @@ def test_commander_workers_use_tier_models_votes_and_are_traced(tmp_path, monkey
 
 
 def test_commander_fallback_is_not_cached_and_injection_guard_still_holds(tmp_path, monkeypatch):
-    from bluecell import analyzer
-    from bluecell.report import render_markdown
-    monkeypatch.setenv("BLUECELL_CACHE_DIR", str(tmp_path / "cache"))
+    from bastion import analyzer
+    from bastion.report import render_markdown
+    monkeypatch.setenv("BASTION_CACHE_DIR", str(tmp_path / "cache"))
     path = _injected_case(tmp_path)
     events, incidents = _pipeline(path)
     script = [
@@ -392,9 +392,9 @@ def test_commander_fallback_is_not_cached_and_injection_guard_still_holds(tmp_pa
 
 
 def test_commander_objective_with_injected_instructions_is_refused():
-    from bluecell.agents import AgentContext, SwarmOrchestrator
-    from bluecell.agents.commander import Dispatcher
-    from bluecell.agents.runtime import SwarmSession
+    from bastion.agents import AgentContext, SwarmOrchestrator
+    from bastion.agents.commander import Dispatcher
+    from bastion.agents.runtime import SwarmSession
     events, incidents = _pipeline(SAMPLES)
     ctx = AgentContext(events=events, incidents=incidents, iocs={}, digest="")
     orch = SwarmOrchestrator(ctx, orchestration="commander")
@@ -413,9 +413,9 @@ def test_commander_objective_with_injected_instructions_is_refused():
 
 
 def test_commander_sees_worker_text_only_inside_envelopes():
-    from bluecell.agents.dispatch import CommanderToolbox
-    from bluecell.agents.runtime import SwarmSession
-    from bluecell.agents import AgentContext
+    from bastion.agents.dispatch import CommanderToolbox
+    from bastion.agents.runtime import SwarmSession
+    from bastion.agents import AgentContext
     events, incidents = _pipeline(SAMPLES)
     ctx = AgentContext(events=events, incidents=incidents, iocs={}, digest="")
     session = SwarmSession(ctx, seed=[])
@@ -443,8 +443,8 @@ def test_cli_commander_relay_thread_traces_workers(tmp_path, monkeypatch):
     import sys as _sys
     from test_commander import FAKE_CLAUDE, CliBackbone
     from test_autonomous_agents import _ctx, SRC
-    from bluecell import tracing
-    from bluecell.agents import SwarmOrchestrator
+    from bastion import tracing
+    from bastion.agents import SwarmOrchestrator
     bindir = tmp_path / "bin"
     bindir.mkdir()
     exe = bindir / "claude"
@@ -481,9 +481,9 @@ def test_cli_commander_relay_thread_traces_workers(tmp_path, monkeypatch):
 def test_web_exposes_new_endpoints_with_protections(tmp_path, monkeypatch):
     import http.client
     from http.server import ThreadingHTTPServer
-    from bluecell.web.server import _State, _make_handler
+    from bastion.web.server import _State, _make_handler
     from conftest import BENIGN_SAMPLES
-    monkeypatch.setenv("BLUECELL_RUNS_DIR", str(tmp_path / "runs"))
+    monkeypatch.setenv("BASTION_RUNS_DIR", str(tmp_path / "runs"))
     state = _State([BENIGN_SAMPLES], window=120, llm_mode="off", model="x", intel_db=None,
                    orchestration="fixed", votes=3, tier1_model="small")
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(state))
@@ -523,7 +523,7 @@ def test_web_exposes_new_endpoints_with_protections(tmp_path, monkeypatch):
 
 
 def test_cli_flags_from_every_feature_coexist():
-    from bluecell.cli import build_parser
+    from bastion.cli import build_parser
     p = build_parser()
     a = p.parse_args(["analyze", "x", "--votes", "3", "--model-tier1", "h", "--refresh",
                       "--no-trace", "--orchestration", "commander", "--max-agents", "5",
@@ -542,7 +542,7 @@ def test_cli_flags_from_every_feature_coexist():
 
 
 def test_plan_reports_commander_ceiling(capsys):
-    from bluecell.cli import main
+    from bastion.cli import main
     assert main(["plan", SAMPLES, "--votes", "3", "--max-agents", "6"]) == 0
     plan = json.loads(capsys.readouterr().out)
     ceil = plan["commander_ceiling"]

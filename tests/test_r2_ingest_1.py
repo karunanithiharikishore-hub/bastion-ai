@@ -3,7 +3,7 @@ ingested, with every Records-style wrapper unwrapped at every level."""
 import datetime
 import json
 
-from bluecell.ingest.loader import ingest_file
+from bastion.ingest.loader import ingest_file
 
 TS = "2026-01-01T00:00:00Z"
 

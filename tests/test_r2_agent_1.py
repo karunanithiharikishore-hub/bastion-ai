@@ -4,7 +4,7 @@ import json
 import re
 
 from test_injection import _attack_ctx, _box
-from bluecell.agents.roles import JuniorSocAnalyst
+from bastion.agents.roles import JuniorSocAnalyst
 
 
 def test_tier1_mission_label_finds_source_events(tmp_path):

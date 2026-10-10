@@ -1,15 +1,15 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 import json
 import os
 
 from conftest import SAMPLES, FEEDS
-from bluecell.ingest import ingest_path
-from bluecell.pipeline import normalize, map_attack, correlate, extract_iocs, compress
-from bluecell.intel import IntelStore
-from bluecell.agents import run_swarm, SwarmOrchestrator, AgentContext
-from bluecell.agents.roles import (
+from bastion.ingest import ingest_path
+from bastion.pipeline import normalize, map_attack, correlate, extract_iocs, compress
+from bastion.intel import IntelStore
+from bastion.agents import run_swarm, SwarmOrchestrator, AgentContext
+from bastion.agents.roles import (
     JuniorSocAnalyst, SeniorSocAnalyst, IncidentResponder, SPECIALISTS,
 )
 
@@ -57,7 +57,7 @@ def test_tier1_raises_then_tier2_confirms(tmp_path):
 
 
 def test_tier2_dismisses_uncorroborated_singleton():
-    from bluecell.models import Event
+    from bastion.models import Event
     # One lonely low-severity event, single source, no ATT&CK -> not confirmed.
     e = Event(ts="2026-09-26T09:00:00Z", source="syslog", category="other",
               action="log", message="benign", host="h1")

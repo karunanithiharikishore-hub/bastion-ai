@@ -1,10 +1,10 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """ITEM-19 regression: SHA-224 (56 hex) and SHA-384 (96 hex) digests must be
 extracted and grounded like the other hash lengths."""
-from bluecell.agents.grounding import check_text, evidence_index
-from bluecell.models import Event
+from bastion.agents.grounding import check_text, evidence_index
+from bastion.models import Event
 
 
 def _idx():

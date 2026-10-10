@@ -2,7 +2,7 @@
 
 Before the fix, records using query_name / QueryName / rrname / ECS
 dns.question.name returned None, so the whole DNS file was silently dropped."""
-from bluecell.ingest.parsers import parse_dns
+from bastion.ingest.parsers import parse_dns
 
 
 def test_parse_dns_accepts_alternate_query_name_fields():

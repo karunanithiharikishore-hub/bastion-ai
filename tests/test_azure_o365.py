@@ -1,10 +1,10 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
-from bluecell.ingest import ingest_path, detect_source
-from bluecell.ingest.parsers import parse_azure_signin, parse_o365_message
-from bluecell.pipeline import normalize, map_attack, correlate
-from bluecell.report.rca import deterministic_storyline
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
+from bastion.ingest import ingest_path, detect_source
+from bastion.ingest.parsers import parse_azure_signin, parse_o365_message
+from bastion.pipeline import normalize, map_attack, correlate
+from bastion.report.rca import deterministic_storyline
 
 
 def test_detect_azure_signin_by_filename():
@@ -84,7 +84,7 @@ def test_azure_end_to_end_incident_and_summary(tmp_path):
 
 
 def test_verdict_benign_for_failed_logins_only(tmp_path):
-    from bluecell.report.rca import assess_incident
+    from bastion.report.rca import assess_incident
     rows = ["Date (UTC),User,IP address,Status,Sign-in error code"]
     for i in range(20):
         rows.append(f"2026-09-20T08:{i:02d}:00Z,user@corp.com,203.0.113.9,Failure,50126")
@@ -98,7 +98,7 @@ def test_verdict_benign_for_failed_logins_only(tmp_path):
 
 
 def test_verdict_review_when_success_follows_failures(tmp_path):
-    from bluecell.report.rca import assess_incident
+    from bastion.report.rca import assess_incident
     rows = ["Date (UTC),User,IP address,Status,Sign-in error code"]
     for i in range(10):
         rows.append(f"2026-09-20T08:{i:02d}:00Z,user@corp.com,203.0.113.9,Failure,50126")
@@ -115,7 +115,7 @@ def test_verdict_malicious_for_multistage(tmp_path):
     # reuse the bundled samples multi-stage incident
     import os
     from conftest import SAMPLES
-    from bluecell.report.rca import assess_incident
+    from bastion.report.rca import assess_incident
     events = normalize(ingest_path(SAMPLES)); map_attack(events)
     inc = correlate(events, window_minutes=120)[0]
     v = assess_incident(inc)

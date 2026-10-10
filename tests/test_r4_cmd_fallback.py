@@ -1,6 +1,6 @@
 """BUG-R4-CMD-1/3/4: the fixed-flow fallback's admission (agent slot + wall clock)."""
-from bluecell.agents import orchestrator
-from bluecell.agents.injection import INJECTION_TAG
+from bastion.agents import orchestrator
+from bastion.agents.injection import INJECTION_TAG
 from test_autonomous_agents import _ctx
 from test_commander import SwarmModel, _orch, _use, _text
 

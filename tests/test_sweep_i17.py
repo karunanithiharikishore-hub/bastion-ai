@@ -1,7 +1,7 @@
 """ITEM-17 regression: events that differ only in their message text must not collapse
 into one 'xN' digest line, and the digest carries a bounded, escaped message excerpt."""
-from bluecell.models import Event
-from bluecell.pipeline import compress
+from bastion.models import Event
+from bastion.pipeline import compress
 
 
 def _ev(message, **kw):

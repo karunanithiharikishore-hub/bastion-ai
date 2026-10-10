@@ -1,6 +1,6 @@
 """Sweep ITEM-25 (repeated lines): 'last message repeated N times' re-emits the previous event."""
-from bluecell.ingest.loader import ingest_file
-from bluecell.pipeline.attack import map_attack
+from bastion.ingest.loader import ingest_file
+from bastion.pipeline.attack import map_attack
 
 ATTACK = "sshd[1]: Failed password for root from 203.0.113.9 port 4000 ssh2"
 

@@ -4,7 +4,7 @@ say what they skipped, and BOM-less UTF-16 CSV must parse.
 import gzip
 import os
 
-from bluecell.ingest.loader import ingest_file, ingest_path
+from bastion.ingest.loader import ingest_file, ingest_path
 
 SYSLOG = ("Oct  3 22:00:00 web1 sshd[1]: Failed password for root from "
           "203.0.113.9 port 4000 ssh2\n") * 5

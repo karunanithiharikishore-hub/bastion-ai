@@ -1,11 +1,11 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 # ITEM-23: Tier-2 verdicts beyond the cap must be noted, not silently dropped.
 # ITEM-24: reviewer grounding detail must be kept, not reduced to a boolean.
 import json
 
-from bluecell.agents.analyst import ai_analyze
+from bastion.agents.analyst import ai_analyze
 
 
 class _Backbone:

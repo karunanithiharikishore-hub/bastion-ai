@@ -3,8 +3,8 @@ hash IOCs mined from bare 32-hex ids in messages."""
 from conftest import SAMPLES  # noqa: F401  (sets sys.path to src)
 from datetime import datetime, timezone
 
-from bluecell.models import Event
-from bluecell.pipeline import extract_iocs
+from bastion.models import Event
+from bastion.pipeline import extract_iocs
 
 T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 

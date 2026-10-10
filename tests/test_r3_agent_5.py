@@ -1,13 +1,13 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """BUG-R3-AGENT-5: grounding must not reject legitimate finding text.
 
 A version string ("Chrome 120.0.6.99") was read as an IPv4 address, and a missing
 space after a period ("shell.Then", "T1059.Then") as a domain.
 """
-from bluecell.models import Event
-from bluecell.agents.grounding import evidence_index, check_text
+from bastion.models import Event
+from bastion.agents.grounding import evidence_index, check_text
 
 
 def _idx():

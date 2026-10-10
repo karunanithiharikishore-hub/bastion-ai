@@ -1,6 +1,6 @@
-"""BUG-WEB-8 -- `eval --json <unwritable path>` must fail fast with "[bluecell] ..." and rc 2,
+"""BUG-WEB-8 -- `eval --json <unwritable path>` must fail fast with "[bastion] ..." and rc 2,
 not print a traceback after the whole eval has already run."""
-from bluecell.cli import main
+from bastion.cli import main
 
 
 def test_eval_json_missing_dir_fails_before_running(tmp_path, capsys):
@@ -9,7 +9,7 @@ def test_eval_json_missing_dir_fails_before_running(tmp_path, capsys):
                "--no-trace", "--llm", "off"])
     out, err = capsys.readouterr()
     assert rc == 2
-    assert "[bluecell] cannot write eval JSON" in err
+    assert "[bastion] cannot write eval JSON" in err
     assert "Traceback" not in err
     assert out == ""  # precheck fires before the eval table is printed
 
@@ -21,5 +21,5 @@ def test_eval_json_write_oserror_returns_2(tmp_path, capsys):
                "--no-trace", "--llm", "off"])
     _, err = capsys.readouterr()
     assert rc == 2
-    assert "[bluecell] cannot write eval JSON" in err
+    assert "[bastion] cannot write eval JSON" in err
     assert "Traceback" not in err

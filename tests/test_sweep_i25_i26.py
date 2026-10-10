@@ -1,7 +1,7 @@
 """Sweep ITEM-25 (syslog header variants) and ITEM-26 (ASA regex ReDoS)."""
 import time
 
-from bluecell.ingest.parsers import parse_syslog_line
+from bastion.ingest.parsers import parse_syslog_line
 
 ATTACK = "Failed password for root from 203.0.113.9 port 4000 ssh2"
 

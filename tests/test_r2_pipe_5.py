@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from bluecell.intel.store import IntelStore
+from bastion.intel.store import IntelStore
 
 
 def _good_store(path):

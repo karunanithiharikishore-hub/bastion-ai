@@ -1,8 +1,8 @@
 """BUG-R3-INGEST-2: an IP present as both src_ip and dst_ip was counted twice per event."""
 from datetime import datetime
 
-from bluecell.models import Event
-from bluecell.pipeline.ioc import extract_iocs
+from bastion.models import Event
+from bastion.pipeline.ioc import extract_iocs
 
 
 def test_same_ip_as_src_and_dst_counts_once_per_event():

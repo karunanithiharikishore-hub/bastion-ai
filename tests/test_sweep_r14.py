@@ -1,7 +1,7 @@
 """ITEM-14 / ITEM-16: commander Tier-1 retry after a failed run; plan text is capped."""
 import json
 
-from bluecell.agents import commander
+from bastion.agents import commander
 from test_autonomous_agents import _ctx
 
 

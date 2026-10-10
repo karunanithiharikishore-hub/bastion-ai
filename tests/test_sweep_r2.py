@@ -9,13 +9,13 @@ import urllib.error
 import pytest
 
 from conftest import SAMPLES
-from bluecell.ingest import ingest_path
-from bluecell.pipeline import normalize, map_attack, correlate, extract_iocs, compress
-from bluecell.agents import AgentContext
-from bluecell.agents.roles import ThreatHunter, JuniorSocAnalyst
-from bluecell.agents.runtime import SwarmSession
-from bluecell.llm import backbone as bb
-from bluecell.llm.backbone import BackboneUnavailable, LLMBackbone
+from bastion.ingest import ingest_path
+from bastion.pipeline import normalize, map_attack, correlate, extract_iocs, compress
+from bastion.agents import AgentContext
+from bastion.agents.roles import ThreatHunter, JuniorSocAnalyst
+from bastion.agents.runtime import SwarmSession
+from bastion.llm import backbone as bb
+from bastion.llm.backbone import BackboneUnavailable, LLMBackbone
 
 
 def _ctx(backbone=None):

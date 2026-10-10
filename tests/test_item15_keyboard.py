@@ -1,11 +1,11 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """ITEM-15: run rows, phase layers and chip remove control must be keyboard reachable."""
 import re
 from pathlib import Path
 
-STATIC = Path(__file__).resolve().parents[1] / "src/bluecell/web/static"
+STATIC = Path(__file__).resolve().parents[1] / "src/bastion/web/static"
 APP_JS = (STATIC / "app.js").read_text()
 RUNS_JS = (STATIC / "runs.js").read_text()
 

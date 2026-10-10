@@ -2,7 +2,7 @@
 so non-auth lines do not get a bogus user that correlates unrelated hosts."""
 import pytest
 
-from bluecell.ingest.parsers import parse_syslog_line
+from bastion.ingest.parsers import parse_syslog_line
 
 
 @pytest.mark.parametrize("msg", [
@@ -16,7 +16,7 @@ def test_non_auth_lines_have_no_user(msg):
 
 
 def test_non_auth_lines_do_not_correlate_hosts():
-    from bluecell.pipeline.correlate import correlate
+    from bastion.pipeline.correlate import correlate
     ev = [parse_syslog_line("Oct  3 22:00:%02d %s" % (i, m)) for i, m in enumerate([
         "db1 systemd[1]: Waiting for network to come online",
         "mail1 postfix/qmgr[1]: warning: queue file for network is old",

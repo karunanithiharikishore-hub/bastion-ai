@@ -1,10 +1,10 @@
 """ITEM-2: rca's failure count must use attack.map_attack's T1110 predicate (action OR message)."""
 import json
 
-from bluecell.ingest.loader import ingest_file
-from bluecell.pipeline.attack import map_attack
-from bluecell.pipeline.correlate import correlate
-from bluecell.report.rca import assess_incident
+from bastion.ingest.loader import ingest_file
+from bastion.pipeline.attack import map_attack
+from bastion.pipeline.correlate import correlate
+from bastion.report.rca import assess_incident
 
 
 def test_message_only_auth_failures_are_counted_not_called_benign(tmp_path):

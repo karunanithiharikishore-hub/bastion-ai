@@ -1,10 +1,10 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
-from bluecell.models import Event
-from bluecell.agents.analyst import build_evidence_brief, _extract_json, ai_analyze
-from bluecell.agents.grounding import evidence_index, check_text
-from bluecell.pipeline import extract_iocs
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
+from bastion.models import Event
+from bastion.agents.analyst import build_evidence_brief, _extract_json, ai_analyze
+from bastion.agents.grounding import evidence_index, check_text
+from bastion.pipeline import extract_iocs
 
 
 def _events():

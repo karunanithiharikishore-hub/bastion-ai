@@ -1,7 +1,7 @@
 # Benign sample: approved maintenance window (SYNTHETIC)
 
 A **false-positive test case**. Everything here is legitimate IT work, but it is
-deliberately shaped to trip BlueCell's rule-based detections, so you can check
+deliberately shaped to trip Bastion AI's rule-based detections, so you can check
 whether the analysis tells it apart from a real attack.
 
 Kept outside `samples/` on purpose: ingestion walks subfolders, so putting this
@@ -33,8 +33,8 @@ DNS and firewall traffic goes only to update mirrors and internal hosts.
   and dismiss the incident.
 
 ```bash
-bluecell analyze samples_benign --llm off
-bluecell analyze samples_benign --llm auto
+bastion analyze samples_benign --llm off
+bastion analyze samples_benign --llm auto
 ```
 
 All data is fabricated. Public IPs use the RFC 5737 documentation range

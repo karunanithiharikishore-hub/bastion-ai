@@ -1,13 +1,13 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """BUG-CMD-10: wrong-typed deploy fields are a validation refusal, and the
 refusal is logged with its problems. No real model calls."""
 import pytest
 
-from bluecell.agents.commander import Dispatcher
-from bluecell.agents.orchestrator import SwarmOrchestrator
-from bluecell.agents.runtime import SwarmSession
+from bastion.agents.commander import Dispatcher
+from bastion.agents.orchestrator import SwarmOrchestrator
+from bastion.agents.runtime import SwarmSession
 
 from test_autonomous_agents import _ctx
 from test_commander import SwarmModel

@@ -1,8 +1,8 @@
 """ITEM-4: a later, weaker verifier deploy must not override an earlier majority
 verdict. Pure merge_tier2 calls; no model is involved."""
 from test_autonomous_agents import _ctx
-from bluecell.agents import SwarmOrchestrator
-from bluecell.agents.base import Finding
+from bastion.agents import SwarmOrchestrator
+from bastion.agents.base import Finding
 
 
 def _verdict(status: str, completed: int) -> Finding:

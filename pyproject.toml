@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "bluecell"
+name = "bastion-ai"
 version = "0.13.0"
 description = "Blue-Team Log Intelligence — read-only multi-agent log analysis, ATT&CK mapping, RCA storyline, and IOC/threat-hunt generation."
 readme = "README.md"
@@ -14,17 +14,18 @@ keywords = ["security", "blue-team", "siem", "mitre-attack", "dfir", "threat-hun
 dependencies = []  # stdlib-only core
 
 [project.optional-dependencies]
-api = []   # kept so `bluecell[api]` still installs; the API path is stdlib urllib
+api = []   # kept so `bastion-ai[api]` still installs; the API path is stdlib urllib
 dev = ["pytest>=7"]
 
 [project.scripts]
-bluecell = "bluecell.cli:main"
+bastion = "bastion.cli:main"
+bluecell = "bastion.cli:main"   # old command name keeps working
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-bluecell = ["web/static/*"]
+bastion = ["web/static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

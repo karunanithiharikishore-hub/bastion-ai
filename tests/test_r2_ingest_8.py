@@ -7,8 +7,8 @@ must survive ingestion.
 import json
 from datetime import datetime, timezone
 
-from bluecell.models import Event, _parse_ts
-from bluecell.ingest.loader import ingest_file
+from bastion.models import Event, _parse_ts
+from bastion.ingest.loader import ingest_file
 
 
 def test_parse_ts_extreme_low_with_positive_offset_clamps():

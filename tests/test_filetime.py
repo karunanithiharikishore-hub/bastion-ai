@@ -1,7 +1,7 @@
 """Windows FILETIME integers (100ns since 1601) parse to the right date, not 1974."""
 from datetime import datetime, timezone
 
-from bluecell.models import _parse_ts
+from bastion.models import _parse_ts
 
 
 def test_filetime_int_and_text():

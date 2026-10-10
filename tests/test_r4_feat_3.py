@@ -1,6 +1,6 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """BUG-R4-FEAT-3: a failed `claude -p` call's CLI-reported cost and tokens must
 reach the run trace before BackboneUnavailable is raised. Offline: fake `claude`."""
 import os
@@ -8,8 +8,8 @@ import stat
 
 import pytest
 
-from bluecell import tracing
-from bluecell.llm.backbone import BackboneUnavailable, LLMBackbone
+from bastion import tracing
+from bastion.llm.backbone import BackboneUnavailable, LLMBackbone
 
 _ERROR_RESULT = ("cat >/dev/null\n"
                  "echo '{\"type\":\"result\",\"subtype\":\"error_during_execution\","

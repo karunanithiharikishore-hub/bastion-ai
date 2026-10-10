@@ -2,7 +2,7 @@
 shift Status/Recipient_status, and a mixed JSONL file is detected per record."""
 import json
 
-from bluecell.ingest.loader import ingest_file
+from bastion.ingest.loader import ingest_file
 
 
 def test_unquoted_comma_in_subject_does_not_shift_status(tmp_path):

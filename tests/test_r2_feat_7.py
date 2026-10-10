@@ -1,7 +1,7 @@
 """BUG-FEAT-7: per-agent rows are exclusive (own calls only) and sum to the run total."""
 import pytest
 
-from bluecell import tracing
+from bastion import tracing
 
 USAGE = {"input_tokens": 1000, "output_tokens": 100}
 

@@ -2,7 +2,7 @@
 invalid case instead of crashing the whole eval run."""
 import json
 
-from bluecell import evals
+from bastion import evals
 
 
 def _case(tmp_path, payload_text):

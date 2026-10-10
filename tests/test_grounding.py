@@ -1,8 +1,8 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
-from bluecell.models import Event
-from bluecell.agents.grounding import evidence_index, check_text, annotate
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
+from bastion.models import Event
+from bastion.agents.grounding import evidence_index, check_text, annotate
 
 
 def _events():
@@ -58,8 +58,8 @@ def test_domain_subdomain_is_not_grounded():
 
 
 def test_file_names_are_not_treated_as_domains():
-    from bluecell.models import Event
-    from bluecell.agents.grounding import evidence_index, check_text
+    from bastion.models import Event
+    from bastion.agents.grounding import evidence_index, check_text
     e = Event(ts="2026-10-03T22:11:02Z", source="edr", category="process",
               action="process_create", message="wusa C:\\Installers\\KB5044284.msu /quiet",
               host="win-app02")
@@ -70,16 +70,16 @@ def test_file_names_are_not_treated_as_domains():
 
 
 def test_domains_mentioned_in_log_messages_are_grounded():
-    from bluecell.models import Event
-    from bluecell.agents.grounding import evidence_index, check_text
+    from bastion.models import Event
+    from bastion.agents.grounding import evidence_index, check_text
     e = Event(ts="2026-10-03T22:00:00Z", source="syslog", category="other",
               action="log", message="apt fetched from archive.ubuntu.com", host="app01")
     assert check_text("Patched from archive.ubuntu.com", evidence_index([e], []))["ok"]
 
 
 def test_technique_flagged_even_when_logs_have_none():
-    from bluecell.models import Event
-    from bluecell.agents.grounding import evidence_index, check_text
+    from bastion.models import Event
+    from bastion.agents.grounding import evidence_index, check_text
     e = Event(ts="2026-10-03T22:00:00Z", source="syslog", category="other",
               action="log", message="routine", host="h1")
     res = check_text("Credential dumping via T1003 on h1", evidence_index([e], []))

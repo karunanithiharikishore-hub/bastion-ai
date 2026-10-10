@@ -3,7 +3,7 @@
 import json
 
 from test_injection import _attack_ctx, _box
-from bluecell.agents import toolbox
+from bastion.agents import toolbox
 
 
 def _seed(ctx, n=12):

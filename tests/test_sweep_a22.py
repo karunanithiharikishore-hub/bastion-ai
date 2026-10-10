@@ -1,12 +1,12 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 # ITEM-22: unknown or malformed verdicts must become needs-review, never a final_verdict string.
 import json
 
 import pytest
 
-from bluecell.agents.analyst import ai_analyze, _norm_verdict
+from bastion.agents.analyst import ai_analyze, _norm_verdict
 
 
 class _Backbone:

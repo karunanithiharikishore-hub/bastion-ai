@@ -1,7 +1,7 @@
 """BUG-WEB-5: long non-ASCII upload names must stage under a truncated, filesystem-safe name."""
 import os
 
-from bluecell.web.server import _State
+from bastion.web.server import _State
 
 NAME_MAX = 255  # bytes on Linux and macOS
 

@@ -1,7 +1,7 @@
 """BUG-FEAT-13 -- a --refresh run that cannot be stored must drop the old entry."""
 import pytest
 
-from bluecell import cache as run_cache
+from bastion import cache as run_cache
 
 
 @pytest.fixture

@@ -6,14 +6,14 @@ import shutil
 
 import pytest
 
-from bluecell import cache
+from bastion import cache
 
 PKG = os.path.dirname(cache.__file__)
 
 
 @pytest.fixture
 def pkg_copy(tmp_path, monkeypatch):
-    dst = tmp_path / "bluecell"
+    dst = tmp_path / "bastion"
     shutil.copytree(PKG, dst, ignore=shutil.ignore_patterns("__pycache__"))
     monkeypatch.setattr(cache, "_PKG_DIR", str(dst))
     return dst

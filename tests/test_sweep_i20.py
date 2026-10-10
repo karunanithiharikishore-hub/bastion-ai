@@ -3,7 +3,7 @@ and a comma-separated IP string yields its first valid IP instead of being dropp
 import json
 from conftest import SAMPLES  # noqa: F401  (sets sys.path to src)
 
-from bluecell.ingest.loader import ingest_file
+from bastion.ingest.loader import ingest_file
 
 
 def load(tmp_path, rec):

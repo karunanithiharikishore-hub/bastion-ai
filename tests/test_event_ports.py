@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
-from bluecell.ingest.parsers import parse_edr, parse_network, parse_syslog_line
-from bluecell.models import Event
+from bastion.ingest.parsers import parse_edr, parse_network, parse_syslog_line
+from bastion.models import Event
 
 
 def test_firewall_row_ports():
@@ -57,8 +57,8 @@ def test_ports_not_entities_or_id_and_shown_in_compact():
 
 def test_toolbox_dst_port_filter(tmp_path):
     import json
-    from bluecell.agents.toolbox import Blackboard, SecurityToolbox
-    from bluecell.agents.base import AgentContext
+    from bastion.agents.toolbox import Blackboard, SecurityToolbox
+    from bastion.agents.base import AgentContext
     evs = [Event(ts=datetime(2026, 1, 1, tzinfo=timezone.utc), source="fw", category="network", action="a",
                  message=f"m{p}", dst_port=p) for p in (22, 443)]
     box = SecurityToolbox(AgentContext(events=evs, incidents=[], iocs={}, digest=""), "t", "T",
@@ -67,5 +67,5 @@ def test_toolbox_dst_port_filter(tmp_path):
 
 
 def test_named_ports_map_to_numbers():
-    from bluecell.models import _port
+    from bastion.models import _port
     assert _port("https") == 443 and _port("SSH") == 22 and _port("netbios-ssn") == 139

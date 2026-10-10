@@ -1,6 +1,6 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """ITEM-1: a non-loopback `serve --host` must refuse foreign Host headers and warn."""
 import os
 import socket
@@ -33,11 +33,11 @@ def test_foreign_host_refused_on_non_loopback_bind(tmp_path):
         port = s.getsockname()[1]
     cache = tempfile.mkdtemp()
     env = dict(os.environ, PYTHONPATH=os.path.join(REPO, "src"),
-               BLUECELL_CACHE_DIR=cache, BLUECELL_RUNS_DIR=cache)
+               BASTION_CACHE_DIR=cache, BASTION_RUNS_DIR=cache)
     err = tmp_path / "stderr.log"
     with open(err, "w") as ef:
         proc = subprocess.Popen(
-            [sys.executable, "-m", "bluecell", "serve", SAMPLES, "--llm", "off",
+            [sys.executable, "-m", "bastion", "serve", SAMPLES, "--llm", "off",
              "--host", "0.0.0.0", "--port", str(port)],
             cwd=REPO, env=env, stdout=subprocess.DEVNULL, stderr=ef)
     try:

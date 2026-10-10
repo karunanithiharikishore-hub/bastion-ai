@@ -2,7 +2,7 @@
 argparse error (rc 2) that lists the valid names, including the aliases."""
 import pytest
 
-from bluecell.cli import build_parser, main
+from bastion.cli import build_parser, main
 
 
 @pytest.mark.parametrize("cmd", ["analyze", "plan"])

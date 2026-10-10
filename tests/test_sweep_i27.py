@@ -1,5 +1,5 @@
 """Sweep ITEM-27: syslog auth gaps (sudo/su/vsftpd/dropbear/sshd 'not allowed', 'for directory')."""
-from bluecell.ingest.parsers import parse_syslog_line
+from bastion.ingest.parsers import parse_syslog_line
 
 PFX = "Oct  3 22:00:01 web1 "
 ATTACKER = "203.0.113.9"

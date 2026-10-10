@@ -1,12 +1,12 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """ITEM-1 regression: a trimmed oversized tool result must still fit the cap
 with its `truncated` note, instead of collapsing into an error with no data."""
 import json
 
 from conftest import SAMPLES  # noqa: F401  (sets sys.path to src)
-from bluecell.agents.toolbox import SecurityToolbox
+from bastion.agents.toolbox import SecurityToolbox
 
 
 def _event(i, pad):

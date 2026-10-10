@@ -1,8 +1,8 @@
 """ITEM-18: hub entities (public resolvers, root, many-host IPs) must not merge unrelated hosts."""
 from datetime import datetime, timedelta
 
-from bluecell.models import Event
-from bluecell.pipeline.correlate import correlate
+from bastion.models import Event
+from bastion.pipeline.correlate import correlate
 
 
 def _ev(i, host, **kw):

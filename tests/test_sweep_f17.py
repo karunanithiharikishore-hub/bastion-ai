@@ -7,13 +7,13 @@ from http.server import ThreadingHTTPServer
 import pytest
 
 from conftest import SAMPLES
-from bluecell.web.server import _State, _make_handler
+from bastion.web.server import _State, _make_handler
 
 
 @pytest.fixture()
 def srv(tmp_path, monkeypatch):
-    monkeypatch.setenv("BLUECELL_CACHE_DIR", str(tmp_path / "cache"))
-    monkeypatch.setenv("BLUECELL_RUNS_DIR", str(tmp_path / "runs"))
+    monkeypatch.setenv("BASTION_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("BASTION_RUNS_DIR", str(tmp_path / "runs"))
     state = _State([SAMPLES], window=120, llm_mode="off", model="x", intel_db=None)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(state))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()

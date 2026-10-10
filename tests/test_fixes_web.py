@@ -1,6 +1,6 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """Regression tests for web dashboard / CLI fixes (W1-W12)."""
 import glob
 import json
@@ -13,8 +13,8 @@ import http.client
 import pytest
 
 from conftest import SAMPLES
-from bluecell import cli
-from bluecell.web.server import _State, _make_handler
+from bastion import cli
+from bastion.web.server import _State, _make_handler
 from http.server import ThreadingHTTPServer
 
 SYSLOG = ("Sep 26 09:01:12 web01 sshd[1]: Failed password for admin from 203.0.113.66 port 41022 ssh2\n"
@@ -156,18 +156,18 @@ def test_w9_staging_dirs_removed(tmp_path, monkeypatch):
     tok = state.stage_reset()
     with pytest.raises(ValueError, match="no files staged"):  # "no files staged" branch
         state.stage_run(token=tok)
-    assert not glob.glob(str(tmp_path / "bluecell_stage_*"))
+    assert not glob.glob(str(tmp_path / "bastion_stage_*"))
     tok = state.stage_reset()
     state.stage_add("a.log", SYSLOG, token=tok)
     state.stage_add("b.log", SYSLOG)                    # default slot
-    assert len(glob.glob(str(tmp_path / "bluecell_stage_*"))) == 2
+    assert len(glob.glob(str(tmp_path / "bastion_stage_*"))) == 2
     state.close()
-    assert not glob.glob(str(tmp_path / "bluecell_stage_*"))
+    assert not glob.glob(str(tmp_path / "bastion_stage_*"))
 
 
 # W10 -----------------------------------------------------------------------
 def test_w10_port_in_use_exits_cleanly(capsys):
-    from bluecell.web import server as srvmod
+    from bastion.web import server as srvmod
     s = socket.socket(); s.bind(("127.0.0.1", 0)); s.listen(1)
     port = s.getsockname()[1]
     try:
@@ -179,7 +179,7 @@ def test_w10_port_in_use_exits_cleanly(capsys):
 
 
 def test_w10_ipv6_server_class():
-    from bluecell.web import server as srvmod
+    from bastion.web import server as srvmod
     if not socket.has_ipv6:
         pytest.skip("no IPv6")
     try:
@@ -197,11 +197,11 @@ def test_w11_intel_import_bad_json(tmp_path, capsys, content):
     f = tmp_path / "feed.json"; f.write_text(content)
     rc = cli.main(["intel", "--intel-db", str(tmp_path / "db.json"), "import", str(f)])
     assert rc == 2
-    assert "[bluecell]" in capsys.readouterr().err
+    assert "[bastion]" in capsys.readouterr().err
 
 
 def test_w11_analyze_output_dir_missing(tmp_path, capsys):
     rc = cli.main(["analyze", SAMPLES, "--llm", "off", "-o",
                    str(tmp_path / "nope" / "x.md")])
     assert rc == 2
-    assert "[bluecell]" in capsys.readouterr().err
+    assert "[bastion]" in capsys.readouterr().err

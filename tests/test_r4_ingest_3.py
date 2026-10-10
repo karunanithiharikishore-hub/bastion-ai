@@ -1,7 +1,7 @@
 """BUG-R4-INGEST-3: ECS-nested JSON (winlogbeat/filebeat) must resolve host.name,
 user.name, source.ip and event.action; a dict must never become a host/user string."""
-from bluecell.ingest.parsers import _get, parse_dns, parse_edr
-from bluecell.pipeline.attack import map_attack
+from bastion.ingest.parsers import _get, parse_dns, parse_edr
+from bastion.pipeline.attack import map_attack
 
 ECS = {"@timestamp": "2026-10-03T22:00:00Z",
        "event": {"action": "logon-failed", "outcome": "failure"},

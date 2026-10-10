@@ -1,7 +1,7 @@
 """BUG-PIPE-8 -- T1562 impair-defenses must not fire on cancelled scans or stopped
 log/export jobs, and must still fire on a stopped Sysmon64 service."""
-from bluecell.models import Event
-from bluecell.pipeline import map_attack
+from bastion.models import Event
+from bastion.pipeline import map_attack
 
 
 def _tags(message):

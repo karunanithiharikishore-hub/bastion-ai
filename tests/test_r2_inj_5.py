@@ -1,12 +1,12 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """BUG-INJ-5: log-derived tags and source names reach the model only inside
 envelopes. No real model calls."""
 import json
 
-from bluecell.agents.injection import outside_envelopes
-from bluecell.agents.toolbox import Blackboard, SecurityToolbox
+from bastion.agents.injection import outside_envelopes
+from bastion.agents.toolbox import Blackboard, SecurityToolbox
 
 from test_autonomous_agents import _ctx
 from test_r2_cmd_10 import _dispatcher

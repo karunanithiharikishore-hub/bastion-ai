@@ -1,11 +1,11 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """R3 CMD-4: distinct raw sources must get distinct shown labels, so a label
 the commander reads back deploys the source it was shown for. No real model calls."""
-from bluecell.agents.commander import Dispatcher
-from bluecell.agents.orchestrator import SwarmOrchestrator
-from bluecell.agents.runtime import SwarmSession
+from bastion.agents.commander import Dispatcher
+from bastion.agents.orchestrator import SwarmOrchestrator
+from bastion.agents.runtime import SwarmSession
 
 from test_autonomous_agents import _ctx
 from test_commander import SwarmModel

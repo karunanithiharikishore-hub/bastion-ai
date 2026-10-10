@@ -1,7 +1,7 @@
 """ITEM-6: each vote of a Tier-2 verifier is a model run, so it counts against
 --max-agents; K is capped at what the agent budget (commander) or the fallback
 cap (orchestrator._admit) leaves, and the run records votes_effective + a note."""
-from bluecell.agents import commander, orchestrator
+from bastion.agents import commander, orchestrator
 from test_autonomous_agents import _ctx
 from test_commander import SwarmModel, _orch, _use, _text
 

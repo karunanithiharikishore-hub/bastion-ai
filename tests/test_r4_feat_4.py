@@ -1,13 +1,13 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """BUG-R4-FEAT-4: shutdown (`_State.close`) must not wait for a running analysis, and
 must still remove staged upload dirs. Offline: the analysis is a blocked stub."""
 import os
 import threading
 import time
 
-from bluecell.web.server import _State
+from bastion.web.server import _State
 
 
 def test_close_returns_promptly_while_analysis_runs(monkeypatch):

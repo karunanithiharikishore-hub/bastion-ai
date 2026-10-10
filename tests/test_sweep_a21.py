@@ -1,4 +1,4 @@
-from bluecell.agents.analyst import _extract_json
+from bastion.agents.analyst import _extract_json
 
 
 def test_trailing_brace_text_does_not_discard_object():

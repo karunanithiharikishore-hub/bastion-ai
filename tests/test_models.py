@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from bluecell.models import Event, _parse_ts, CATEGORIES
+from bastion.models import Event, _parse_ts, CATEGORIES
 
 
 def test_parse_ts_iso_z():

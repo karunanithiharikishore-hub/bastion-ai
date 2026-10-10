@@ -4,7 +4,7 @@ import socket
 import threading
 from http.server import ThreadingHTTPServer
 
-from bluecell.web.server import _State, _make_handler
+from bastion.web.server import _State, _make_handler
 
 
 def test_413_json_is_readable_when_body_is_unread_by_handler():

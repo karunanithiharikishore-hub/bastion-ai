@@ -6,7 +6,7 @@ import os
 
 import pytest
 
-from bluecell import cli
+from bastion import cli
 
 
 def _verdict_result():
@@ -43,7 +43,7 @@ def _write_run(runs, run_id, summary):
 
 def test_item23_runs_list_survives_scalar_tokens(tmp_path, monkeypatch, capsys):
     runs = tmp_path / "runs"
-    monkeypatch.setenv("BLUECELL_RUNS_DIR", str(runs))
+    monkeypatch.setenv("BASTION_RUNS_DIR", str(runs))
     _write_run(runs, "20260101T000000Z-aaaaaa", {"run_id": "20260101T000000Z-aaaaaa",
                "started": "2026-01-01T00:00:00Z", "inputs": ["a.log"], "tokens": 5})
     _write_run(runs, "20260101T000001Z-bbbbbb", {"run_id": "20260101T000001Z-bbbbbb",
@@ -57,7 +57,7 @@ def test_item23_runs_list_survives_scalar_tokens(tmp_path, monkeypatch, capsys):
 
 def test_item23_runs_show_survives_bad_shapes(tmp_path, monkeypatch, capsys):
     runs = tmp_path / "runs"
-    monkeypatch.setenv("BLUECELL_RUNS_DIR", str(runs))
+    monkeypatch.setenv("BASTION_RUNS_DIR", str(runs))
     rid = "20260101T000000Z-cccccc"
     _write_run(runs, rid, {"run_id": rid, "inputs": [1, 2], "tokens": 5})
     args = cli.build_parser().parse_args(["runs", "show", rid])

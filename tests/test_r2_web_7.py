@@ -7,15 +7,15 @@ from http.server import ThreadingHTTPServer
 
 import pytest
 
-from bluecell import tracing
-from bluecell.web.server import _State, _make_handler, _upload_label
+from bastion import tracing
+from bastion.web.server import _State, _make_handler, _upload_label
 
 LINE = "Jan  1 00:00:00 host sshd[1]: Failed password for root from 10.0.0.1 port 22 ssh2\n"
 
 
 @pytest.fixture()
 def base(tmp_path, monkeypatch):
-    monkeypatch.setenv("BLUECELL_RUNS_DIR", str(tmp_path / "runs"))
+    monkeypatch.setenv("BASTION_RUNS_DIR", str(tmp_path / "runs"))
     state = _State([], window=60, llm_mode="off", model="x", intel_db=None)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(state))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
@@ -52,7 +52,7 @@ def test_staged_upload_run_is_labelled_and_temp_dir_is_gone(base):
     _post(base, "/api/stage/run", {"token": tok})
     run = _latest_run(base)
     assert run["inputs"] == ["dashboard upload: secret.log"]
-    assert "bluecell_" not in run["inputs"][0]
+    assert "bastion_" not in run["inputs"][0]
 
 
 def test_upload_label_truncates_long_lists():
@@ -64,7 +64,7 @@ def test_upload_label_truncates_long_lists():
 
 
 def test_label_override_does_not_leak_into_later_runs(tmp_path, monkeypatch):
-    monkeypatch.setenv("BLUECELL_RUNS_DIR", str(tmp_path / "runs"))
+    monkeypatch.setenv("BASTION_RUNS_DIR", str(tmp_path / "runs"))
     t1 = t2 = None
     try:
         with tracing.input_names(["dashboard upload: x.log"]):

@@ -2,7 +2,7 @@
 expand into events; only the syslog parser's repeat counter expands (capped)."""
 import json
 
-from bluecell.ingest.loader import ingest_file
+from bastion.ingest.loader import ingest_file
 
 TS = "2026-01-01T00:00:00Z"
 

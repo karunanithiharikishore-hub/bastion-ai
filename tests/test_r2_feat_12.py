@@ -2,9 +2,9 @@
 # incident has no Tier-1 candidate, exactly as when candidates exist.
 from test_repeatability import VotingModel, _ctx
 
-from bluecell.agents import SwarmOrchestrator
-from bluecell.agents.roles import SeniorSocAnalyst
-from bluecell.agents.runtime import SwarmSession
+from bastion.agents import SwarmOrchestrator
+from bastion.agents.roles import SeniorSocAnalyst
+from bastion.agents.runtime import SwarmSession
 
 
 def _split_without_candidates():

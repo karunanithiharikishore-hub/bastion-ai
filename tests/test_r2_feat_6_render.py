@@ -1,6 +1,6 @@
 """BUG-FEAT-6 (render part): unknown cost shows n/a, partial cost shows >= x, never a fake $0.0000."""
-from bluecell import tracing
-from bluecell.report import render
+from bastion import tracing
+from bastion.report import render
 
 USAGE = {"input_tokens": 1000, "output_tokens": 1000}
 
@@ -15,7 +15,7 @@ def _result(trace):
 
 
 def test_all_unknown_run_renders_na_not_zero(tmp_path, monkeypatch):
-    monkeypatch.setenv("BLUECELL_RUNS_DIR", str(tmp_path))
+    monkeypatch.setenv("BASTION_RUNS_DIR", str(tmp_path))
     t = tracing.Tracer(persist=False)
     t.record_usage(None, model="claude-haiku-5-5", source="cli")
     out = render.render_markdown(_result(t.summary()))
@@ -24,7 +24,7 @@ def test_all_unknown_run_renders_na_not_zero(tmp_path, monkeypatch):
 
 
 def test_mixed_run_renders_lower_bound(tmp_path, monkeypatch):
-    monkeypatch.setenv("BLUECELL_RUNS_DIR", str(tmp_path))
+    monkeypatch.setenv("BASTION_RUNS_DIR", str(tmp_path))
     t = tracing.Tracer(persist=False)
     t.record_usage(USAGE, model="claude-haiku-5-5")
     t.record_usage(None, model="claude-haiku-5-5", source="cli")
@@ -34,7 +34,7 @@ def test_mixed_run_renders_lower_bound(tmp_path, monkeypatch):
 
 
 def test_per_agent_unknown_cost_renders_na(tmp_path, monkeypatch):
-    monkeypatch.setenv("BLUECELL_RUNS_DIR", str(tmp_path))
+    monkeypatch.setenv("BASTION_RUNS_DIR", str(tmp_path))
     t = tracing.Tracer(persist=False)
     with t.open("agent-x", "agent", agent="x", tier=1) as sp:
         t.record_usage(None, model="claude-haiku-5-5", source="cli", span=sp)

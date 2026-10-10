@@ -2,10 +2,10 @@
 records the raw source in its run metadata (human-facing report only). The raw
 source must not appear in the model-facing mission text."""
 from conftest import SAMPLES
-from bluecell.ingest import ingest_path
-from bluecell.pipeline import normalize, map_attack, correlate, extract_iocs, compress
-from bluecell.agents import AgentContext
-from bluecell.agents.roles import JuniorSocAnalyst
+from bastion.ingest import ingest_path
+from bastion.pipeline import normalize, map_attack, correlate, extract_iocs, compress
+from bastion.agents import AgentContext
+from bastion.agents.roles import JuniorSocAnalyst
 
 RAW = "iam.amazonaws.com"
 
@@ -38,7 +38,7 @@ def test_plain_source_still_recorded_and_raw_source_not_in_mission():
 
 
 def test_report_shows_raw_source_for_hashed_agent():
-    from bluecell.report.render import _render_swarm
+    from bastion.report.render import _render_swarm
     md = _render_swarm({"agent_count": 1, "roster": [], "consensus": [], "findings": [],
                         "agent_runs": [{"agent": "soc1-src-1a2b3c4d", "tier": 1,
                                         "mode": "rules", "source": "Palo Alto"}]})

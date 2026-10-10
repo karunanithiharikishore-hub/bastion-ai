@@ -1,6 +1,6 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """BUG-R3-AGENT-2: a crashed or timed-out worker's stdout is stream-json that echoes
 tool results (log text). Only the CLI's own error text may trigger the swarm halt
 or appear in the error. Offline: every `claude` here is a fake shell script on PATH."""
@@ -8,12 +8,12 @@ import os
 import stat
 
 from conftest import SAMPLES
-from bluecell.ingest import ingest_path
-from bluecell.pipeline import normalize, map_attack, correlate, extract_iocs, compress
-from bluecell.agents import AgentContext
-from bluecell.agents.roles import ThreatHunter
-from bluecell.agents.runtime import SwarmSession, _run_cli
-from bluecell.llm.backbone import LLMBackbone
+from bastion.ingest import ingest_path
+from bastion.pipeline import normalize, map_attack, correlate, extract_iocs, compress
+from bastion.agents import AgentContext
+from bastion.agents.roles import ThreatHunter
+from bastion.agents.runtime import SwarmSession, _run_cli
+from bastion.llm.backbone import LLMBackbone
 
 
 def _ctx(backbone=None):

@@ -1,6 +1,6 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """ITEM-13: same-named dropped files must stay distinct in the intake list (app.js uniqueName)."""
 import json
 import re
@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-APP_JS = Path(__file__).resolve().parents[1] / "src/bluecell/web/static/app.js"
+APP_JS = Path(__file__).resolve().parents[1] / "src/bastion/web/static/app.js"
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")

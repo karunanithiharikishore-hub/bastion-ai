@@ -3,7 +3,7 @@ with the full URL kept in the message; Azure local-only time is tagged ts-local.
 from conftest import SAMPLES  # noqa: F401  (sets sys.path to src)
 from datetime import datetime, timezone
 
-from bluecell.ingest.parsers import parse_azure_signin, parse_edr
+from bastion.ingest.parsers import parse_azure_signin, parse_edr
 
 
 def test_edr_remote_url_domain_is_hostname_and_url_kept_in_message():

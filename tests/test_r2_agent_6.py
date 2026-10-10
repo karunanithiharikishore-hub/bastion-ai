@@ -1,12 +1,12 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """BUG-AGENT-6: an API-driver run with zero tool calls (refusal or empty reply)
 must fail and fall back to rules, as the CLI driver already does."""
 from test_autonomous_agents import ScriptedModel, _ctx
 
-from bluecell.agents.roles import JuniorSocAnalyst
-from bluecell.agents.runtime import SwarmSession
+from bastion.agents.roles import JuniorSocAnalyst
+from bastion.agents.runtime import SwarmSession
 
 
 def _run_with_reply(content):

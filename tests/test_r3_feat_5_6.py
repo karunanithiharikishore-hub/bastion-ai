@@ -1,7 +1,7 @@
 """R3-FEAT-5/6: intel search --limit must be positive; intel add --id must not be empty."""
 import pytest
 
-from bluecell import cli
+from bastion import cli
 
 
 def test_negative_limit_rejected(tmp_path):

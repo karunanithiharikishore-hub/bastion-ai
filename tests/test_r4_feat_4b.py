@@ -8,10 +8,10 @@ import time
 _CHILD = r"""
 import subprocess, sys
 from conftest import SAMPLES
-from bluecell.ingest import ingest_path
-from bluecell.pipeline import normalize, correlate, extract_iocs, compress
-from bluecell.agents import AgentContext
-from bluecell.agents.runtime import SwarmSession
+from bastion.ingest import ingest_path
+from bastion.pipeline import normalize, correlate, extract_iocs, compress
+from bastion.agents import AgentContext
+from bastion.agents.runtime import SwarmSession
 ev = normalize(ingest_path(SAMPLES))
 ctx = AgentContext(events=ev, incidents=correlate(ev), iocs=extract_iocs(ev), digest=compress(ev))
 s = SwarmSession(ctx, seed=[])

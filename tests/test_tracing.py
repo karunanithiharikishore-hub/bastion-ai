@@ -1,6 +1,6 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """Tracing + cost accounting. No real model calls: fake claude scripts, fake
 API payloads and a fake backbone."""
 import json
@@ -11,17 +11,17 @@ import threading
 import pytest
 
 from conftest import SAMPLES, BENIGN_SAMPLES
-from bluecell import tracing
-from bluecell.analyzer import analyze
-from bluecell.cli import main
-from bluecell.llm.backbone import LLMBackbone
+from bastion import tracing
+from bastion.analyzer import analyze
+from bastion.cli import main
+from bastion.llm.backbone import LLMBackbone
 
 
 @pytest.fixture()
 def runs_dir(tmp_path, monkeypatch):
     d = tmp_path / "runs"
-    monkeypatch.setenv("BLUECELL_RUNS_DIR", str(d))
-    monkeypatch.delenv("BLUECELL_NO_TRACE", raising=False)
+    monkeypatch.setenv("BASTION_RUNS_DIR", str(d))
+    monkeypatch.delenv("BASTION_NO_TRACE", raising=False)
     return d
 
 
@@ -106,7 +106,7 @@ def test_price_lookup_prefers_longest_prefix_and_family():
 STREAM = "\n".join(json.dumps(m) for m in [
     {"type": "system", "subtype": "init"},
     {"type": "assistant", "message": {"model": "claude-sonnet-5", "content": [
-        {"type": "tool_use", "id": "u1", "name": "mcp__bluecell__search_events", "input": {}}]}},
+        {"type": "tool_use", "id": "u1", "name": "mcp__bastion__search_events", "input": {}}]}},
     {"type": "assistant", "message": {"content": [{"type": "text", "text": "hi"}]}},
     "not json at all",
     {"type": "result", "subtype": "success", "result": "done", "num_turns": 3,
@@ -168,7 +168,7 @@ def test_backbone_cli_plain_text_and_error_results(runs_dir, tmp_path, monkeypat
     _fake_claude(tmp_path, monkeypatch, json.dumps(
         {"type": "result", "is_error": True, "subtype": "error_during_execution",
          "result": "limit hit", "total_cost_usd": 0.0}))
-    from bluecell.llm import BackboneUnavailable
+    from bastion.llm import BackboneUnavailable
     with pytest.raises(BackboneUnavailable):
         LLMBackbone("cli").complete("x")
 
@@ -208,7 +208,7 @@ def test_load_run_rejects_traversal_and_missing(runs_dir):
 def test_failure_safety_unwritable_dir_and_bad_inputs(tmp_path, monkeypatch):
     blocker = tmp_path / "file"
     blocker.write_text("x")
-    monkeypatch.setenv("BLUECELL_RUNS_DIR", str(blocker / "sub"))   # cannot mkdir
+    monkeypatch.setenv("BASTION_RUNS_DIR", str(blocker / "sub"))   # cannot mkdir
     t = tracing.start_run(["a"], persist=True)
     tracing.record_llm(object(), model=object())
     tracing.record_tool_calls([{"tool": "x", "t0": "bad", "ms": "bad"}, None])
@@ -227,7 +227,7 @@ def test_analyze_never_fails_when_tracing_breaks(runs_dir, monkeypatch):
 
 
 def test_analyze_trace_summary_report_section_and_persistence(runs_dir):
-    from bluecell.report import render_markdown
+    from bastion.report import render_markdown
     res = analyze([SAMPLES], use_llm=False)
     tr = res["meta"]["trace"]
     assert tr["tool_calls"] == 0 and tr["llm_calls"] == 0 and tr["total_cost_usd"] == 0
@@ -245,7 +245,7 @@ def test_no_trace_does_not_persist(runs_dir):
 
 
 def test_env_disables_persistence(runs_dir, monkeypatch):
-    monkeypatch.setenv("BLUECELL_NO_TRACE", "1")
+    monkeypatch.setenv("BASTION_NO_TRACE", "1")
     analyze([BENIGN_SAMPLES], use_llm=False)
     assert not runs_dir.exists()
 
@@ -260,7 +260,7 @@ class _FakeAPI:
                 "usage": {"input_tokens": 100, "output_tokens": 10}}
 
     def complete(self, *a, **k):
-        from bluecell.llm import BackboneUnavailable
+        from bastion.llm import BackboneUnavailable
         raise BackboneUnavailable("no text mode in this fake")
 
 

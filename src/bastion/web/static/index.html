@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<!-- Bastion AI dashboard - WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
+     Built by Harikishore Karunanithi. MIT - attribution required. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="author" content="Harikishore Karunanithi" />
+  <title>Bastion AI - Threat Intelligence Command Deck</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <canvas id="bg"></canvas>
+  
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true"></span>
+      <div>
+        <div class="wm">BASTION</div>
+        <p class="tag">THREAT INTELLIGENCE · COMMAND DECK</p>
+      </div>
+    </div>
+    <nav class="topnav" aria-label="Sections">
+      <a href="#intake">Intake</a>
+      <a href="#verdict">Verdict</a>
+      <a href="#pinpointer-panel">Root cause</a>
+      <a href="#stage-wrap">Storyline</a>
+      <a href="#iocs">Indicators</a>
+      <a href="runs.html">Runs &amp; cost</a>
+    </nav>
+    <div class="head-right">
+      <span id="backbone" class="pill">backbone: …</span>
+      <span id="live" class="pill live">● LIVE</span>
+    </div>
+  </header>
+
+  <section class="hero-stage" id="top">
+    <div class="hs-grid" aria-hidden="true"></div>
+    <h1 class="hs-title">BASTION</h1>
+    <canvas id="sentinel" aria-hidden="true"></canvas>
+    <div class="hs-copy">
+      <p>Local, read-only log analysis. Drop EDR, DNS and cloud logs, get a grounded verdict and attack storyline.</p>
+      <div class="hs-cta">
+        <button id="hs-drop" class="btn pill-solid" type="button">Drop logs</button>
+        <button id="hs-sample" class="btn ghost" type="button">Load sample attack</button>
+      </div>
+    </div>
+    <aside class="hs-card" aria-label="Sentinel status">
+      <div class="hs-card-h">SENTINEL-01</div>
+      <dl>
+        <dt>Mode</dt><dd>Read-only</dd>
+        <dt>Data</dt><dd>Stays local</dd>
+        <dt>Backbone</dt><dd id="hc-backbone">idle</dd>
+        <dt>Agents</dt><dd id="hc-agents">ready</dd>
+        <dt>Verdict</dt><dd id="hc-verdict">awaiting logs</dd>
+      </dl>
+    </aside>
+  </section>
+
+  <div class="author-bar">
+    ENGINEERED BY <strong>HARIKISHORE KARUNANITHI</strong> · © 2026 · MIT (ATTRIBUTION REQUIRED)
+  </div>
+
+  <main id="app">
+    <!-- ===== STEP 1: LOG INTAKE (drop zone) ===== -->
+    <section class="panel glass intake" id="intake">
+      <div class="panel-head">
+        <h2>DROP YOUR LOGS HERE</h2>
+        <span class="sub">EDR · syslog · DNS · firewall/router/switch · cloud · CSV/JSON/JSONL</span>
+      </div>
+      <div id="dropzone" class="dropzone">
+        <div class="dz-icon" aria-hidden="true">&#8593;</div>
+        <div class="dz-title">Drag &amp; drop log files here</div>
+        <div class="dz-or">or</div>
+        <div class="dz-actions">
+          <button id="browse" class="btn">BROWSE FILES</button>
+          <button id="loadsample" class="btn ghost">LOAD SAMPLE ATTACK</button>
+        </div>
+        <input id="filepick" type="file" multiple hidden
+               accept=".json,.jsonl,.ndjson,.csv,.log,.txt,.syslog" />
+        <div class="dz-hint">Everything stays on your machine. Nothing is uploaded to the internet.</div>
+      </div>
+      <div id="filelist" class="filelist"></div>
+      <div class="intake-controls">
+        <label class="ctl">Correlation window
+          <select id="window">
+            <option value="30">30 min</option>
+            <option value="60">60 min</option>
+            <option value="120" selected>120 min</option>
+            <option value="360">6 hours</option>
+            <option value="1440">24 hours</option>
+          </select>
+        </label>
+        <button id="analyze" class="btn big" disabled>ANALYZE</button>
+        <span id="status" class="status"></span>
+      </div>
+    </section>
+
+    <!-- results wrapper (hidden until first analysis) -->
+    <div id="results">
+      <div class="results-actions">
+        <button id="download-ir" class="btn">DOWNLOAD IR REPORT (.md)</button>
+      </div>
+
+      <section id="verdict" class="verdict"></section>
+
+      <section class="hero" id="hero"></section>
+
+      <section class="panel glass pinpointer" id="pinpointer-panel">
+        <div class="panel-head"><h2>RCA PINPOINTER</h2><span class="sub">root-cause target lock</span></div>
+        <div id="pinpointer" class="pin-body"></div>
+      </section>
+
+      <section class="panel glass summary" id="summary-panel">
+        <div class="panel-head"><h2>ATTACK SUMMARY</h2><span class="sub">how they got in · what they did</span></div>
+        <div id="summary" class="summary-body"></div>
+      </section>
+
+      <section class="panel glass">
+        <div class="panel-head">
+          <h2>ATTACK STORYLINE · 3D KILL-CHAIN</h2>
+          <span class="sub" id="story-sub"></span>
+          <span class="stage-hint">click a phase for details, drag to rotate</span>
+          <div class="stage-btns">
+            <button id="stage-left" class="btn ghost tiny" title="scroll left" aria-label="scroll left">&#8249;</button>
+            <button id="stage-right" class="btn ghost tiny" title="scroll right" aria-label="scroll right">&#8250;</button>
+            <button id="resetview" class="btn ghost tiny">reset view</button>
+          </div>
+        </div>
+        <div class="stage-wrap" id="stage-wrap">
+          <div id="stage" class="stage"></div>
+        </div>
+        <div id="stage-detail" class="stage-detail"></div>
+      </section>
+
+      <div class="grid">
+        <section class="panel glass span-2">
+          <div class="panel-head"><h2>AGENT SWARM · CONSTELLATION</h2><span class="sub" id="swarm-sub"></span></div>
+          <div class="swarm-wrap">
+            <div id="orbit" class="orbit"></div>
+            <div id="swarm-side" class="swarm-side"></div>
+          </div>
+        </section>
+        <section class="panel glass">
+          <div class="panel-head"><h2>INCIDENTS</h2></div>
+          <div id="incidents" class="incidents"></div>
+        </section>
+      </div>
+
+      <div class="grid">
+        <section class="panel glass">
+          <div class="panel-head"><h2>INDICATORS OF COMPROMISE</h2></div>
+          <div id="iocs"></div>
+        </section>
+        <section class="panel glass span-2">
+          <div class="panel-head"><h2>THREAT-HUNT CHECKLIST</h2></div>
+          <div id="hunt"></div>
+        </section>
+      </div>
+
+      <section class="panel glass">
+        <div class="panel-head"><h2>THREAT INTEL REFERENCED</h2></div>
+        <div id="intel"></div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="foot">
+    <!-- BASTION::AUTHOR::Harikishore-Karunanithi -->
+    BASTION - ENGINEERED BY <strong>HARIKISHORE KARUNANITHI</strong> ·
+    MIT; ATTRIBUTION REQUIRED · <span id="ver"></span>
+  </footer>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="app.js"></script>
+  <script src="sentinel.js"></script>
+</body>
+</html>

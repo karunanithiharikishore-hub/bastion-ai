@@ -2,8 +2,8 @@
 usermod group-add is account manipulation (T1098). Deletes and plain `net user` stay clean."""
 import pytest
 
-from bluecell.models import Event
-from bluecell.pipeline.attack import map_attack
+from bastion.models import Event
+from bastion.pipeline.attack import map_attack
 
 _TS = "2026-10-03T22:00:00Z"
 

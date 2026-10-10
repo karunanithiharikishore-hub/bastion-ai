@@ -1,15 +1,15 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """BUG-CMD-6: a wall-clock budget too small to start one worker is refused
 (CLI and commander), and a fallback caused by the budget says it ran unbounded.
 """
 import pytest
 
-from bluecell.agents import AgentContext
-from bluecell.agents.commander import Dispatcher
-from bluecell.agents.runtime import SwarmSession
-from bluecell.cli import build_parser
+from bastion.agents import AgentContext
+from bastion.agents.commander import Dispatcher
+from bastion.agents.runtime import SwarmSession
+from bastion.cli import build_parser
 
 from test_autonomous_agents import _ctx
 from test_commander import SwarmModel, _orch, _text, _use
@@ -31,7 +31,7 @@ def test_commander_refuses_budget_too_small_at_construction():
     ctx = _ctx()
     session = SwarmSession(ctx, seed=[])
     try:
-        from bluecell.agents import SwarmOrchestrator
+        from bastion.agents import SwarmOrchestrator
         orch = SwarmOrchestrator(ctx, orchestration="commander")
         with pytest.raises(ValueError, match="too small"):
             Dispatcher(orch, ctx, session, budget_seconds=30)

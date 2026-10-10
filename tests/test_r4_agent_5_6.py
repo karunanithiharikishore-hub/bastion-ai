@@ -1,7 +1,7 @@
 import time
 from types import SimpleNamespace
 
-from bluecell.agents.grounding import evidence_index
+from bastion.agents.grounding import evidence_index
 
 
 def _ev(raw):

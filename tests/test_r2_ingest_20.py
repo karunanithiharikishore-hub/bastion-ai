@@ -3,8 +3,8 @@ for CloudTrail, Azure Activity and Defender/Sentinel Advanced Hunting, and the
 Sentinel IPAddress header."""
 import json
 
-from bluecell.ingest import detect_source
-from bluecell.ingest.loader import ingest_file
+from bastion.ingest import detect_source
+from bastion.ingest.loader import ingest_file
 
 TS = "2026-01-01T00:00:00Z"
 

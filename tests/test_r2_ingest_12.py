@@ -1,7 +1,7 @@
 """BUG-INGEST-12: blank CSV rows and {} records must not become phantom events."""
 import json
 
-from bluecell.ingest.loader import ingest_file
+from bastion.ingest.loader import ingest_file
 
 
 def test_csv_blank_trailing_rows_are_skipped(tmp_path):

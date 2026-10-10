@@ -1,7 +1,7 @@
 """BUG-R3-INGEST-3: non-cloud logon brute force must not blame a mail client."""
-from bluecell.models import Event
-from bluecell.pipeline import map_attack, correlate
-from bluecell.report.rca import assess_incident
+from bastion.models import Event
+from bastion.pipeline import map_attack, correlate
+from bastion.report.rca import assess_incident
 
 T = "2026-09-26T09:%02d:00Z"
 

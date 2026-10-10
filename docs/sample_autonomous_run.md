@@ -1,4 +1,4 @@
-# BlueCell - Incident Analysis Report
+# Bastion AI - Incident Analysis Report
 
 > Built by **Harikishore Karunanithi** · Copyright (c) 2026 Harikishore Karunanithi. Licensed under MIT — attribution required.
 
@@ -326,7 +326,7 @@ Caveat: the observed IPs (203.0.113.66, 203.0.113.90, 198.51.100.7) fall in the 
     - action: Immediately deactivate/delete the newly created access key and detach AdministratorAccess from 'admin'; pull full CloudTrail (beyond this case's 09:01-09:20 window) to check for any use of the new key; remove standing iam:CreateAccessKey/iam:AttachUserPolicy self-permissions from this principal (apply least privilege + permission boundaries / SCP guardrails so no identity can attach AdministratorAccess to itself); require MFA (hardware or virtual) for all sensitive IAM mutating calls; rotate all admin credentials and audit other IAM principals for the same self-escalation permission pattern.
 
 ---
-_BlueCell is a read-only analysis aid. Validate all findings before acting. IOCs and RCA are hypotheses, not proof._
+_Bastion AI is a read-only analysis aid. Validate all findings before acting. IOCs and RCA are hypotheses, not proof._
 
-<!-- BLUECELL::AUTHOR::Harikishore-Karunanithi -->
-_BlueCell - built by Harikishore Karunanithi. Copyright (c) 2026 Harikishore Karunanithi. Licensed under MIT — attribution required._
+<!-- BASTION::AUTHOR::Harikishore-Karunanithi -->
+_Bastion AI - built by Harikishore Karunanithi. Copyright (c) 2026 Harikishore Karunanithi. Licensed under MIT — attribution required._

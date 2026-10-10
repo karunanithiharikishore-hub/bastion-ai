@@ -1,13 +1,13 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """ITEM-3 regression: submit_finding must reject an incident_id whose events are
 not among the cited evidence, the same rule submit_verdict already enforces."""
 import json
 
 from test_autonomous_agents import _ctx
-from bluecell.agents.toolbox import Blackboard, SecurityToolbox
-from bluecell.pipeline.correlate import Incident
+from bastion.agents.toolbox import Blackboard, SecurityToolbox
+from bastion.pipeline.correlate import Incident
 
 
 def _two_incident_box(tmp_path):

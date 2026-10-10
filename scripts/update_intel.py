@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """Self-updating threat-intel ingester (the "always-current" layer).
 
 Pulls recent CVEs from the public NVD 2.0 API (no API key required for modest
-rates) and folds them into the BlueCell intel store. Run it on a schedule
+rates) and folds them into the Bastion AI intel store. Run it on a schedule
 (cron / launchd / the scheduled-tasks connector) so the analysis pipeline
 always retrieves current vulnerability context via RAG.
 
@@ -27,7 +27,7 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-from bluecell.intel import IntelStore  # noqa: E402
+from bastion.intel import IntelStore  # noqa: E402
 
 NVD_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 
@@ -43,7 +43,7 @@ def fetch_nvd(days: int, keyword: str | None, limit: int) -> list:
     if keyword:
         params["keywordSearch"] = keyword
     url = NVD_URL + "?" + urllib.parse.urlencode(params)
-    req = urllib.request.Request(url, headers={"User-Agent": "bluecell-intel/0.1"})
+    req = urllib.request.Request(url, headers={"User-Agent": "bastion-intel/0.1"})
     with urllib.request.urlopen(req, timeout=60) as resp:
         data = json.loads(resp.read().decode("utf-8"))
 
@@ -72,7 +72,7 @@ def fetch_nvd(days: int, keyword: str | None, limit: int) -> list:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Update BlueCell threat-intel store from NVD.")
+    ap = argparse.ArgumentParser(description="Update Bastion AI threat-intel store from NVD.")
     ap.add_argument("--days", type=int, default=3,
                     help="Look back this many days (NVD allows at most 120)")
     ap.add_argument("--keyword", help="Optional keyword filter (e.g. ransomware)")

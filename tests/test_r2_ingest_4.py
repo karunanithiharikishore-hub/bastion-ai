@@ -2,12 +2,12 @@
 
 NUL bytes and placeholders ('-', 'N/A') used to survive, and correlate() then
 linked unrelated events through them. Unparseable syslog IPs were kept as-is."""
-from bluecell.ingest.loader import ingest_file
-from bluecell.ingest.parsers import (
+from bastion.ingest.loader import ingest_file
+from bastion.ingest.parsers import (
     _clean_ip, parse_auth, parse_azure_signin, parse_dns, parse_edr,
     parse_network, parse_syslog_line, parse_ual,
 )
-from bluecell.pipeline.correlate import correlate
+from bastion.pipeline.correlate import correlate
 
 
 def test_clean_ip_strips_nul_and_rejects_placeholders_and_junk():

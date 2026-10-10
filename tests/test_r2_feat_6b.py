@@ -6,9 +6,9 @@ import types
 
 import pytest
 
-from bluecell import tracing
-from bluecell.agents import runtime
-from bluecell.agents.roles import JuniorSocAnalyst
+from bastion import tracing
+from bastion.agents import runtime
+from bastion.agents.roles import JuniorSocAnalyst
 
 ASSISTANT = ('{"type":"assistant","message":{"id":"msg_1","model":"claude-haiku-5-5",'
              '"usage":{"input_tokens":1200,"output_tokens":300}}}')

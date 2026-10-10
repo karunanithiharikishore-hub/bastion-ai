@@ -1,7 +1,7 @@
 """ITEM-6: a render crash in observe() must fail must_* checks, not blank the text so they pass vacuously."""
 import pytest
 
-from bluecell import evals
+from bastion import evals
 
 
 def _result():
@@ -13,8 +13,8 @@ def _result():
 def broken_renderer(monkeypatch):
     def boom(result):
         raise RuntimeError("renderer crashed")
-    # observe() imports render_markdown from the bluecell.report package at call time
-    monkeypatch.setattr("bluecell.report.render_markdown", boom)
+    # observe() imports render_markdown from the bastion.report package at call time
+    monkeypatch.setattr("bastion.report.render_markdown", boom)
 
 
 def test_observe_records_render_error(broken_renderer):

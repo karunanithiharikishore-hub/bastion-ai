@@ -1,7 +1,7 @@
 """ITEM-24 follow-up: CEF extension values may contain spaces; `\\=`, `\\\\` and header `\\|` are escapes."""
 import time
 
-from bluecell.ingest.parsers import parse_text_line
+from bastion.ingest.parsers import parse_text_line
 
 HDR = "CEF:0|Acme|IDS|1.0|100|Login|8|"
 

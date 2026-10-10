@@ -1,5 +1,5 @@
-from bluecell.ingest.loader import ingest_file
-from bluecell.ingest.parsers import parse_o365_message
+from bastion.ingest.loader import ingest_file
+from bastion.ingest.parsers import parse_o365_message
 
 
 def test_failed_second_recipient_raises_severity():

@@ -1,6 +1,6 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """BUG-WEB-3: staged upload dirs must not survive SIGTERM / SIGHUP shutdown."""
 import glob
 import http.client
@@ -43,11 +43,11 @@ def test_bug_web3_signal_removes_staged_dirs(sig, tmp_path):
     samples = tmp_path / "samples"
     shutil.copytree(SAMPLES, samples)
     env = dict(os.environ, PYTHONPATH=os.path.abspath(os.path.join(ROOT, "src")),
-               TMPDIR=str(tmp), BLUECELL_CACHE_DIR=str(tmp_path / "cache"),
-               BLUECELL_RUNS_DIR=str(tmp_path / "runs"))
+               TMPDIR=str(tmp), BASTION_CACHE_DIR=str(tmp_path / "cache"),
+               BASTION_RUNS_DIR=str(tmp_path / "runs"))
     port = _free_port()
     proc = subprocess.Popen(
-        [sys.executable, "-u", "-m", "bluecell", "serve", str(samples),
+        [sys.executable, "-u", "-m", "bastion", "serve", str(samples),
          "--llm", "off", "--port", str(port)],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
     try:
@@ -60,13 +60,13 @@ def test_bug_web3_signal_removes_staged_dirs(sig, tmp_path):
         else:
             pytest.fail("server did not start")
         _post(port, "/api/stage/add", {"token": token, "name": "a.log", "content": "secret"})
-        assert glob.glob(str(tmp / "bluecell_stage_*")), "stage dir should exist before signal"
+        assert glob.glob(str(tmp / "bastion_stage_*")), "stage dir should exist before signal"
         proc.send_signal(sig)
         out, _ = proc.communicate(timeout=60)
     finally:
         if proc.poll() is None:
             proc.kill()
             proc.communicate()
-    assert glob.glob(str(tmp / "bluecell_stage_*")) == []
+    assert glob.glob(str(tmp / "bastion_stage_*")) == []
     assert proc.returncode == 0
     assert "shutting down" in out

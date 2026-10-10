@@ -6,13 +6,13 @@ from datetime import datetime, timezone
 
 import pytest
 
-from bluecell.ingest import detect_source, ingest_path
-from bluecell.ingest.loader import ingest_file
-from bluecell.ingest.parsers import (
+from bastion.ingest import detect_source, ingest_path
+from bastion.ingest.loader import ingest_file
+from bastion.ingest.parsers import (
     _azure_is_failure, parse_azure_signin, parse_cloud, parse_edr,
     parse_o365_message, parse_syslog_line, parse_ual,
 )
-from bluecell.models import Event
+from bastion.models import Event
 
 
 def _write(tmp_path, name, text, encoding="utf-8"):

@@ -2,7 +2,7 @@
 agents and wall clock the commander left, not run the full roster."""
 import time
 
-from bluecell.agents import orchestrator
+from bastion.agents import orchestrator
 from test_autonomous_agents import _ctx
 from test_commander import SwarmModel, _orch
 

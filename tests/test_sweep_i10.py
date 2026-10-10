@@ -1,9 +1,9 @@
 """ITEM-10: a successful risky Azure sign-in (T1078, zero failures) must not be
 narrated as defense evasion / persistence, nor headlined as failed-then-success."""
-from bluecell import analyzer
-from bluecell.ingest import ingest_path
-from bluecell.pipeline import correlate, map_attack, normalize
-from bluecell.report.rca import assess_incident, deterministic_storyline
+from bastion import analyzer
+from bastion.ingest import ingest_path
+from bastion.pipeline import correlate, map_attack, normalize
+from bastion.report.rca import assess_incident, deterministic_storyline
 
 from conftest import SAMPLES
 

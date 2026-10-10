@@ -2,10 +2,10 @@
 spelling of the model's verdict string."""
 import pytest
 
-from bluecell.models import Event
-from bluecell.agents.analyst import ai_analyze, _norm_verdict
-from bluecell.agents.injection import INJECTION_TAG
-from bluecell.pipeline import extract_iocs
+from bastion.models import Event
+from bastion.agents.analyst import ai_analyze, _norm_verdict
+from bastion.agents.injection import INJECTION_TAG
+from bastion.pipeline import extract_iocs
 
 
 class _FakeBackbone:

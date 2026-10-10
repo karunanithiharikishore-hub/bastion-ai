@@ -8,8 +8,8 @@ import json
 import os
 
 from conftest import SAMPLES, FEEDS
-from bluecell.analyzer import analyze
-from bluecell.intel.store import IntelStore
+from bastion.analyzer import analyze
+from bastion.intel.store import IntelStore
 
 
 def _store(tmp_path):

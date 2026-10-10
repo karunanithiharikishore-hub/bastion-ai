@@ -1,10 +1,10 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 # ITEM-20: _shrink must keep the reviewer's lead payload within 4000 chars, valid JSON.
 import json
 
-from bluecell.agents.analyst import _shrink
+from bastion.agents.analyst import _shrink
 
 
 def test_shrink_caps_many_string_keys():

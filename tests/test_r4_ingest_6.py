@@ -3,7 +3,7 @@ string we cannot honour must be unparsed (None), not silently wrong.
 """
 from datetime import datetime, timezone
 
-from bluecell.models import _parse_ts_or_none
+from bastion.models import _parse_ts_or_none
 
 
 def test_month_name_pm_timestamp_keeps_pm():

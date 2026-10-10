@@ -3,7 +3,7 @@ line must not create a new syslog event (log forging) or drop JSONL records."""
 import json
 import pytest
 
-from bluecell.ingest.loader import ingest_file
+from bastion.ingest.loader import ingest_file
 
 
 @pytest.mark.parametrize("sep", [" ", "\u0085", "\x0c", "\x1c", "\x0b"])

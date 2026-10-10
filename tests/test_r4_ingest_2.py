@@ -1,8 +1,8 @@
 """BUG-R4-INGEST-2: Sentinel SecurityEvent 4625, Get-WinEvent TimeCreated and SecurityAlert fields."""
 import json
 
-from bluecell.ingest.loader import ingest_file
-from bluecell.pipeline.attack import map_attack
+from bastion.ingest.loader import ingest_file
+from bastion.pipeline.attack import map_attack
 
 
 def _load(tmp_path, name, text):
@@ -36,7 +36,7 @@ def test_security_alert_fields_kept(tmp_path):
 
 
 def test_security_alert_row_is_an_alert():
-    from bluecell.ingest.parsers import parse_edr
+    from bastion.ingest.parsers import parse_edr
     ev = parse_edr({"TimeGenerated": "2026-10-03T22:00:00Z", "AlertName": "Mimikatz detected",
                     "AlertSeverity": "High", "CompromisedEntity": "WKS-7"})
     assert ev.category == "alert"

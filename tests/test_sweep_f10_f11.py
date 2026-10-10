@@ -3,8 +3,8 @@ ITEM-11: save() merges concurrent writers and uses a unique tmp name."""
 import json
 import os
 
-from bluecell.intel import IntelStore
-from bluecell.intel import store as store_mod
+from bastion.intel import IntelStore
+from bastion.intel import store as store_mod
 
 
 def test_store_file_keywords_match_case_insensitively(tmp_path):

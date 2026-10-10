@@ -7,7 +7,7 @@ current directory.
 import json
 import os
 
-from bluecell.intel.store import IntelStore
+from bastion.intel.store import IntelStore
 
 
 def test_save_bare_filename_writes_into_cwd(tmp_path, monkeypatch):

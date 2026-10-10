@@ -7,7 +7,7 @@ import sys
 sys.path.insert(0, sys.argv[1])
 from test_autonomous_agents import _ctx
 from test_commander import SwarmModel, _orch, _use
-from bluecell import cli
+from bastion import cli
 cli.provenance.enforce = lambda **k: None
 def cmd(args):
     ctx = _ctx()
@@ -30,12 +30,12 @@ def test_exit_fast_with_inflight_model_call(tmp_path, sig, code):
     try:
         p.stdout.readline()
         time.sleep(1.5)                      # workers are now blocked in their fake model call
-        assert glob.glob(str(tmp_path / "bluecell-swarm-*"))
+        assert glob.glob(str(tmp_path / "bastion-swarm-*"))
         t = time.monotonic()
         p.send_signal(sig)
         assert p.wait(timeout=10) == code
         assert time.monotonic() - t < 3
-        assert not glob.glob(str(tmp_path / "bluecell-swarm-*"))
+        assert not glob.glob(str(tmp_path / "bastion-swarm-*"))
     finally:
         if p.poll() is None:
             p.kill()

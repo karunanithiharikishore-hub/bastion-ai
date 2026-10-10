@@ -1,11 +1,11 @@
 """BUG-FEAT-11 (cache part) -- the run cache must not grow forever: entries orphaned
-by a code change are dropped, only the newest BLUECELL_CACHE_KEEP entries are
+by a code change are dropped, only the newest BASTION_CACHE_KEEP entries are
 kept, stale *.tmp files are swept, and pruning never breaks a store."""
 import os
 
 import pytest
 
-from bluecell import cache as run_cache
+from bastion import cache as run_cache
 
 
 @pytest.fixture

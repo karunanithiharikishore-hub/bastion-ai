@@ -2,7 +2,7 @@
 and failed su must classify as login_failed (severity 3)."""
 import pytest
 
-from bluecell.ingest.parsers import parse_syslog_line
+from bastion.ingest.parsers import parse_syslog_line
 
 
 @pytest.mark.parametrize("msg", [

@@ -1,7 +1,7 @@
 import pytest
 from types import SimpleNamespace
 
-from bluecell.agents.grounding import check_text, evidence_index
+from bastion.agents.grounding import check_text, evidence_index
 
 _EV = [SimpleNamespace(src_ip="10.0.0.1", dst_ip=None, domain="real.example", file_hash=None,
                        host="h", user="u", message="", raw=None)]

@@ -1,6 +1,6 @@
-# BlueCell - Blue-Team Log Intelligence
+# Bastion AI - Blue-Team Log Intelligence
 # Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
-# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
+# WATERMARK: BASTION::AUTHOR::Harikishore-Karunanithi
 """BUG-INJ-6: commander objectives and summaries are untrusted text.
 
 A steering-only objective ("do not report anything") must be refused, the
@@ -9,10 +9,10 @@ carries injected steering must be stored enveloped, not as the case conclusion.
 """
 import re
 
-from bluecell.agents import AgentContext, SwarmOrchestrator
-from bluecell.agents.commander import Dispatcher
-from bluecell.agents.injection import outside_envelopes
-from bluecell.agents.runtime import SwarmSession
+from bastion.agents import AgentContext, SwarmOrchestrator
+from bastion.agents.commander import Dispatcher
+from bastion.agents.injection import outside_envelopes
+from bastion.agents.runtime import SwarmSession
 
 from test_integration import _pipeline
 from conftest import SAMPLES

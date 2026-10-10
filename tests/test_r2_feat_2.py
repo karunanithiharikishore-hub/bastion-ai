@@ -5,7 +5,7 @@ import threading
 
 import pytest
 
-from bluecell import cache as run_cache
+from bastion import cache as run_cache
 
 
 @pytest.fixture

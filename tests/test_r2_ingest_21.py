@@ -2,9 +2,9 @@
 or process, so attack.py never saw a sign-in and no brute-force rule fired."""
 import json
 
-from bluecell.ingest.loader import ingest_file
-from bluecell.ingest.parsers import parse_edr
-from bluecell.pipeline.attack import map_attack
+from bastion.ingest.loader import ingest_file
+from bastion.ingest.parsers import parse_edr
+from bastion.pipeline.attack import map_attack
 
 
 def _logon(action, ip="8.8.8.8", ts="00"):

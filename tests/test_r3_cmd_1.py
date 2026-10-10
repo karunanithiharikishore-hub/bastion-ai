@@ -1,6 +1,6 @@
 """BUG-R3-CMD-1: commander path keeps Tier-3 + sets tier3_note on an injection all-dismissal."""
-from bluecell.agents import SwarmOrchestrator
-from bluecell.agents.injection import INJECTION_TAG
+from bastion.agents import SwarmOrchestrator
+from bastion.agents.injection import INJECTION_TAG
 from test_commander import SwarmModel, _text, _use
 from test_autonomous_agents import _ctx
 
