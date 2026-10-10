@@ -315,11 +315,15 @@ def uncacheable_reason(result: dict, backbone) -> str | None:
     return gap
 
 
-def mark_hit(entry: dict, key: str, elapsed_ms: int) -> dict:
+def mark_hit(entry: dict, key: str, elapsed_ms: int, run_meta: dict | None = None) -> dict:
     result = entry["result"]
     meta = result.get("meta")
     if not isinstance(meta, dict):   # a malformed entry must not crash the run
         meta = result["meta"] = {}
+    meta.update(run_meta or {})      # this run's raw counts (the key hashes normalized events)
+    # No agent ran in this run: the stored run's agents are reported as cached.
+    meta["agents_cached"] = meta.pop("agents_deployed", 0)
+    meta["agents_deployed"] = 0
     meta["cache"] = "hit"
     meta["cache_key"] = key
     meta["cached_at"] = entry.get("stored_at")

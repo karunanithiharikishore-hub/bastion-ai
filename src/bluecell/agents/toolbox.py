@@ -28,7 +28,7 @@ import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
-from .grounding import evidence_index, check_text, _DOMAIN_RE
+from .grounding import evidence_index, check_text
 from .injection import Envelope, check_agent_text, is_flagged, event_reasons, safe_label
 from ..pipeline.attack import ATTACK_TECHNIQUES
 from .budget import MAX_TOOL_RESULT_CHARS, MAX_BOARD_ENTRIES
@@ -41,6 +41,7 @@ _SEVERITIES = ("low", "medium", "high", "critical")
 _IOC_TRUSTED = ("count", "suspicious")
 _EVENT_FIELDS = ("source", "category", "action", "host", "user", "process",
                  "src_ip", "dst_ip", "domain", "file_path", "file_hash")
+_GROUP_FIELDS = _EVENT_FIELDS + ("dst_port",)  # ports are groupable, not searched as text
 
 
 _SEV_NAMES = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
@@ -195,7 +196,7 @@ TOOL_SPECS = [
     {"name": "aggregate",
      "description": "Count events grouped by one field (e.g. find rare processes or "
                     "top talkers). Optional source/action filters.",
-     "input_schema": _obj({"group_by": dict(_STR, enum=list(_EVENT_FIELDS)),
+     "input_schema": _obj({"group_by": dict(_STR, enum=list(_GROUP_FIELDS)),
                            "source": _STR, "action": _STR,
                            "limit": dict(_INT, description="default 25")},
                           ["group_by"])},
@@ -283,10 +284,6 @@ class SecurityToolbox:
         self._flagged = [e.event_id for e in ctx.events if is_flagged(e)]
         techs = {t for e in ctx.events for t in (e.attack or [])}
         self._index = evidence_index(ctx.events, techs)
-        # Anything domain-shaped that literally occurs in the logs is grounded.
-        for e in ctx.events:
-            self._index["domains"].update(
-                m.lower() for m in _DOMAIN_RE.findall(self._haystack(e)))
 
     def specs(self) -> list:
         """Tool specs (name, description, input_schema) this agent is offered."""
@@ -457,6 +454,7 @@ class SecurityToolbox:
             "tactics": sorted(inc.tactics), "techniques": inc.techniques,
             "entities": self._wrap({k: sorted(map(str, v)) for k, v in inc.entities.items()}),
             "events": [self._line(e) for e in inc.events[:max_events]],
+            "total": len(inc.events),
             "truncated": len(inc.events) > max_events,
             **self._injection_note(inc.events),
         }
@@ -473,6 +471,9 @@ class SecurityToolbox:
                 raise ValueError(f"min_severity {min_severity!r} must be 0-4 or one of "
                                  f"{list(_SEV_NAMES)}")
             min_severity = sev
+        port = None if dst_port in (None, "") else _as_int(dst_port, None)
+        if dst_port not in (None, "") and port is None:
+            raise ValueError(f"dst_port {dst_port!r} must be an integer")
         # Techniques match hierarchically: T1071 covers T1071.004, not the reverse.
         tech = str(technique).upper() if technique else None
         low = lambda v: str(v).lower() if v is not None else None
@@ -484,7 +485,7 @@ class SecurityToolbox:
             if host and host not in (e.host or "").lower(): continue
             if user and user not in (e.user or "").lower(): continue
             if ip and ip not in ((e.src_ip or "").lower(), (e.dst_ip or "").lower()): continue
-            if dst_port is not None and e.dst_port != _as_int(dst_port, None): continue
+            if port is not None and e.dst_port != port: continue
             if domain and domain not in (e.domain or "").lower(): continue
             if process and process not in (e.process or "").lower(): continue
             if action and action not in (e.action or "").lower(): continue
@@ -537,10 +538,13 @@ class SecurityToolbox:
                 **self._injection_note(hits)}
 
     def t_aggregate(self, group_by, source=None, action=None, limit=25):
-        if group_by not in _EVENT_FIELDS:
-            return {"error": f"group_by must be one of {list(_EVENT_FIELDS)}"}
+        if group_by not in _GROUP_FIELDS:
+            return {"error": f"group_by must be one of {list(_GROUP_FIELDS)}"}
+        # Same matching as search_events: any case, substring.
+        act = str(action).lower() if action else None
         ev = [e for e in self.ctx.events
-              if (not source or _same_source(source, e.source)) and (not action or e.action == action)]
+              if (not source or _same_source(source, e.source))
+              and (not act or act in (e.action or "").lower())]
         counts = Counter(getattr(e, group_by) or "-" for e in ev)
         # Group values are raw field values: cap each, envelope the lot.
         limit = max(1, min(_as_int(limit, 25), 200))
@@ -552,8 +556,12 @@ class SecurityToolbox:
 
     def t_list_iocs(self, kind=None, suspicious_only=False):
         suspicious_only = _as_bool(suspicious_only)
+        known = self.ctx.iocs or {}
+        kind = str(kind).lower() if kind else None
+        if kind and kind not in known:
+            return {"error": f"no IOC kind {kind!r}; known: {sorted(known)}"}
         out = {}
-        for k, items in (self.ctx.iocs or {}).items():
+        for k, items in known.items():
             if kind and k != kind:
                 continue
             sel = [i for i in items if i.get("suspicious") or not suspicious_only]
@@ -563,6 +571,8 @@ class SecurityToolbox:
                            data=self._wrap({f: v for f, v in i.items()
                                             if f not in _IOC_TRUSTED}, 600))
                       for i in sel[:50]]
+            if len(sel) > 50:   # say how many exist, only when the list was capped
+                out.setdefault("total", {})[k] = len(sel)
         return out
 
     def t_attack_lookup(self, technique_id):
@@ -573,6 +583,7 @@ class SecurityToolbox:
                 "name": meta[0] if meta else None,
                 "tactic": meta[1] if meta else None,
                 "in_catalog": bool(meta),
+                "total": len(tagged),
                 "tagged_events": [self._line(e) for e in tagged[:25]]}
 
     def t_intel_search(self, terms):

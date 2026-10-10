@@ -70,8 +70,26 @@ _REMOTE_PORTS = {22, 445, 139, 3389, 5985, 5986}  # SSH, SMB, RDP, WinRM
 # rows (ASA "connection", FortiGate "close") would double-count the session, so they are skipped.
 _ALLOWED_RE = re.compile(r"\b(?:allow(?:ed)?|accept(?:ed)?|permit(?:ted)?|pass(?:ed)?|built|established|success|open|connection)\b")
 _TEARDOWN_RE = re.compile(r"teardown|\bclose[ds]?\b")
-# Whole-word failure: "failover" is not a failed login.
-_FAIL_RE = re.compile(r"(?<![a-z])fail(?:ed|ure|ures|ing|s)?(?![a-z])")
+# Whole-word failure: "failover" is not a failed login; "unsuccessful" is. Auth-only
+# wording: denied/rejected/incorrect/lockout, "LogonFailed" (no word boundary in Windows names).
+# T1110 gates on category=authentication, so firewall "deny" rows never reach this.
+_FAIL_RE = re.compile(
+    r"(?:(?<![a-z])(?:fail(?:ed|ure|ures|ing|s)?|unsuccess(?:ful|fully)?|denied|rejected|incorrect"
+    r"|invalid[ _](?:password|credentials|user)|bad[ _]password|lock(?:ed[ _])?out"
+    r"|authentication[ _]error)(?![a-z])|logonfailed(?![a-z]))")
+# "unsuccessful" and "not accepted" are not successes; "logonsuccess" and "login_success" are.
+_SUCCESS_RE = re.compile(r"(?<!un)success(?:ful|fully)?(?![a-z])")
+_ACCEPTED_RE = re.compile(r"(?<!not )(?<![a-z])accepted(?![a-z])")
+
+
+def _is_auth_success(ev) -> bool:
+    """A sign-in that worked. Shared by map_attack and report/rca so verdict and tags agree."""
+    if ev.category != "authentication":
+        return False
+    act = (ev.action or "").lower()
+    if _FAIL_RE.search(act):  # an explicit failure action always wins
+        return False
+    return bool(_SUCCESS_RE.search(act) or _ACCEPTED_RE.search((ev.message or "").lower()))
 _SEC_TOOL = (r"(?:defender|windefend|mpssvc|antivirus|anti-virus|antimalware|"
              r"firewall\w*|edr|sysmon\d*|real-?time (?:protection|monitoring)|"
              r"tamper protection|security (?:service|product|agent|center|software|tool))")
@@ -122,8 +140,7 @@ def map_attack(events: list) -> list:
 
         # Credential access — failed logins. A success that merely mentions an
         # earlier failure ("accepted ... after 1 failed attempt") is not one.
-        success = ev.category == "authentication" and (
-            "success" in act or "accepted" in msg or "login_success" in act)
+        success = _is_auth_success(ev)
         if ev.category == "authentication" and not success and (_FAIL_RE.search(act) or _FAIL_RE.search(msg)):
             _tag(ev, "T1110", "auth-failure")
         if success:

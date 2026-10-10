@@ -46,8 +46,9 @@ class _State:
     _MAX_STAGES = 32     # concurrent staging slots (oldest is dropped beyond this)
 
     def __init__(self, paths, window, llm_mode, model, intel_db, max_upload_mb=256,
-                 orchestration="auto", votes=1, tier1_model=None):
+                 orchestration="auto", votes=1, tier1_model=None, allow_hosts=None):
         self.paths = paths
+        self.allow_hosts = allow_hosts or set(_LOOPBACK)  # Host names served (DNS rebinding guard)
         self.window = window
         self.llm_mode = llm_mode
         self.orchestration = orchestration   # auto | commander | fixed
@@ -213,6 +214,19 @@ def _upload_label(folder):
 _LOOPBACK = {"127.0.0.1", "localhost", "::1"}
 
 
+def _allowed_hosts(bind, extra=()):
+    """Host names served. Loopback binds: loopback only. Other binds also accept the
+    bind address, this machine's name and IPs, and --allow-host names."""
+    if bind in _LOOPBACK:
+        return set(_LOOPBACK)
+    me = socket.gethostname()
+    try:
+        ips = {a[4][0] for a in socket.getaddrinfo(me, None)}
+    except OSError:
+        ips = set()
+    return set(_LOOPBACK) | {x.lower() for x in (bind, me, *ips, *extra)}
+
+
 def _host_name(host_header: str) -> str:
     """Hostname part of a Host header ("127.0.0.1:8787", "[::1]:8787")."""
     h = (host_header or "").strip().lower()
@@ -274,7 +288,7 @@ def _make_handler(state: _State):
             POST carrying an Origin must come from the dashboard itself (a page on
             another site cannot upload logs or start an analysis)."""
             host = self.headers.get("Host", "")
-            if self.server.server_address[0] in _LOOPBACK and _host_name(host) not in _LOOPBACK:
+            if _host_name(host) not in state.allow_hosts:
                 self._send(403, b"forbidden host", "text/plain")
                 return False
             # A cross-site <img>/<link> can still fire a GET (e.g. /api/refresh,
@@ -472,12 +486,19 @@ def _interrupt(signum, frame):
 
 def serve(paths, host="127.0.0.1", port=8787, window=60, llm_mode="off",
           model="claude-sonnet-5", intel_db=None, open_browser=False,
-          max_upload_mb=256, orchestration="auto", votes=1, tier1_model=None):
+          max_upload_mb=256, orchestration="auto", votes=1, tier1_model=None, allow_host=()):
     """Start the dashboard server (blocking). Returns the httpd, or None if the
     address could not be bound."""
     provenance.enforce(strict=True)
+    allow = _allowed_hosts(host, allow_host)
     state = _State(paths, window, llm_mode, model, intel_db, max_upload_mb=max_upload_mb,
-                   orchestration=orchestration, votes=votes, tier1_model=tier1_model)
+                   orchestration=orchestration, votes=votes, tier1_model=tier1_model,
+                   allow_hosts=allow)
+    if llm_mode != "off" and state._backbone() is None:
+        if llm_mode != "auto":  # an explicit backbone must not silently fall back to rules
+            print(f"[bluecell] WARNING: --llm {llm_mode} requested but that backbone is "
+                  "unavailable; serving deterministic (rules-only) results.", file=sys.stderr)
+        state.llm_mode = "off"  # banner and /api/meta report the mode actually in use
     try:
         httpd = _make_server(host, port, _make_handler(state))
     except OSError as exc:
@@ -487,7 +508,12 @@ def serve(paths, host="127.0.0.1", port=8787, window=60, llm_mode="off",
     url = f"http://[{host}]:{port}" if ":" in host else f"http://{host}:{port}"
     print(provenance.banner())
     print(f"\n[bluecell] dashboard serving at {url}")
-    print(f"[bluecell] analyzing: {paths}  (window={window}m, llm={llm_mode})")
+    if host not in _LOOPBACK:
+        print("[bluecell] WARNING: listening beyond localhost. The dashboard has NO "
+              "authentication: anyone who can reach this port can read the analysis and "
+              "upload logs. Use only on a trusted network (Host allowed: "
+              f"{', '.join(sorted(allow))}; add more with --allow-host).", file=sys.stderr)
+    print(f"[bluecell] analyzing: {paths}  (window={window}m, llm={state.llm_mode})")
     if state.error:
         print(f"[bluecell] WARNING: initial analysis error: {state.error}")
     if open_browser:

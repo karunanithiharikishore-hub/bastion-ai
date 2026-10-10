@@ -45,6 +45,7 @@ import time
 import weakref
 
 from .. import tracing
+from ..llm.backbone import BackboneUnavailable
 from .base import Agent, AgentContext, Finding
 from .toolbox import Blackboard, SecurityToolbox, BASE_TOOLS, file_slug
 from .budget import TIER_MAX_TURNS
@@ -55,9 +56,22 @@ DEFAULT_MAX_TURNS = 24
 DEFAULT_TIMEOUT = 900   # seconds per agent
 
 # Agent errors that will hit every later agent too (account usage/session limits).
-# Matched only against the CLI/API's own error text (run["limit_text"]), never our
+# Matched only against the CLI's own error text (run["limit_text"]), never our
 # composed error, which can carry the prompt; the lookahead keeps "rate limiting" out.
-_LIMIT_RE = re.compile(r"\b(?:usage|session|rate)[ _-]?limit(?:ed|s)?(?![a-z])|limit reached", re.I)
+_LIMIT_RE = re.compile(r"\b(?:usage|session|rate)[ _-]?limit(?:ed|s)?(?![a-z])", re.I)
+# Same for the CLI's account errors (bad login, key, credit). The CLI reports no HTTP status.
+_CLI_ACCOUNT_RE = re.compile(r"not logged in|invalid api key|credit balance is too low|"
+                             r"authentication_error|permission_error", re.I)
+
+
+def _api_halts(exc: Exception) -> bool:
+    """A backbone HTTP error every later agent would hit too: bad key or permission
+    (401/403), rate or session limit (429), or an account out of credit (400)."""
+    if not isinstance(exc, BackboneUnavailable):
+        return False
+    if exc.status in (401, 403, 429):
+        return True
+    return exc.status == 400 and "credit balance is too low" in str(exc).lower()
 
 _SRC_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -314,7 +328,8 @@ def _run_cli(agent, session: SwarmSession, backbone, max_turns: int,
     return {"findings": result["findings"], "verdicts": result.get("verdicts", []),
             "calls": result["calls"],
             "summary": summary.strip(), "turns": turns, "cost_usd": cost,
-            "error": error, "limit_text": limit_text, "truncated": truncated}
+            "error": error, "limit_text": limit_text, "truncated": truncated,
+            "halt": bool(_LIMIT_RE.search(limit_text) or _CLI_ACCOUNT_RE.search(limit_text))}
 
 
 def _run_api(agent, session: SwarmSession, backbone, max_turns: int,
@@ -325,7 +340,7 @@ def _run_api(agent, session: SwarmSession, backbone, max_turns: int,
     system = agent.system_prompt()
     messages = [{"role": "user", "content": agent.task()}]
     summary, error, turns, finished, timed_out = "", None, 0, False, False
-    limit_text = ""
+    halt = False        # decided from the HTTP status, never from the error text
     temperature = getattr(backbone, "temperature", 0.0)
     # The agent's wall-clock budget: checked before every model call and tool
     # round, and each request gets only the time left (when the backbone takes it).
@@ -372,7 +387,7 @@ def _run_api(agent, session: SwarmSession, backbone, max_turns: int,
             timed_out = True
         else:
             error = f"{type(exc).__name__}: {exc}"
-            limit_text = str(exc)     # provider's own error body (e.g. HTTP 429)
+            halt = _api_halts(exc)
     if timed_out:
         error = f"timed out: {timeout}s budget exhausted after {turns} turns"
     if not box.calls and error is None:   # refusal / empty reply: same as the CLI driver
@@ -380,7 +395,7 @@ def _run_api(agent, session: SwarmSession, backbone, max_turns: int,
     tracing.record_tool_calls(box.calls, agent=agent.name)
     return {"findings": box.findings, "verdicts": list(box.verdicts.values()),
             "calls": box.calls, "summary": summary.strip(),
-            "turns": turns, "cost_usd": None, "error": error, "limit_text": limit_text,
+            "turns": turns, "cost_usd": None, "error": error, "halt": halt,
             "truncated": timed_out or (error is None and not finished)}
 
 
@@ -442,7 +457,7 @@ class AutonomousAgent(Agent):
         driver = _run_cli if backbone.resolved == "cli" else _run_api
         model = self.llm_model or backbone.model
         run = driver(self, session, backbone, self.max_turns, self.timeout, model=model)
-        if run["error"] and _LIMIT_RE.search(run.get("limit_text") or ""):
+        if run["error"] and run["halt"]:
             session.halted = f"model limit hit by {self.name} ({run['error'][:200]})"
         findings = [Finding(agent=self.name, role=self.role, tier=self.tier,
                             title=f["title"], severity=f["severity"],

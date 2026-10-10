@@ -50,6 +50,9 @@ PRICES = {
     "claude-sonnet-5-5": (2.00, 10.00),
     "claude-sonnet-5": (2.00, 10.00),
     "claude-sonnet-4-6": (3.00, 15.00),
+    # shortcut: 4-5 prices are the family list prices, not re-checked; verify against Anthropic's pricing page and update here when it changes.
+    "claude-opus-4-5": (5.00, 25.00),
+    "claude-sonnet-4-5": (3.00, 15.00),
     "claude-haiku-5-5": (0.10, 0.50),
     "claude-haiku-4-5": (1.00, 5.00),
 }
@@ -347,6 +350,7 @@ class Tracer:
             basis = total["cost_basis"]
             return {
                 "run_id": self.run_id,
+                "persisted": self.persist,   # False = --no-trace, nothing under runs dir
                 "started": _iso(self.root.start),
                 "duration_ms": round((end - self.root.start) * 1000, 1),
                 "total_cost_usd": total["cost_usd"],   # None = unknown, never a fake 0

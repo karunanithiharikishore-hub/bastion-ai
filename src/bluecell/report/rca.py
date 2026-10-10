@@ -13,7 +13,7 @@ Two layers:
 """
 from __future__ import annotations
 
-from ..pipeline.attack import ATTACK_TECHNIQUES, _FAIL_RE, _is_private
+from ..pipeline.attack import ATTACK_TECHNIQUES, _FAIL_RE, _is_auth_success, _is_private
 from ..agents.injection import BOUNDARY_INSTRUCTION, Envelope, INJECTION_TAG
 
 
@@ -58,10 +58,9 @@ def _assess_rules(inc) -> dict:
 
     def _is_success(e):
         # Only a sign-in is a success; same predicate as attack.map_attack.
-        a = (e.action or "").lower(); m = (e.message or "").lower()
-        if e.category == "authentication" and (
-                "success" in a or "accepted" in m or a == "login_success"):
+        if _is_auth_success(e):
             return True
+        a = (e.action or "").lower()
         # CloudTrail console success stays cloud_api/ConsoleLogin; only its raw
         # responseElements says Success.
         resp = e.raw.get("responseElements") if isinstance(e.raw, dict) else None
@@ -94,11 +93,12 @@ def _assess_rules(inc) -> dict:
     serious = bool(tactics & {"impact", "exfiltration", "command-and-control"}) or (
         "lateral-movement" in tactics and strong_lateral)
 
-    # Distinct source IPs of the failures: breadth of a spray vs. one retrying device.
-    ips = {e.src_ip for e in events if e.src_ip}
-    # shortcut: fixed cutoffs; a benign retry loop is 1-2 IPs and tens of failures
+    # Distinct source IPs and usernames of the failures: breadth of a spray or enumeration vs. one retrying device.
+    ips = {e.src_ip for e in events if e.src_ip and _is_fail(e)}
+    users = {e.user for e in events if _is_fail(e)}
+    # shortcut: fixed cutoffs; a benign retry loop is 1-2 IPs, 1-2 accounts and tens of failures
     # (stale-credential sample: 36), upgrade to a tuned/baselined threshold.
-    benign_noise = len(ips) <= 2 and fail_ct <= 100
+    benign_noise = len(ips) <= 2 and len(users) <= 2 and fail_ct <= 100
 
     if serious and inc.score() >= 50:
         return {

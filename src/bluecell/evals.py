@@ -140,17 +140,18 @@ def observe(result: dict) -> dict:
                 tier2 = _decision(f.get("status"))
             elif tier2_rule is None:
                 tier2_rule = _decision(f.get("status"))
+    render_error = None
     try:
         from .report import render_markdown
         text = render_markdown(result)
-    except Exception:
-        text = ""
+    except Exception as exc:  # recorded, so must_* checks fail instead of passing on blank text
+        text, render_error = "", f"{type(exc).__name__}: {exc}"
     text += "\n" + json.dumps(swarm.get("findings") or [], default=str)
     text += "\n" + json.dumps(result.get("ai_analysis") or {}, default=str)
     meta = result.get("meta") or {}
     trace = meta.get("trace") or {}
     return {"verdict": verdict, "tier2": tier2, "tier2_rule": tier2_rule,
-            "incidents": len(incs), "text": text,
+            "incidents": len(incs), "text": text, "render_error": render_error,
             "run_id": trace.get("run_id"),
             "cost_usd": trace.get("total_cost_usd"),  # None = unknown, never a fake 0
             "cost_unknown_calls": trace.get("cost_unknown_calls") or 0,
@@ -178,16 +179,19 @@ def score(expected: dict, obs: dict) -> dict:
             failures.append(f"Tier-2 agent {obs['tier2']} != expected {exp_t2}")
 
     low = (obs.get("text") or "").lower()
+    broken = bool(obs.get("render_error"))  # text is blank, so no mention check can be trusted
     missing = [m for m in expected.get("must_mention") or [] if m.lower() not in low]
     present = [m for m in expected.get("must_not_mention") or [] if m.lower() in low]
     checks["must_mention"] = ("n/a" if not expected.get("must_mention")
-                              else "fail" if missing else "pass")
+                              else "fail" if missing or broken else "pass")
     checks["must_not_mention"] = ("n/a" if not expected.get("must_not_mention")
-                                  else "fail" if present else "pass")
+                                  else "fail" if present or broken else "pass")
     if missing:
         failures.append(f"missing mention(s): {missing}")
     if present:
         failures.append(f"forbidden mention(s): {present}")
+    if broken and "fail" in (checks["must_mention"], checks["must_not_mention"]):
+        failures.append(f"report render failed: {obs['render_error']}")
 
     mi = expected.get("min_incidents")
     if mi is None:
@@ -327,7 +331,7 @@ def run_eval(cases_dir: str = DEFAULT_CASES, *, names=None, repeat: int = 1,
     return {
         "schema": SCHEMA,
         "generated": datetime.now(timezone.utc).isoformat(),
-        "config": {"cases_dir": cases_dir, "llm": llm,
+        "config": {"cases_dir": cases_dir, "llm": llm if backbone is not None else "off",
                    "backbone": (backbone.resolved if backbone else "none (rules)"),
                    "model": getattr(backbone, "model", None), "repeat": repeat,
                    "options": {k: v for k, v in (options or {}).items() if v is not None}},

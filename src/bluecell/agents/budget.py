@@ -58,7 +58,7 @@ def plan_swarm(events, incidents, *, votes: int = 1, skip_idle_tier1: bool = Tru
     if orchestration == "commander":
         return plan_commander(events, incidents, votes=votes, tier_turns=tier_turns,
                               analyst_calls=analyst_calls, **(commander_limits or {}))
-    turns = dict(tier_turns or TIER_MAX_TURNS)
+    turns = {**TIER_MAX_TURNS, **(tier_turns or {})}
     run, skipped = active_tier1_sources(events, incidents, skip_idle_tier1)
     t2_runs = max(1, votes) if incidents else 0
     t3_runs = n_specialists if events else 0
@@ -79,7 +79,7 @@ def plan_commander(events, incidents, *, votes: int = 1, tier_turns: dict | None
                    analyst_calls: int = 2, max_agents: int = 15,
                    max_commander_turns: int = 30, budget_seconds: float = 3600) -> dict:
     """Ceiling for a commander-led run (see ``plan_swarm``)."""
-    turns = dict(tier_turns or TIER_MAX_TURNS)
+    turns = {**TIER_MAX_TURNS, **(tier_turns or {})}
     votes = max(1, votes)
     # Worst case per deploy: a Tier-2 verifier voting K times, else a Tier-3 run.
     per_deploy = max(turns[2] * votes, turns[3], turns[1])

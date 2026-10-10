@@ -170,16 +170,18 @@ Return JSON with keys:
 def _extract_json(text: str):
     if not text:
         return None
-    s = text.find("{"); e = text.rfind("}")
-    if s == -1 or e == -1 or e < s:
-        return None
-    try:
-        return json.loads(text[s:e + 1])
-    except (ValueError, TypeError):
-        return None
+    dec = json.JSONDecoder()
+    i = text.find("{")
+    while i != -1:
+        try:
+            return dec.raw_decode(text, i)[0]
+        except ValueError:
+            i = text.find("{", i + 1)
+    return None
 
 
 _BENIGN_WORDS = {"benign", "likely-benign", "clean", "safe", "not-malicious", "false-positive"}
+_KNOWN_VERDICTS = {"likely-malicious", "needs-review", "likely-benign"}
 
 
 def _norm_verdict(v):
@@ -218,12 +220,13 @@ def _ground(obj, idx) -> dict:
 
 
 def _shrink(obj, limit=4000):
-    """Trim long strings/lists until the JSON fits ``limit``; stays valid JSON."""
+    """Trim strings, keys and collection sizes until the JSON fits ``limit``; stays valid JSON."""
     def cut(v, cap):
         if isinstance(v, str):
             return v[:cap]
         if isinstance(v, dict):
-            return {k: cut(x, cap) for k, x in v.items() if not k.startswith("_")}
+            return {k[:cap]: cut(x, cap) for k, x in list(v.items())[:max(3, cap // 20)]
+                    if not k.startswith("_")}
         if isinstance(v, list):
             return [cut(x, cap) for x in v[:max(3, cap // 20)]]
         return v
@@ -231,7 +234,8 @@ def _shrink(obj, limit=4000):
         out = json.dumps(cut(obj, cap))
         if len(out) <= limit:
             return out
-    return out
+    # shortcut: whole payload dropped when even the smallest cut is over limit (deep nesting), upgrade to a key whitelist
+    return json.dumps({"truncated": True})
 
 
 def ai_analyze(events, iocs, backbone, want_review=True, tier2_verdicts=None) -> dict:
@@ -287,6 +291,8 @@ def ai_analyze(events, iocs, backbone, want_review=True, tier2_verdicts=None) ->
         out["injection_override"] = (
             f"Model verdict '{final}' downgraded to 'needs-review': "
             f"{len(flagged)} event(s) contain prompt-injection attempts.")
+        final = "needs-review"
+    if final is not None and final not in _KNOWN_VERDICTS:   # unknown/malformed; None stays "no verdict" (cache.py)
         final = "needs-review"
     out["final_verdict"] = final
     return out

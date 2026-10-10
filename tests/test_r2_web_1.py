@@ -1,5 +1,6 @@
 """BUG-WEB-1: the dashboard's upload size check must use the exact JSON request body the server
 caps. A file the UI accepts must never be rejected by the server with 413."""
+import re
 import json
 import shutil
 import subprocess
@@ -74,4 +75,4 @@ def test_client_accepts_only_bodies_the_server_accepts(base_url):
 def test_app_js_has_no_raw_size_headroom_check():
     src = APP_JS.read_text(encoding="utf-8")
     assert "* 0.9" not in src and "maxFile" not in src
-    assert "uploadBodyBytes(file.name, reader.result)" in src
+    assert re.search(r"uploadBodyBytes\(\w+, reader\.result\)", src)

@@ -97,12 +97,20 @@ class SwarmOrchestrator:
         return {f.incident_id for f in self.tier2 if f.status == "escalated"}
 
     def merge_tier2(self, verdicts: list) -> None:
-        """Fold a verifier's output into Tier-2: one verdict per incident; a
-        later agent verdict replaces an earlier one, rule verdicts only fill gaps."""
+        """Fold a verifier's output into Tier-2: one verdict per incident. A later
+        agent verdict replaces an earlier agent one only with at least as many
+        completed votes; a disagreement keeps the stronger one flagged needs_review.
+        Rule verdicts only fill gaps."""
         by_inc = {f.incident_id: f for f in self.tier2}
         for f in verdicts:
             old = by_inc.get(f.incident_id)
-            if old is None or f.origin == "agent" or old.origin != "agent":
+            if old is None or old.origin != "agent":
+                by_inc[f.incident_id] = f
+            elif f.origin == "agent":
+                if f.status != old.status:
+                    support = lambda v: (v.votes or {}).get("completed", 1)
+                    f = f if support(f) >= support(old) else old
+                    f.votes = dict(f.votes or {}, needs_review=True)
                 by_inc[f.incident_id] = f
         self.tier2 = list(by_inc.values())
 
@@ -166,8 +174,11 @@ class SwarmOrchestrator:
             # The fallback may use only the agents and wall clock the commander left.
             self._cap = {"agents": self.max_agents - dispatcher.deployed,
                          "deadline": time.monotonic() + dispatcher.remaining_seconds()}
+            # A usage/session limit that halted the commander applies to the fallback too.
             self._fallback_llm = (dispatcher.remaining_seconds() >= MIN_WORKER_SECONDS
-                                  and dispatcher.deployed < self.max_agents)
+                                  and dispatcher.deployed < self.max_agents
+                                  and not session.halted)
+            self.commander["halted"] = session.halted
             return None
 
         self.used = "commander"

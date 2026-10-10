@@ -27,6 +27,23 @@ def _is_shared_noise_ip(val) -> bool:
     return a.is_loopback or a.is_unspecified or a.is_link_local
 
 
+def _is_public_ip(val) -> bool:
+    """Routable IPs are attacker infrastructure; many hosts hitting one is the signal, not noise."""
+    try:
+        a = ipaddress.ip_address(str(val).strip().strip("[]"))
+    except ValueError:
+        return False
+    a = getattr(a, "ipv4_mapped", None) or a
+    return a.is_global
+
+
+# Shared by many unrelated hosts, so useless (and harmful) as a merge link.
+_HUB_VALUES = {"8.8.8.8", "8.8.4.4", "1.1.1.1", "1.0.0.1", "9.9.9.9", "208.67.222.222",
+               "208.67.220.220", "root", "administrator", "system", "admin",
+               "nt authority\\system", "local service", "network service"}
+_HUB_MAX_HOSTS = 3  # shortcut: fixed cap, make configurable if real fleets need it
+
+
 @dataclass
 class Incident:
     id: str
@@ -127,14 +144,30 @@ def correlate(events: list, window_minutes: int = 60,
     # Index by entity value, but only link within the time window. Because
     # events are time-sorted, for each entity we only need to compare against
     # the most recent prior event carrying that value.
+    def _token(key, val):
+        # An IP is the same entity whether it is the source or destination
+        # (attacker IP as SSH source, then as a firewall destination).
+        return ("ip" if key in ("src_ip", "dst_ip") else key, str(val).lower())
+
+    # One pass: distinct hosts per ip/user value, to spot hubs (shared resolvers, gateways).
+    hosts_of: dict = {}
+    for ev in events:
+        if ev.host:
+            for key, val in ev.entities().items():
+                if key in ("src_ip", "dst_ip", "user"):
+                    hosts_of.setdefault(_token(key, val), set()).add(ev.host.lower())
+
     last_seen: dict = {}  # (entity_key, value) -> index
     for i, ev in enumerate(events):
         for key, val in ev.entities().items():
             if key in ("src_ip", "dst_ip") and _is_shared_noise_ip(val):
                 continue
-            # An IP is the same entity whether it is the source or destination
-            # (attacker IP as SSH source, then as a firewall destination).
-            token = ("ip" if key in ("src_ip", "dst_ip") else key, str(val).lower())
+            token = _token(key, val)
+            # Degree cap spares public IPs: an attacker spraying many hosts must still link them.
+            if key in ("src_ip", "dst_ip", "user") and (
+                    token[1] in _HUB_VALUES or (len(hosts_of.get(token, ())) > _HUB_MAX_HOSTS
+                                                and not _is_public_ip(val))):
+                continue
             j = last_seen.get(token)
             if j is not None and (ev.ts - events[j].ts) <= window:
                 dsu.union(j, i)

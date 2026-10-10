@@ -25,8 +25,20 @@ from datetime import datetime, timezone
 _TOKEN_RE = re.compile(r"[a-z0-9_.\-]+")
 _GENERIC_TERMS = frozenset({"system", "admin", "administrator", "root", "user", "service"})
 
-DEFAULT_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
-    os.path.dirname(__file__)))), "data", "intel.json")
+INTEL_ENV = "BLUECELL_INTEL_DB"
+
+
+# Store used by source checkouts before ~/.bluecell; kept if it already exists.
+_LEGACY_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__))))), "data", "intel.json")
+
+
+def default_path() -> str:
+    # Resolved per call, not at import: a packaged install has no repo data/ dir.
+    if os.environ.get(INTEL_ENV):
+        return os.environ[INTEL_ENV]
+    home = os.path.join(os.path.expanduser("~"), ".bluecell", "intel.json")
+    return _LEGACY_PATH if not os.path.exists(home) and os.path.exists(_LEGACY_PATH) else home
 
 
 def _feed_record(rec: dict) -> dict:
@@ -48,13 +60,13 @@ def _as_list(v) -> list:
     if isinstance(v, str):
         return [v.strip()] if v.strip() else []
     if isinstance(v, (list, tuple)):
-        return [str(x) for x in v if x is not None]
+        return [s for s in (str(x).strip() for x in v if x is not None) if s]
     return []
 
 
 class IntelStore:
-    def __init__(self, path: str = DEFAULT_PATH):
-        self.path = path
+    def __init__(self, path: str | None = None):
+        self.path = path or default_path()
         self.entries: list = []
         self.load_error: str | None = None
         self._load()

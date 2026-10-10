@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# BlueCell - Blue-Team Log Intelligence
+# Author: Harikishore Karunanithi | SPDX-License-Identifier: MIT
+# WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
 """Self-updating threat-intel ingester (the "always-current" layer).
 
 Pulls recent CVEs from the public NVD 2.0 API (no API key required for modest

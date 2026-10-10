@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import signal
 import subprocess
 import tempfile
 import time
@@ -46,7 +47,9 @@ DEFAULT_TEMPERATURE = 0.0
 
 
 class BackboneUnavailable(RuntimeError):
-    pass
+    def __init__(self, message: str = "", status: int | None = None):
+        super().__init__(message)
+        self.status = status    # HTTP status of an API error response, else None
 
 
 _RETRIES = 2   # extra attempts on 429/529; backoff 2s, 4s unless Retry-After says more
@@ -153,10 +156,20 @@ class LLMBackbone:
             cmd += ["--append-system-prompt", system]
         try:
             with tempfile.TemporaryDirectory(prefix="bluecell-llm-") as cwd:
-                proc = subprocess.run(
-                    cmd, input=prompt, capture_output=True, text=True,
-                    timeout=self.timeout, cwd=cwd,
-                )
+                # Own session, so a timeout kills the CLI's helpers too (as runtime._run_cli).
+                with subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE, text=True, cwd=cwd,
+                                      start_new_session=True) as p:
+                    try:
+                        out, err = p.communicate(prompt, timeout=self.timeout)
+                    except subprocess.TimeoutExpired as exc:
+                        try:
+                            os.killpg(p.pid, signal.SIGKILL)
+                        except OSError:
+                            pass
+                        exc.stderr = p.communicate()[1]
+                        raise
+                proc = subprocess.CompletedProcess(cmd, p.returncode, out, err)
         except subprocess.TimeoutExpired as exc:   # str(exc) embeds the full argv
             # shortcut: stderr tail only, no argv/prompt; upgrade if callers need more
             tail = exc.stderr or b""
@@ -241,7 +254,7 @@ class LLMBackbone:
                 payload = json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")[:200]
-            err = BackboneUnavailable(f"API HTTP {exc.code}: {detail}")
+            err = BackboneUnavailable(f"API HTTP {exc.code}: {detail}", status=exc.code)
             if exc.code in (429, 529):
                 try:
                     wait = float(exc.headers.get("retry-after"))

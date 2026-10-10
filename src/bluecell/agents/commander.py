@@ -340,9 +340,10 @@ class Dispatcher:
                               "tier": agent.tier, "mode": "skipped", "error": why,
                               "findings_filed": 0}
             return []
+        requested = agent.votes if isinstance(agent, SeniorSocAnalyst) else 1
         if isinstance(agent, SeniorSocAnalyst) and agent.votes > 1:
             # The K vote runs share this deploy's time: fewer votes rather than
-            # a per-run timeout under MIN_WORKER_SECONDS (shortcut: K shrinks, no vote tiebreak).
+            # a per-run timeout under MIN_WORKER_SECONDS (shortcut: K shrinks, recorded in vote_note).
             agent.votes = min(agent.votes, max(1, int(left) // MIN_WORKER_SECONDS))
             left = left / agent.votes
         agent.timeout = max(MIN_WORKER_SECONDS, min(agent.timeout, left))  # float: int() turned sub-second budgets into 0
@@ -350,8 +351,15 @@ class Dispatcher:
         if isinstance(agent, SeniorSocAnalyst):
             # Incidents an earlier verifier decided keep that verdict (see SeniorSocAnalyst.settled).
             agent.settled = frozenset(f.incident_id for f in self.orch.tier2 if f.origin == "agent")
-            return self.orch.traced_verify(agent, ctx, list(self.orch.tier1),
-                                           session=self.session)
+            out = self.orch.traced_verify(agent, ctx, list(self.orch.tier1),
+                                          session=self.session)
+            if agent.votes < requested:
+                # settings.votes still says `requested`; the run must say what actually ran.
+                note = (f"K reduced {requested} -> {agent.votes}: wall clock"
+                        + (" (single run, no vote)" if agent.votes == 1 else ""))
+                agent.last_run = dict(agent.last_run or {}, votes_requested=requested,
+                                      votes_effective=agent.votes, vote_note=note)
+            return out
         if agent.tier == 3:
             ctx = AgentContext(events=ctx.events, incidents=self._scope(item),
                                iocs=ctx.iocs, digest=ctx.digest,
@@ -454,6 +462,8 @@ class Dispatcher:
         else:
             what = f"{len(findings)} finding(s)"
         out = f"{run.get('mode', '?')}: {what}"
+        if run.get("vote_note"):
+            out += f" · {run['vote_note']}"
         if run.get("error"):
             out += f" · error: {Envelope().wrap(run['error'], 120)}"  # worker text is untrusted
         return out

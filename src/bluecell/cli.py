@@ -94,6 +94,14 @@ def cmd_analyze(args) -> int:
     if out_dir and not os.path.isdir(out_dir):
         print(f"[bluecell] output directory not found: {out_dir}", file=sys.stderr)
         return 2
+    if args.output:  # checked before the billable analysis; the write below is still the backstop
+        target = os.path.abspath(args.output)
+        if os.path.isdir(target):
+            print(f"[bluecell] cannot write report: {args.output} is a directory", file=sys.stderr)
+            return 2
+        if not os.access(target if os.path.exists(target) else out_dir, os.W_OK):
+            print(f"[bluecell] cannot write report: {args.output} is not writable", file=sys.stderr)
+            return 2
     backbone = _make_backbone(args.llm, args.model)
     intel = IntelStore(args.intel_db) if args.intel_db else IntelStore()
     result = analyze(
@@ -258,7 +266,7 @@ def cmd_serve(args) -> int:
           llm_mode=args.llm, model=args.model, intel_db=args.intel_db,
           open_browser=args.open, max_upload_mb=args.max_upload_mb,
           orchestration=args.orchestration, votes=args.votes,
-          tier1_model=args.model_tier1)
+          tier1_model=args.model_tier1, allow_host=args.allow_host)
     return 0 if httpd is not None else 2
 
 
@@ -329,6 +337,10 @@ def cmd_eval(args) -> int:
         return 2
     backbone = _make_backbone(args.llm, args.model)
     if args.llm != "off" and backbone is None:
+        if args.llm != "auto":   # an explicit backbone must not silently fall back to rules
+            print(f"[bluecell] eval: --llm {args.llm} requested but that backbone is "
+                  "unavailable; not scoring the rules only.", file=sys.stderr)
+            return 2
         print("[bluecell] eval: no backbone available; scoring the rules only.",
               file=sys.stderr)
 
@@ -531,6 +543,8 @@ def build_parser() -> argparse.ArgumentParser:
     sv.add_argument("--model", default="claude-sonnet-5")
     sv.add_argument("--intel-db", dest="intel_db", help="Path to intel JSON store")
     sv.add_argument("--open", action="store_true", help="Open the browser automatically")
+    sv.add_argument("--allow-host", dest="allow_host", action="append", default=[], metavar="NAME",
+                    help="Extra Host name to accept when --host is not loopback (repeatable)")
     sv.add_argument("--max-upload-mb", dest="max_upload_mb", type=_positive_int, default=256,
                     help="Cap on each upload request body in MB (default 256), counted on "
                          "the whole JSON-encoded request, not the raw file size, so JSON "
@@ -584,12 +598,16 @@ def main(argv=None) -> int:
         code = 130 if isinstance(exc, KeyboardInterrupt) else exc.code
         # Only for a signal (Ctrl-C, or _terminate's 128+signum): a command's own SystemExit exits normally.
         interrupted = code in (130, 128 + signal.SIGTERM, 128 + getattr(signal, "SIGHUP", 1))
+        if isinstance(exc, KeyboardInterrupt):
+            print("[bluecell] interrupted", file=sys.stderr)
         if interrupted and any(t.name.startswith("ThreadPoolExecutor") for t in threading.enumerate()):
             # An in-flight model call can't be interrupted and the interpreter would join it at exit.
             # Callers' finally blocks already ran; run atexit (session close) then skip the join.
             sys.stdout.flush(); sys.stderr.flush()
             atexit._run_exitfuncs()
             os._exit(code if isinstance(code, int) else 1)
+        if isinstance(exc, KeyboardInterrupt):
+            return 130
         raise
     finally:
         for sig, handler in prev.items():

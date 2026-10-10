@@ -252,6 +252,9 @@ _ROLE_CUE_RE = re.compile(
     r"classify|follow))\b",
     re.I)
 _B64_RE = re.compile(r"[A-Za-z0-9+/_-]{24,}={0,2}")
+# MIME-style wrapping: base64 split over lines; the lines are joined before decoding.
+_B64_WRAPPED_RE = re.compile(r"[A-Za-z0-9+/_-]{8,}(?:\r?\n[A-Za-z0-9+/_-]+)+={0,2}")
+_HEX_RE = re.compile(r"(?:[0-9a-fA-F]{2}){12,}")
 
 _STRONG_CATEGORIES = {"override", "persona", "steering", "jailbreak", "hidden",
                       "encoded", "envelope", "role", "terminal", "unscanned"}
@@ -337,6 +340,18 @@ def _decode_b64(blob: str):
         raw = base64.b64decode(s, validate=True)
     except (binascii.Error, ValueError):
         return None
+    return _as_text(raw)
+
+
+def _decode_hex(blob: str):
+    try:
+        raw = bytes.fromhex(blob)
+    except ValueError:
+        return None
+    return _as_text(raw)
+
+
+def _as_text(raw: bytes):
     for enc in ("utf-8", "utf-16-le"):
         try:
             txt = raw.decode(enc)
@@ -371,16 +386,19 @@ def scan_text(text, *, categories=None, _depth: int = 0) -> list:
     norm = _normalize(text)
     _phrases(norm, hits)
     if _depth < 2:
-        for blob in _B64_RE.findall(norm)[:50]:
-            decoded = _decode_b64(blob)
-            if not decoded:
-                continue
-            inner = scan_text(decoded, _depth=_depth + 1)
-            if any(h["category"] in _STRONG_CATEGORIES for h in inner):
-                hits.append({"code": "base64-encoded-instruction", "category": "encoded",
-                             "match": sanitize(decoded, 80)})
-                hits.extend(dict(h, code=h["code"] + "(base64)") for h in inner
-                            if h["category"] != "length")
+        b64 = _B64_RE.findall(norm) + [re.sub(r"\s+", "", m) for m in _B64_WRAPPED_RE.findall(norm)]
+        for name, blobs, decode in (("base64", b64, _decode_b64),
+                                    ("hex", _HEX_RE.findall(norm), _decode_hex)):
+            for blob in blobs[:50]:
+                decoded = decode(blob)
+                if not decoded:
+                    continue
+                inner = scan_text(decoded, _depth=_depth + 1)
+                if any(h["category"] in _STRONG_CATEGORIES for h in inner):
+                    hits.append({"code": f"{name}-encoded-instruction", "category": "encoded",
+                                 "match": sanitize(decoded, 80)})
+                    hits.extend(dict(h, code=f"{h['code']}({name})") for h in inner
+                                if h["category"] != "length")
     # De-duplicate by code, keep order.
     seen, out = set(), []
     for h in hits:

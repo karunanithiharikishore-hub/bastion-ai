@@ -281,8 +281,10 @@ def _render_trace(meta: dict) -> str:
     if not t:
         return ""
     tok = t.get("tokens") or {}
+    saved = (f"`bluecell runs show {t.get('run_id')}`" if t.get("persisted", True)
+             else "not saved (--no-trace)")
     out = ["## Run cost & trace\n",
-           f"- Run id: `{t.get('run_id')}` (`bluecell runs show {t.get('run_id')}`)",
+           f"- Run id: `{t.get('run_id')}` ({saved})",
            f"- Duration: {round((t.get('duration_ms') or 0) / 1000, 2)} s · "
            f"LLM calls: {t.get('llm_calls', 0)} · tool calls: {t.get('tool_calls', 0)}",
            f"- Tokens: {tok.get('total', 0)} (in {tok.get('input', 0)}, out {tok.get('output', 0)}, "

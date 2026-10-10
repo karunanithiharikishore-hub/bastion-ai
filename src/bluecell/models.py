@@ -146,9 +146,11 @@ def _raw_digest(raw: Any) -> str:
 # Entity fields that must be strings (JSON may hold numbers, lists or objects).
 _STR_FIELDS = ("host", "user", "process", "src_ip", "dst_ip", "domain",
                "file_path", "file_hash")
-_ENTITY_FIELDS = ("host", "user", "process", "domain")
+_ENTITY_FIELDS = ("host", "user", "process", "domain", "file_hash")
 _PLACEHOLDERS = {"-", "n/a", "na", "null", "(null)", "none", "unknown", "?"}
+_HEX = re.compile(r"[0-9a-fA-F]+")
 _CONTROL = re.compile(r"[\x00-\x08\x0e-\x1f\x7f]")   # keep \t\n\v\f\r: _flat() escapes those for the digest
+_MSG_CAP = 120   # message excerpt length in compact(); keeps the digest bounded
 
 
 def _flat(value: Any) -> str:
@@ -225,6 +227,8 @@ class Event:
                     val = _CONTROL.sub("", val).strip()
                     if val.lower() in _PLACEHOLDERS:
                         val = ""
+                    if name == "file_hash" and not (_HEX.fullmatch(val) and val.strip("0")):
+                        val = ""   # non-hex or all-zero hash is not an entity either
                 else:
                     val = val.strip()
                 setattr(self, name, val or None)
@@ -290,6 +294,9 @@ class Event:
                 parts.append(f"{label}={_flat(val)}")
         if self.attack:
             parts.append("att=" + ",".join(_flat(a) for a in self.attack))
+        # Generic events have no discriminating field, so their text is the only thing that tells them apart.
+        if self.message and not (self.attack or self.user or self.src_ip or self.dst_ip or self.domain or self.file_hash):
+            parts.append("msg=" + _flat(self.message[:_MSG_CAP]))
         return " ".join(parts)
 
 

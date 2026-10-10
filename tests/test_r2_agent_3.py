@@ -109,7 +109,7 @@ def test_backbone_timeout_error_has_no_argv_or_system_prompt(tmp_path, monkeypat
 def test_backbone_oserror_error_is_short(monkeypatch):
     def boom(*a, **k):
         raise OSError(13, "Permission denied", "/secret/claude --system-prompt XYZ")
-    monkeypatch.setattr(backbone_mod.subprocess, "run", boom)
+    monkeypatch.setattr(backbone_mod.subprocess, "Popen", boom)  # _complete_cli uses Popen (process-group kill)
     monkeypatch.setattr(backbone_mod.shutil, "which", lambda name: "/usr/bin/claude")
     with pytest.raises(BackboneUnavailable) as exc:
         LLMBackbone(mode="cli").complete("hi", system="XYZ")

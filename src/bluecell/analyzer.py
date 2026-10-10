@@ -77,6 +77,17 @@ def _analyze(paths, *, source_override=None, window_minutes=60,
     max_commander_turns / budget_seconds: the commander's guardrails (None =
     the defaults in agents/commander.py).
     """
+    # Validate at the API boundary (the CLI already does this for its flags).
+    if max_incidents < 1:
+        raise ValueError(f"max_incidents must be >= 1, got {max_incidents!r}")
+    for name, val in (("votes", votes), ("max_agents", max_agents),
+                      ("max_commander_turns", max_commander_turns)):
+        if val is not None and val < 1:
+            raise ValueError(f"{name} must be >= 1, got {val!r}")
+    # A worker needs MIN_WORKER_SECONDS and the commander needs time to plan.
+    if budget_seconds is not None and budget_seconds <= commander.MIN_WORKER_SECONDS:
+        raise ValueError(f"budget_seconds must be > {commander.MIN_WORKER_SECONDS}, "
+                         f"got {budget_seconds!r}")
     import time
     _t0 = time.perf_counter()
     tracing.stage("ingest")
@@ -111,12 +122,14 @@ def _analyze(paths, *, source_override=None, window_minutes=60,
     if orchestration not in ORCHESTRATIONS:
         raise ValueError(f"orchestration must be one of {ORCHESTRATIONS}, got {orchestration!r}")
     commander_limits = {
-        "max_agents": int(max_agents or commander.DEFAULT_MAX_AGENTS),
-        "max_commander_turns": int(max_commander_turns or commander.DEFAULT_COMMANDER_TURNS),
-        "budget_seconds": float(budget_seconds or commander.DEFAULT_BUDGET_SECONDS),
+        "max_agents": commander.DEFAULT_MAX_AGENTS if max_agents is None else int(max_agents),
+        "max_commander_turns": (commander.DEFAULT_COMMANDER_TURNS if max_commander_turns is None
+                                else int(max_commander_turns)),
+        "budget_seconds": (commander.DEFAULT_BUDGET_SECONDS if budget_seconds is None
+                           else float(budget_seconds)),
     }
     # Everything that shapes the swarm goes into the run-cache key below.
-    swarm_options = {"votes": max(1, int(votes or 1)), "tier1_model": tier1_model,
+    swarm_options = {"votes": 1 if votes is None else int(votes), "tier1_model": tier1_model,
                      "skip_idle_tier1": skip_idle_tier1, "orchestration": orchestration,
                      **commander_limits}
     cache_mode = cache if cache in run_cache.MODES else "off"
@@ -134,7 +147,8 @@ def _analyze(paths, *, source_override=None, window_minutes=60,
             entry = run_cache.load(cache_key)
             if entry is not None:
                 return run_cache.mark_hit(entry, cache_key,
-                                          int((time.perf_counter() - _t0) * 1000))
+                                          int((time.perf_counter() - _t0) * 1000),
+                                          run_meta={"events_ingested": ingested})
 
     tracing.stage("storyline", incidents=len(incidents))
     incident_blocks = []

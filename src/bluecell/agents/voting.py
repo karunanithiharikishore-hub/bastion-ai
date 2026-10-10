@@ -14,13 +14,14 @@ Rules (pure functions, no model involved):
   ``None`` and does not count. A completed run that filed no verdict for an
   incident abstains on it.
 - An incident is decided when one decision holds a strict majority of the
-  completed runs (2 of 3, 3 of 3, 2 of 2 ...). Anything else is a split: no
-  agent verdict is used, the rule verdict stands and is marked for review.
+  requested runs (2 of 3, 3 of 3, 2 of 2 ...). A failed or abstaining run cannot
+  add to the majority, so a lone surviving run of three is a split: no agent
+  verdict is used, the rule verdict stands and is marked for review.
 - The merged verdict takes the winning side's evidence and reviewed candidates
   (union, in run order), its most common severity, the rationale of the first
   winning run, and confidence = mean winning confidence x agreement, where
-  agreement = winning votes / completed runs. A 2-1 vote therefore reports a
-  lower confidence than 3-0.
+  agreement = winning votes / requested runs. A 2-1 vote therefore reports a
+  lower confidence than 3-0, and 2 of 3 with one failure reports 0.67.
 """
 from __future__ import annotations
 
@@ -58,8 +59,8 @@ def tally(ballots: list, incident_ids) -> dict:
             decision, won = "dismissed", dismissed
         else:
             decision, won = None, max(confirmed, dismissed)
-        majority = decision is not None and n > 0 and won * 2 > n
-        agreement = round(won / n, 2) if n else 0.0
+        majority = decision is not None and won * 2 > k   # quorum: strict majority of requested runs
+        agreement = round(won / k, 2) if k else 0.0
         record = {
             "k": k, "completed": n, "confirmed": confirmed, "dismissed": dismissed,
             "abstained": n - len(cast), "failed": k - n,

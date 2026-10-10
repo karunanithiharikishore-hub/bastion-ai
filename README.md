@@ -267,7 +267,8 @@ verifier K times, in the fixed flow and for every `tier2-verifier` the
 commander deploys. Each run starts from the same board, so no run sees
 another run's verdicts, and every run's `submit_verdict` goes through the
 injection guard. Each incident is decided by a strict majority of the
-completed runs; the Tier-2 finding, the verdict and the run record carry the
+requested runs (a failed run cannot help make a majority, so one surviving run of
+three is a split); the Tier-2 finding, the verdict and the run record carry the
 tally (`votes`: confirmed, dismissed, abstained, failed, agreement), and the
 report prints it ("Tier-2 vote: 2 confirmed / 1 dismissed, agreement 67%").
 Confidence is the mean winning confidence times the agreement, so a 2-1 vote
@@ -388,10 +389,11 @@ the scores as regression signals, not as accuracy claims.
 ## Authorship & integrity
 
 Built by **Harikishore Karunanithi**. Licensed MIT — you may use and share it,
-but you must keep the author attribution. Every source file carries a watermark
-header, and `provenance.py` runs an integrity check at startup: if the
-attribution is removed or altered, BlueCell prints a warning asking for the
-credit to be kept. It never stops the program: the enforceable protection is
+but you must keep the author attribution. Every source file under `src/` and
+`scripts/` carries a watermark header. At startup, `provenance.py` only checks
+its own author constants: if they are altered, BlueCell prints a warning asking
+for the credit to be kept. It does not scan the files for the header; `scan_repo()`
+does that and only the tests call it. It never stops the program: the enforceable protection is
 the MIT license + copyright, not a runtime kill switch.
 
 ## Why it's different
@@ -466,7 +468,7 @@ tokens, span tree), `POST /api/stage/reset` (returns a `token`) ->
 (`{files:[{name,content}], window}`). Each POST body is capped by
 `--max-upload-mb` (default 256 MB): the whole JSON-encoded request body, not the raw file size.
 Every endpoint, including the runs API, gets the same protections: when bound
-to loopback only localhost `Host` headers are served (DNS rebinding), browser
+to loopback only localhost `Host` headers are served (DNS rebinding; a non-loopback `--host` also accepts this machine's name/IPs plus `--allow-host NAME`, and prints a no-authentication warning), browser
 cross-site / same-site requests to `/api/*` (`Sec-Fetch-Site`) are refused,
 POSTs must come from the dashboard's own `Origin`, and each upload uses its own
 staging token so concurrent clients never mix files. Dashboard runs are traced
@@ -508,6 +510,7 @@ python scripts/update_intel.py --days 7 --keyword ransomware
 
 Schedule it (cron / launchd / your scheduler) so every analysis retrieves the
 latest vulnerability and TTP context. Network failures are non-fatal.
+The store lives at `~/.bluecell/intel.json` (override with `$BLUECELL_INTEL_DB` or `--intel-db`).
 
 ## Supported inputs & sources
 

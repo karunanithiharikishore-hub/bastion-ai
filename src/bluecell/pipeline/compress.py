@@ -25,9 +25,10 @@ def _dedup_with_counts(events: list) -> list:
         # Signature ignores the exact timestamp so bursts collapse, but keeps
         # the first occurrence's line (with its time) as representative. It
         # covers every field compact() prints, so a collapsed line never hides
-        # a different IP/process/hash behind the representative's value.
+        # a different IP/process/hash behind the representative's value. The full
+        # message is included too: compact() only prints an excerpt of it.
         sig = (f"{ev.source}|{ev.action}|{ev.host}|{ev.user}|{ev.src_ip}|{ev.src_port}|{ev.dst_ip}|{ev.dst_port}|"
-               f"{ev.domain}|{ev.process}|{ev.file_hash}|{','.join(ev.attack)}")
+               f"{ev.domain}|{ev.process}|{ev.file_hash}|{','.join(ev.attack)}|{ev.message}")
         counts[sig] = counts.get(sig, 0) + 1
         representative.setdefault(sig, ev)
     out = []

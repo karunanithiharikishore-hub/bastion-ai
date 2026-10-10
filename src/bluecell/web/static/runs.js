@@ -25,6 +25,7 @@ function inputLabel(inputs) {
 const costText = (c, unknownCalls, est) =>
   c == null ? "n/a" : (num(unknownCalls) ? ">= " : "") + num(c).toFixed(4) + (est ? "~" : "");
 const costCell = (s) => esc(costText(s.total_cost_usd, s.cost_unknown_calls, s.cost_estimated));
+const unkRun = (s) => s.total_cost_usd == null || num(s.cost_unknown_calls) > 0;
 
 let RUNS = [];
 
@@ -79,11 +80,14 @@ function renderChart() {
     const y = H - B - f * (H - B - T);
     svg += `<text x="${L - 6}" y="${y + 3}" text-anchor="end">${esc("$" + (top * f).toFixed(max > 0 && top < 0.1 ? 4 : 2))}</text>`;
   }
+  const unkRuns = runs.filter(unkRun).length;
   runs.forEach((s, i) => {
     const c = num(s.total_cost_usd);
+    const unk = c <= 0 && unkRun(s);   // unknown cost: outlined bar, not a $0 bar (styled inline; runs.html is out of lane)
     const h = c > 0 ? Math.max(1.5, (c / top) * (H - B - T)) : 1.5;
     const x = L + i * bw + bw * 0.15;
-    svg += `<rect class="bar${c > 0 ? "" : " zero"}" x="${x.toFixed(1)}" y="${(H - B - h).toFixed(1)}" ` +
+    svg += `<rect class="bar${c > 0 ? "" : unk ? " unknown" : " zero"}"${unk ? ' style="fill:none;stroke:var(--line-strong);stroke-dasharray:3 2"' : ""} ` +
+      `x="${x.toFixed(1)}" y="${(H - B - h).toFixed(1)}" ` +
       `width="${Math.max(1, bw * 0.7).toFixed(1)}" height="${h.toFixed(1)}">` +
       `<title>${esc((s.started || "").slice(0, 19) + " · " + (s.total_cost_usd == null ? "cost unknown" :
         (num(s.cost_unknown_calls) ? ">= " : "") + money(c) + (s.cost_estimated ? " (estimated)" : "")) + " · " + inputLabel(s.inputs))}</title></rect>`;
@@ -93,7 +97,10 @@ function renderChart() {
   svg += `<text x="${W - R}" y="${H - 8}" text-anchor="end">${esc(last)}</text>`;
   svg += `</svg>`;
   host.innerHTML = svg;
-  $("chart-sub").textContent = max > 0 ? `max ${money(max)} per run` : "no LLM spend recorded (rules-only runs)";
+  const parts = [];
+  if (max > 0) parts.push(`max ${money(max)} per run`);
+  if (unkRuns) parts.push(`${unkRuns} run(s) with unknown cost`);
+  $("chart-sub").textContent = parts.join(" · ") || "no LLM spend recorded (rules-only runs)";
 }
 
 function renderTable() {

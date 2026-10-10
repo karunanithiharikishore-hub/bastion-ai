@@ -28,12 +28,16 @@ _REFANG_DOT = re.compile(r"[\[({]\s*(?:\.|dot)\s*[\])}]", re.I)
 _REFANG_WORD_DOT = re.compile(r"(?<=[\w-])[ \t]+dot[ \t]+(?=[\w-])", re.I)
 _DOT_TLDS = {"com", "net", "org", "info", "biz", "ru", "cn", "io", "xyz", "top", "su",
              "cc", "pw", "tk", "ml", "ga", "cf", "gq", "icu", "ws", "de", "uk", "gov", "edu"}
+# TLDs that are also English words: a capitalised one after a period is prose ("here.Top").
+_WORD_TLDS = {"top", "cc", "net", "org", "info"}
+_TITLE_TLDS = _DOT_TLDS - _WORD_TLDS
 _IDEO_DOTS = str.maketrans({"。": "."})   # NFKC does not fold ideographic full stop
 _PCT_DOT = re.compile(r"(?<=\w)(?:%2E|\\\.)(?=\w)", re.I)   # bad%2Eru, bad\.ru
 # IPv6 candidates (validated with ipaddress, so "10:22:33" is rejected).
 _IP6_RE = re.compile(r"(?<![\w:.])[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}(?![\w:]|\.\d)")
 _HASH_RE = re.compile(r"(?<![0-9a-fA-F])(?:[a-fA-F0-9]{128}|[a-fA-F0-9]{64}|[a-fA-F0-9]{40}|[a-fA-F0-9]{32})(?![0-9a-fA-F])")
-_DOMAIN_RE = re.compile(r"(?<![a-zA-Z0-9-])(?:[a-zA-Z0-9-]{1,63}\.){1,10}[a-zA-Z]{2,24}(?![a-zA-Z0-9-])")
+# Labels and TLDs may be Unicode (IDN "пример.рф") or punycode ("xn--p1ai"); _dom() folds them to ASCII.
+_DOMAIN_RE = re.compile(r"(?<![^\W_]|-)(?:(?:[^\W_]|-){1,63}\.){1,10}(?:xn--[a-z0-9-]{1,59}|[^\W\d_]{2,24})(?![^\W_]|-)", re.I)
 # ATT&CK technique ids the model might cite.
 _TECH_RE = re.compile(r"\bT1\d{3}(?:\.\d{3})?\b")
 
@@ -75,6 +79,16 @@ def _refang(text: str) -> str:
     text = _PCT_DOT.sub(".", text)
     text = _REFANG_WORD_DOT.sub(_dot_word, _REFANG_DOT.sub(".", text))
     return re.sub(r"hxxp", "http", text, flags=re.I)
+
+
+def _dom(d: str) -> str:
+    """Lowercase ASCII (punycode) form of a domain, so 'пример.рф' matches 'xn--e1afmkfd.xn--p1ai'."""
+    if d.isascii():
+        return d.lower()
+    try:
+        return d.encode("idna").decode("ascii").lower()
+    except UnicodeError:
+        return d.lower()
 
 
 def _v4(tok: str) -> str | None:
@@ -126,6 +140,12 @@ def leaf_strings(v):
         yield str(v)
 
 
+# Event fields whose text is mined for domain-shaped values, so "john.smith" or
+# "update.zip" in a user/file field is grounded (ITEM-18; toolbox searches the same set).
+_HAY_FIELDS = ("message", "source", "category", "action", "host", "user", "process",
+               "src_ip", "dst_ip", "domain", "file_path", "file_hash")
+
+
 def evidence_index(events, valid_techniques) -> dict:
     """Build the set of indicators that ACTUALLY appear in the evidence."""
     ips, domains, hashes, hosts, users = set(), set(), set(), set(), set()
@@ -155,6 +175,9 @@ def evidence_index(events, valid_techniques) -> dict:
             users.add(str(e.user).lower())
             _note_user_domain(e.user)
         # Mine the message text too, so IOCs embedded in messages count as evidence.
+        for f in _HAY_FIELDS:   # raw text too: a plain "john.smith" is not defanged
+            for d in _DOMAIN_RE.findall(str(getattr(e, f, None) or "").lower()):
+                domains.add(d)
         msg = _refang(getattr(e, "message", "") or "")
         ips |= _ips(msg)
         for h in _HASH_RE.findall(msg):
@@ -170,8 +193,8 @@ def evidence_index(events, valid_techniques) -> dict:
                     hashes.add(h.lower())
                 for d in _DOMAIN_RE.findall(t):
                     domains.add(d.lower())
-    return {"ips": ips, "domains": domains, "hashes": hashes,
-            "hosts": hosts, "users": users,
+    return {"ips": ips, "domains": {_dom(d) for d in domains}, "hashes": hashes,
+            "hosts": {_dom(h) for h in hosts}, "users": users,
             "techniques": {t.upper() for t in (valid_techniques or [])}}
 
 
@@ -189,12 +212,13 @@ def check_text(text: str, index: dict) -> dict:
     found_hashes = {m.lower() for m in _HASH_RE.findall(text)}
     found_domains = set()
     for m in _DOMAIN_RE.finditer(text):
-        d = m.group(0).lower()
+        d = _dom(m.group(0))
         ext = d.rsplit(".", 1)[-1]
         if d in _DOMAIN_STOPWORDS or _IP_RE.fullmatch(d) or _TECH_JOIN.fullmatch(d):
             continue
-        if re.search(r"[a-z]\.[A-Z][a-z]+$", m.group(0)):
-            continue   # "shell.Then": a sentence boundary missing its space, not a domain
+        tail = re.search(r"[a-z]\.([A-Z][a-z]+)$", m.group(0))
+        if tail and tail.group(1).lower() not in _TITLE_TLDS:
+            continue   # "shell.Then": a sentence boundary missing its space; "evil.Com" is a domain
         if ext in _FILE_EXTS and (ext not in _AMBIGUOUS_EXTS or _in_path(text, m.start())):
             continue   # a file name, not a domain
         found_domains.add(d)

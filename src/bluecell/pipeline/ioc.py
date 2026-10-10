@@ -7,9 +7,14 @@ from __future__ import annotations
 import ipaddress
 import re
 from collections import Counter
+from urllib.parse import urlsplit
 
 _IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 _HASH_RE = re.compile(r"\b[a-fA-F0-9]{64}\b|\b[a-fA-F0-9]{40}\b|\b[a-fA-F0-9]{32}\b")
+# Message text is mined only for SHA-1/SHA-256: bare 32-hex strings in messages are usually session/correlation ids.
+_MSG_HASH_RE = re.compile(r"\b[a-fA-F0-9]{64}\b|\b[a-fA-F0-9]{40}\b")
+# ATT&CK techniques that make a domain a C2/DGA suspect; other tags (e.g. T1059 on a download URL) do not.
+_DNS_C2_TECHNIQUES = ("T1071", "T1568")
 
 def is_public_ip(ip) -> bool:
     """True for a globally routable IPv4/IPv6 address. Private, loopback,
@@ -49,21 +54,26 @@ def extract_iocs(events: list) -> dict:
 
     for ev in events:
         flagged = bool(ev.attack)
+        dns_c2 = any(t.startswith(_DNS_C2_TECHNIQUES) for t in ev.attack)
         for ip in dict.fromkeys((ev.src_ip, ev.dst_ip)):  # once per event, order kept
             if ip and _is_public_ip(ip):
                 buckets["ip"][ip] += 1
                 note_host("ip", ip, ev.host)
                 if flagged:
                     suspicious["ip"].add(ip)
+        # RemoteUrl arrives as a full URL; the IOC is its hostname.
+        dom = ""
         if ev.domain:
-            dom = ev.domain.lower().rstrip(".")
+            raw = ev.domain.strip()
+            dom = (urlsplit(raw if "://" in raw else "//" + raw).hostname or "").rstrip(".")
+        if dom:
             buckets["domain"][dom] += 1
             note_host("domain", dom, ev.host)
-            if flagged:
+            if dns_c2:
                 suspicious["domain"].add(dom)
         # Each distinct hash counts once per event, whether it came from the
         # hash field or was mined from the message (and case-insensitively).
-        hashes = set(h.lower() for h in _HASH_RE.findall(ev.message or ""))
+        hashes = set(h.lower() for h in _MSG_HASH_RE.findall(ev.message or ""))
         if ev.file_hash and _HASH_RE.fullmatch(ev.file_hash):
             hashes.add(ev.file_hash.lower())
         for h in hashes:

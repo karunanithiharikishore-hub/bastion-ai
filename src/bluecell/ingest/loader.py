@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import copy
 import csv
+import gzip
 import io
 import itertools
 import json
@@ -239,22 +240,50 @@ def _iter_json_records(text: str) -> Iterator[dict]:
 _CSV_DELIMITERS = ",;\t|"
 
 
+def _field_count(line: str, delim: str) -> int:
+    try:
+        return len(next(csv.reader([line], delimiter=delim)))
+    except (csv.Error, StopIteration):
+        return 0
+
+
+def _csv_layout(text: str) -> tuple:
+    """(delimiter, offset of the header line). The header is the first line that
+    splits under some delimiter (lines above it are a preamble such as a report
+    title). Each delimiter that splits the header is scored by how many later lines
+    match its field count, then by width, so a comma in a ';' header cannot win."""
+    lines = text[:65536].split("\n")[:50]
+    h = next((i for i, ln in enumerate(lines)
+              if any(_field_count(ln, d) > 1 for d in _CSV_DELIMITERS)), 0)
+    best, layout = None, (",", 0)
+    for d in _CSV_DELIMITERS:
+        width = _field_count(lines[h], d)
+        if width < 2:
+            continue
+        agree = sum(_field_count(ln, d) == width for ln in lines[h + 1:])
+        if best is None or (agree, width) > best:
+            best, layout = (agree, width), (d, sum(len(ln) + 1 for ln in lines[:h]))
+    return layout
+
+
 def _csv_reader(text: str, quoting: int = csv.QUOTE_MINIMAL) -> csv.DictReader:
     """DictReader for CSV text: an Excel ``sep=X`` first line sets the delimiter
-    and is dropped; otherwise the delimiter is sniffed (comma when unsure)."""
+    and is dropped; otherwise the delimiter and header line come from _csv_layout."""
     head, _, rest = text.lstrip("\n").partition("\n")
     m = re.fullmatch(r"sep=(.)\s*", head)
     if m:
-        return csv.DictReader(io.StringIO(rest), delimiter=m.group(1), quoting=quoting)
-    try:
-        delim = csv.Sniffer().sniff(text[:65536], delimiters=_CSV_DELIMITERS).delimiter
-    except csv.Error:
-        delim = ","
-    # shortcut: a comma in the header forces comma so ;-heavy values in a comma CSV
-    # cannot flip the parse; a ;-file whose column name has a comma will misparse, upgrade to header-count voting if seen.
-    if delim != "," and "," in head:
-        delim = ","
-    return csv.DictReader(io.StringIO(text), delimiter=delim, quoting=quoting)
+        reader = csv.DictReader(io.StringIO(rest), delimiter=m.group(1), quoting=quoting)
+    else:
+        delim, start = _csv_layout(text)
+        reader = csv.DictReader(io.StringIO(text[start:]), delimiter=delim, quoting=quoting)
+    names = reader.fieldnames or []
+    dups = sorted({n for n in names if names.count(n) > 1})
+    if dups:
+        # shortcut: duplicate columns are not renamed, the last one wins; warn so the
+        # first column's values are not lost silently. Upgrade to suffixed names if needed.
+        print(f"bluecell: duplicate CSV column(s) {', '.join(dups)}; last one wins",
+              file=sys.stderr)
+    return reader
 
 
 def _fold_overflow(rec: dict, fieldnames: list) -> dict:
@@ -337,13 +366,29 @@ def ingest_file(path: str, override: Optional[str] = None) -> list:
     skipped = 0   # non-blank records that produced no event (BUG-INGEST-12)
     with open(path, "rb") as fh:
         data = fh.read()
+    if data[:2] == b"\x1f\x8b":   # gzip magic: judge the inner file by its name
+        try:
+            data = gzip.decompress(data)
+        except (OSError, EOFError) as exc:
+            print(f"bluecell: skipping {path}: bad gzip data ({exc})", file=sys.stderr)
+            return []
+        ext = os.path.splitext(os.path.splitext(path)[0])[1].lower()
     # PowerShell `>` / Out-File writes UTF-16 with a BOM. utf-8-sig strips the
     # byte-order mark Excel / Microsoft portal CSVs start with; otherwise the
     # first column header becomes "\ufefftimestamp".
+    head = data[:512]
     if data.startswith((b"\xff\xfe", b"\xfe\xff")):
         text = data.decode("utf-16", errors="replace")
+    elif head[1::2] and head[1::2].count(0) >= 0.9 * len(head[1::2]):
+        text = data.decode("utf-16-le", errors="replace")   # BOM-less UTF-16LE (ASCII text)
+    elif head[0::2] and head[0::2].count(0) >= 0.9 * len(head[0::2]):
+        text = data.decode("utf-16-be", errors="replace")   # BOM-less UTF-16BE
     else:
         text = data.decode("utf-8-sig", errors="replace")
+    sample = text[:4096]   # binary = mostly control bytes / undecodable; one stray NUL in a CSV is not
+    if sum(c < " " and c not in "\t\n\r" or c == "�" for c in sample) > 0.1 * len(sample):
+        print(f"bluecell: skipping {path}: binary data, not a text log", file=sys.stderr)
+        return []
     text = text.replace("\r\n", "\n").replace("\r", "\n")   # universal newlines
 
     if ext in (".json", ".jsonl", ".ndjson"):
@@ -361,7 +406,7 @@ def ingest_file(path: str, override: Optional[str] = None) -> list:
                 skipped += 1
         if text.strip() and not count:
             print(f"bluecell: no JSON records found in {path}", file=sys.stderr)
-    elif ext == ".csv":
+    elif ext in (".csv", ".tsv"):
         rows = []
         for rec in _csv_rows(text, path):
             # Drop None keys (ragged rows / restkey) and empty values; strip
@@ -441,6 +486,7 @@ def ingest_path(path: str, override: Optional[str] = None) -> list:
     """Parse a file or recurse a directory into Events."""
     if os.path.isdir(path):
         events: list = []
+        unsupported: list = []
         for root, _dirs, files in os.walk(path):
             for fname in sorted(files):
                 if fname.startswith("."):
@@ -448,7 +494,7 @@ def ingest_path(path: str, override: Optional[str] = None) -> list:
                 if fname == "expected.json" and _is_eval_label(os.path.join(root, fname)):
                     continue   # an eval case's label file, not a log
                 if os.path.splitext(fname)[1].lower() in (
-                    ".json", ".jsonl", ".ndjson", ".csv", ".log", ".txt", ".syslog"
+                    ".json", ".jsonl", ".ndjson", ".csv", ".tsv", ".log", ".txt", ".syslog", ".gz"
                 ):
                     fpath = os.path.join(root, fname)
                     try:
@@ -456,6 +502,11 @@ def ingest_path(path: str, override: Optional[str] = None) -> list:
                     except (OSError, RecursionError) as exc:
                         # One unreadable or over-nested file must not abort the whole directory.
                         print(f"bluecell: skipping {fpath}: {exc}", file=sys.stderr)
+                else:
+                    unsupported.append(os.path.join(root, fname))
+        if unsupported:
+            print(f"bluecell: skipped {len(unsupported)} unsupported file(s): "
+                  + ", ".join(unsupported), file=sys.stderr)
         return events
     return ingest_file(path, override)
 

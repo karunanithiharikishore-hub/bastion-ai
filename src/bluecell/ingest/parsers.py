@@ -146,8 +146,15 @@ def parse_edr(r: dict) -> Optional[Event]:
     # Sentinel SecurityEvent / Get-WinEvent logons (R4-INGEST-2). shortcut: 4776 (NTLM) skipped, its success is in Status.
     eid = str(_get(r, "EventID", default=_get(r, "Id") if _get(r, "MachineName") else "")).strip()
     # ECS event.action "logon-failed" (winlogbeat 4625) is the same failure.
+    # Generic EDR/ECS failures (ITEM-12): ECS event.category/outcome, or an sshd-style message with no action.
+    ecs = {"failure": "login_failed", "failed": "login_failed", "success": "login_success"}.get(
+        str(_get(r, "event.outcome", default="")).lower()) \
+        if "authentication" in str(_get(r, "event.category", default="")).lower() else None
+    if ecs is None and re.match(r"failed (?:password|login|logon)\b", str(_get(r, "message", default="")), re.I):
+        ecs = "login_failed"
     winauth = {"4624": "login_success", "4625": "login_failed", "4771": "login_failed"}.get(eid) or \
-        {"logon-failed": "login_failed"}.get(str(action).lower())
+        {"logon-failed": "login_failed", "logon_failed": "login_failed", "failed_login": "login_failed",
+         "login_failed": "login_failed"}.get(str(action).lower()) or ecs
     if winauth:
         action = winauth
     # CSV gives "false"/"0" as text, which is truthy; treat those as no alert.
@@ -305,16 +312,36 @@ def _cloud_user(r: dict):
     return user
 
 
+def _auth_verdict(r: dict) -> Optional[bool]:
+    """True = failed login, False = successful login, None = no verdict field."""
+    for k in ("status", "result", "outcome", "success", "response"):
+        v = _get(r, k)
+        if v is None:
+            continue
+        if isinstance(v, bool):
+            return not v
+        s = str(v).strip().lower()
+        if s in ("false", "0", "no") or any(w in s for w in ("fail", "denied", "deny", "reject", "invalid", "block", "error")):
+            return True
+        if s in ("true", "1", "yes", "ok") or "succe" in s or "accept" in s:
+            return False
+    return None
+
+
 def parse_auth(r: dict) -> Optional[Event]:
     """Generic authentication events (server auth, IdP, VPN)."""
-    action = _get(r, "action", "event", default="auth")
+    action = str(_get(r, "action", "event", default="auth"))
+    verdict = _auth_verdict(r)
+    failed = ("fail" in action.lower()) if verdict is None else verdict
+    if verdict is not None:
+        action = "login_failed" if failed else "login_success"
     return Event(
         ts=_get(r, "timestamp", "ts", "time", "TimeGenerated", "TimeGenerated [UTC]", default=None),
         source=_log_source(r, "auth"),
         category="authentication",
         action=str(action),
         message=str(_get(r, "message", default=action)),
-        severity=_severity(_get(r, "severity", default=("high" if "fail" in str(action).lower() else "info"))),
+        severity=_severity(_get(r, "severity", default=("high" if failed else "info"))),
         host=_entity(r, "host.name", "host", "hostname", "server"),
         user=_entity(r, "user.name", "user", "username", "account"),
         src_ip=_ip_field(r, "src_ip", "source_ip", "source", "client_ip"),
@@ -512,9 +539,20 @@ def parse_syslog_line(line: str) -> Optional[Event]:
 _AZURE_BENIGN_REASONS = ("other", "none", "n/a", "na", "null", "-")
 
 
+# MFA / KMSI / silent-sign-in interrupts: the password was not rejected.
+_AZURE_MFA_INTERRUPT_CODES = ("50058", "50072", "50074", "50076", "50140")
+
+
+def _azure_is_interrupt(status, errcode) -> bool:
+    code = str(errcode if errcode is not None else "").strip()
+    if code in _AZURE_MFA_INTERRUPT_CODES:
+        return True
+    return "interrupt" in str(status or "").lower() and code in ("", "0", "0.0")
+
+
 def _azure_is_failure(status, errcode, reason) -> bool:
     s = str(status or "").lower()
-    if any(w in s for w in ("fail", "interrupt", "denied", "block")):
+    if any(w in s for w in ("fail", "denied", "block")):
         return True
     code = str(errcode if errcode is not None else "").strip()
     if code and code not in ("0", "0.0"):
@@ -565,8 +603,9 @@ def parse_azure_signin(r: dict) -> Optional[Event]:
     client_app = _get(r, "Client app", "clientApp", "clientAppUsed")
     token_type = _get(r, "Incoming token type", "incomingTokenType")
 
-    failed = _azure_is_failure(status, errcode, reason)
-    action = "login_failed" if failed else "login_success"
+    interrupt = _azure_is_interrupt(status, errcode)
+    failed = not interrupt and _azure_is_failure(status, errcode, reason)
+    action = "mfa_interrupt" if interrupt else ("login_failed" if failed else "login_success")
     sev = 3 if failed else 1
     risky = str(risk_level or "").lower() in ("high", "medium") or \
         str(risk_state or "").lower() in ("atrisk", "at risk", "confirmedcompromised")
@@ -603,7 +642,9 @@ def parse_azure_signin(r: dict) -> Optional[Event]:
         # Risky/valid-account abuse -> Valid Accounts.
         ev.attack.append("T1078")
         ev.tags.append("azure:risky-signin")
-    if is_devicecode and not failed:
+    if interrupt:
+        ev.tags.append("azure:mfa-interrupt")
+    if is_devicecode and action == "login_success":
         # Successful device-code-flow sign-in — a known AiTM/phishing access vector.
         ev.attack.append("T1078")
         ev.tags.append("azure:devicecode-success")

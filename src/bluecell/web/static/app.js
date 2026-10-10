@@ -63,6 +63,14 @@ function updateAnalyzeBtn() {
   $("status").textContent = pending.size ? `${pending.size} file(s) staged` : "";
 }
 
+// Same-named drops (e.g. two auth.log from different hosts) get " (2)" before the extension so neither is lost.
+function uniqueName(name) {
+  const dot = name.lastIndexOf("."), stem = dot > 0 ? name.slice(0, dot) : name, ext = dot > 0 ? name.slice(dot) : "";
+  let out = name;
+  for (let n = 2; pending.has(out); n++) out = `${stem} (${n})${ext}`;
+  return out;
+}
+
 function addFiles(fileList) {
   const arr = Array.from(fileList);
   let done = 0;
@@ -76,9 +84,10 @@ function addFiles(fileList) {
     }
     const reader = new FileReader();
     reader.onload = () => {
-      const bytes = uploadBodyBytes(file.name, reader.result);
+      const name = uniqueName(file.name);
+      const bytes = uploadBodyBytes(name, reader.result);
       if (bytes > MAX_UPLOAD_BYTES) overCap(bytes);
-      else pending.set(file.name, { name: file.name, content: reader.result, size: file.size });
+      else pending.set(name, { name, content: reader.result, size: file.size });
       done++; if (done === arr.length) renderFileList();
     };
     reader.onerror = () => { done++; toast("Could not read " + esc(file.name));

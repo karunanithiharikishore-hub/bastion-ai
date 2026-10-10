@@ -5,7 +5,7 @@ from bluecell import tracing
 
 
 @pytest.mark.parametrize("model", [
-    "claude-opus-4-1", "claude-opus-4-5", "claude-sonnet-4-5",
+    "claude-opus-4-1",  # 4-5 models are priced now (sweep F23)
     "claude-3-5-sonnet-20241022", "claude-3-opus-20240229",
     "claude-opus-5-1", "totally-unknown-model", "gpt-x",
 ])
