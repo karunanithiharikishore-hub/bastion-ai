@@ -145,9 +145,9 @@ class IntelStore:
             return []
         scored = []
         for e in self.entries:
-            hay = set(e.get("keywords", []))
+            hay = set(_as_list(e.get("keywords")))
             hay.update(str(e.get("title", "")).lower().split())
-            hay.update(t.lower() for t in e.get("techniques", []))
+            hay.update(t.lower() for t in _as_list(e.get("techniques")))
             overlap = len(wanted & hay)
             # Whole-token hits in the summary (not substrings: "db" must not match "database").
             tokens = {t.strip(".-_") for t in _TOKEN_RE.findall(str(e.get("summary", "")).lower())}

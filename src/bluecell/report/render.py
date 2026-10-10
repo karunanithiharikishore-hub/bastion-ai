@@ -104,7 +104,7 @@ def render_markdown(result: dict) -> str:
         f"- Generated: {meta['generated']}",
         f"- Events ingested: **{meta['events_ingested']}** "
         f"(distinct after normalize: {meta['events_normalized']})",
-        f"- Sources: {', '.join(meta['sources']) or 'n/a'}",
+        f"- Sources: {', '.join(_md(str(x)) for x in meta['sources']) or 'n/a'}",
         f"- Incidents found: **{_incident_count(result)}**",
         f"- LLM backbone: {meta['backbone']}  |  digest ≈ {meta['digest_tokens']} tokens",
         "",

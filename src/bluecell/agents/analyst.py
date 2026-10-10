@@ -21,7 +21,7 @@ import json
 import re
 from collections import Counter
 
-from .grounding import evidence_index, check_text
+from .grounding import evidence_index, check_text, leaf_strings
 from .injection import (BOUNDARY_INSTRUCTION, Envelope, is_flagged, event_reasons,
                         safe_label)
 
@@ -212,6 +212,28 @@ def tier2_context(events, tier2_verdicts, max_verdicts=5, max_cited=15,
     return _TIER2_HEADER.format(verdicts="\n".join(blocks))
 
 
+def _ground(obj, idx) -> dict:
+    # Leaves, not json.dumps: its \\n / \\t escapes glue onto the next IOC.
+    return check_text("\n".join(leaf_strings(obj)), idx)
+
+
+def _shrink(obj, limit=4000):
+    """Trim long strings/lists until the JSON fits ``limit``; stays valid JSON."""
+    def cut(v, cap):
+        if isinstance(v, str):
+            return v[:cap]
+        if isinstance(v, dict):
+            return {k: cut(x, cap) for k, x in v.items() if not k.startswith("_")}
+        if isinstance(v, list):
+            return [cut(x, cap) for x in v[:max(3, cap // 20)]]
+        return v
+    for cap in (600, 300, 150, 60, 20, 0):
+        out = json.dumps(cut(obj, cap))
+        if len(out) <= limit:
+            return out
+    return out
+
+
 def ai_analyze(events, iocs, backbone, want_review=True, tier2_verdicts=None) -> dict:
     """Run the model-driven Lead + Reviewer agents. Returns a grounded result.
 
@@ -235,7 +257,7 @@ def ai_analyze(events, iocs, backbone, want_review=True, tier2_verdicts=None) ->
         return {"available": False, "reason": f"lead call failed: {exc}"}
     lead = _extract_json(lead_raw) or {"raw": lead_raw}
     # Ground-check every indicator the model cited.
-    grounding = check_text(json.dumps(lead), idx)
+    grounding = _ground(lead, idx)
     lead["_grounding"] = grounding
     out["lead"] = lead
     out["agents"].append({"name": "lead-dfir", "role": "Lead DFIR Analyst",
@@ -245,14 +267,14 @@ def ai_analyze(events, iocs, backbone, want_review=True, tier2_verdicts=None) ->
         try:
             rev_raw = backbone.complete(
                 _REVIEW_PROMPT.format(brief=brief, tier2=tier2,
-                                      lead=json.dumps(lead)[:2000]),
+                                      lead=env.wrap(_shrink(lead), None)),
                 system=_SYSTEM, max_tokens=600)
             review = _extract_json(rev_raw) or {"raw": rev_raw}
         except Exception as exc:
             review = {"error": str(exc)}
         out["review"] = review
         out["agents"].append({"name": "reviewer-tier2", "role": "Tier-2 Reviewer",
-                              "grounded": check_text(json.dumps(review), idx)["ok"]})
+                              "grounded": _ground(review, idx)["ok"]})
 
     # Final verdict = reviewer's corrected verdict if present, else lead's.
     final = _norm_verdict((out.get("review", {}) or {}).get("corrected_verdict")

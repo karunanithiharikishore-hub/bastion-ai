@@ -212,14 +212,20 @@ class SwarmOrchestrator:
             if self._cap["agents"] <= 0 or left < MIN_WORKER_SECONDS:
                 return False
             self._cap["agents"] -= 1
+        if isinstance(agent, SeniorSocAnalyst) and agent.votes > 1:
+            # The K votes share the time left (as in Dispatcher._run_worker): fewer votes, each a share.
+            agent.votes = min(agent.votes, max(1, int(left) // MIN_WORKER_SECONDS))
+            left = left / agent.votes
         agent.timeout = min(agent.timeout, left)
         return True
 
     def _run_one(self, agent, ctx: AgentContext, session) -> list:
         if session is not None and not self._admit(agent):
             if agent.tier == 3:   # specialists are skipped, other tiers run on rules
-                self.tier3_note = ("Fallback ran out of agents or wall-clock budget; "
-                                   "some specialists were skipped.")
+                skip = "Fallback ran out of agents or wall-clock budget; some specialists were skipped."
+                # Keep an injection needs-review note; append rather than overwrite it.
+                if skip not in (self.tier3_note or ""):
+                    self.tier3_note = f"{self.tier3_note} {skip}" if self.tier3_note else skip
                 return agent.skip(ctx, "agent or wall-clock budget exhausted")
             session = None
         return agent.run(ctx, use_llm=session is not None, session=session)
@@ -231,7 +237,8 @@ class SwarmOrchestrator:
         if session is None:
             results = [a.run(ctx, use_llm=False) for a in agents]
         else:
-            with ThreadPoolExecutor(max_workers=self.max_parallel) as pool:
+            pool = ThreadPoolExecutor(max_workers=self.max_parallel)
+            try:
                 # Pool threads don't inherit contextvars; copy the caller's
                 # context here (one per agent: a Context can't be entered twice)
                 # so each agent's spans and usage land in this run's trace.
@@ -239,6 +246,11 @@ class SwarmOrchestrator:
                 results = list(pool.map(
                     lambda cx: cx[0].run(self._run_one, cx[1], ctx, session),
                     zip(ctxs, agents)))
+            except BaseException:   # Ctrl-C / SIGTERM: don't wait for workers; tell them to stop
+                session.close()
+                raise
+            finally:
+                pool.shutdown(wait=False, cancel_futures=True)
         self.agent_runs.extend(a.last_run for a in agents)
         return [f for findings in results for f in findings]
 
@@ -248,6 +260,11 @@ class SwarmOrchestrator:
         # Tier-1 logic only looks at incident events), saving a model agent each.
         run, idle = active_tier1_sources(ctx.events, ctx.incidents,
                                          self.skip_idle_tier1 and session is not None)
+        # The Tier-2 verifier decides the verdict: hold its fallback slot back from Tier-1.
+        hold = self._cap is not None and session is not None and bool(ctx.incidents)
+        if hold:
+            with self._cap_lock:
+                self._cap["agents"] -= 1
         self.tier1 = self._run_all([JuniorSocAnalyst(src, llm_model=self.tier1_model)
                                     for src in run], ctx, session)
         for src in idle:
@@ -256,6 +273,9 @@ class SwarmOrchestrator:
             self.tier1 += agent.skip(ctx, "no incident events")
             self.agent_runs.append(agent.last_run)
 
+        if hold:
+            with self._cap_lock:
+                self._cap["agents"] += 1
         # ---- Tier 2: senior analyst confirms or dismisses incidents ----
         senior = SeniorSocAnalyst(name="soc2-lead", votes=self.votes)
         if ctx.incidents:

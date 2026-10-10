@@ -406,12 +406,18 @@ class Dispatcher:
         parallel = [p for p in pairs if p not in voting]
         out = {}
         if parallel:
-            with ThreadPoolExecutor(max_workers=min(self.max_parallel, len(parallel))) as pool:
+            pool = ThreadPoolExecutor(max_workers=min(self.max_parallel, len(parallel)))
+            try:
                 futures = [(id(a), pool.submit(contextvars.copy_context().run,
                                                self._run_worker, a, it))
                            for a, it in parallel]
                 for key, fut in futures:
                     out[key] = fut.result()
+            except BaseException:   # Ctrl-C / SIGTERM: don't wait for workers; tell them to stop
+                self.session.close()
+                raise
+            finally:
+                pool.shutdown(wait=False, cancel_futures=True)
         for a, it in voting:
             out[id(a)] = self._run_worker(a, it)
         return [out[id(a)] for a in agents]

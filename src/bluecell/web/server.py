@@ -62,6 +62,8 @@ class _State:
         self.results = OrderedDict()   # result_id -> result, bounded
         self.error = None
         self.stages = OrderedDict()    # token -> [dir, count]; "" = default slot
+        self.stage_lock = threading.Lock()  # guards stages/inflight only; never held during analysis
+        self.inflight = set()          # staged dirs under analysis, removed by close() too
 
     def _backbone(self):
         if self.llm_mode == "off":
@@ -131,7 +133,7 @@ class _State:
 
     def stage_reset(self) -> str:
         """Start a fresh staging slot; return its token (sent back on add/run)."""
-        with self.lock:
+        with self.stage_lock:
             token = uuid.uuid4().hex
             self.stages[token] = [tempfile.mkdtemp(prefix="bluecell_stage_"), 0]
             while len(self.stages) > self._MAX_STAGES:
@@ -141,7 +143,7 @@ class _State:
     def stage_add(self, name, content, token=None) -> int:
         """Append one file to a staging slot. Returns files staged in it.
         No token = the shared default slot (older clients)."""
-        with self.lock:
+        with self.stage_lock:
             slot = self.stages.get(token or "")
             if slot is None:
                 if token:
@@ -154,17 +156,22 @@ class _State:
     def stage_run(self, window=None, token=None) -> dict:
         """Analyze a staging slot, then remove it."""
         window = window or self.window
-        with self.lock:
+        with self.stage_lock:
             slot = self.stages.pop(token or "", None)
             if slot is None and token:
                 raise ValueError("unknown or expired staging token")
-            try:
+            if slot:
+                self.inflight.add(slot[0])
+        try:
+            with self.lock:
                 if not slot or slot[1] == 0:
                     raise ValueError("no files staged")
                 return self._run([slot[0]], window, _upload_label(slot[0]))
-            finally:
-                if slot:
-                    shutil.rmtree(slot[0], ignore_errors=True)
+        finally:
+            if slot:
+                with self.stage_lock:
+                    self.inflight.discard(slot[0])
+                shutil.rmtree(slot[0], ignore_errors=True)
 
     def run_on_uploads(self, files, window=None) -> dict:
         """One-shot batch (kept for API compatibility). For large/many files the
@@ -186,11 +193,14 @@ class _State:
                 shutil.rmtree(tmp, ignore_errors=True)
 
     def close(self):
-        """Remove every staging dir (uploaded log content) - call on shutdown."""
-        with self.lock:
+        """Remove every staging dir (uploaded log content) - call on shutdown.
+        Takes only stage_lock, so it does not wait for a running analysis."""
+        with self.stage_lock:
             for folder, _ in self.stages.values():
                 shutil.rmtree(folder, ignore_errors=True)
             self.stages.clear()
+            for folder in self.inflight:
+                shutil.rmtree(folder, ignore_errors=True)
 
 
 def _upload_label(folder):

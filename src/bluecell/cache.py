@@ -141,7 +141,9 @@ def code_fingerprint() -> str:
 def intel_fingerprint(store) -> str:
     if store is None:
         return "none"
-    return _sha(getattr(store, "entries", []))
+    # `added` is a now() stamp set at load time; leaving it in makes the key differ every run.
+    return _sha([{k: v for k, v in e.items() if k != "added"}
+                 for e in getattr(store, "entries", [])])
 
 
 def key_material(events, *, backbone, intel_store=None, settings: dict | None = None) -> dict:

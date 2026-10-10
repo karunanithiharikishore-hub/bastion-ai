@@ -20,11 +20,13 @@ import ipaddress
 import json
 import re
 
-_IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+_IP_RE = re.compile(r"(?<!\d)(?<!\d\.)(?:\d{1,3}\.){3}\d{1,3}(?!\d)(?!\.\d)")
+# Defang markers analysts use: 1.2.3[.]4, evil(.)ru, evil[dot]ru, hxxp://.
+_REFANG_DOT = re.compile(r"[\[({](?:\.|dot)[\])}]", re.I)
 # IPv6 candidates (validated with ipaddress, so "10:22:33" is rejected).
 _IP6_RE = re.compile(r"(?<![\w:.])[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}(?![\w:]|\.\d)")
-_HASH_RE = re.compile(r"\b[a-fA-F0-9]{64}\b|\b[a-fA-F0-9]{40}\b|\b[a-fA-F0-9]{32}\b")
-_DOMAIN_RE = re.compile(r"\b(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b")
+_HASH_RE = re.compile(r"(?<![0-9a-fA-F])(?:[a-fA-F0-9]{128}|[a-fA-F0-9]{64}|[a-fA-F0-9]{40}|[a-fA-F0-9]{32})(?![0-9a-fA-F])")
+_DOMAIN_RE = re.compile(r"(?<![a-zA-Z0-9-])(?:[a-zA-Z0-9-]{1,63}\.){1,10}[a-zA-Z]{2,24}(?![a-zA-Z0-9-])")
 # ATT&CK technique ids the model might cite.
 _TECH_RE = re.compile(r"\bT1\d{3}(?:\.\d{3})?\b")
 
@@ -50,9 +52,22 @@ def _ip6(tok: str) -> str | None:
     return None
 
 
+def _refang(text: str) -> str:
+    return re.sub(r"hxxp", "http", _REFANG_DOT.sub(".", text), flags=re.I)
+
+
+def _v4(tok: str) -> str | None:
+    """Canonical IPv4 (leading zeros stripped, so '010.000.000.001' == '10.0.0.1'), or None."""
+    try:
+        return str(ipaddress.IPv4Address(".".join(str(int(o)) for o in tok.split("."))))
+    except ValueError:
+        return None
+
+
 def _ips(text: str) -> set[str]:
-    """All IPv4 and IPv6 addresses in `text`, IPv6 in canonical form."""
-    out = {m.lower() for m in _IP_RE.findall(text)}
+    """All IPv4 and IPv6 addresses in `text`, in canonical form."""
+    text = _refang(text)
+    out = {ip for ip in map(_v4, _IP_RE.findall(text)) if ip}
     for tok in _IP6_RE.findall(text):
         ip = _ip6(tok)
         if ip and ip != "::":
@@ -65,21 +80,29 @@ def _in_path(text: str, i: int) -> bool:
     return i >= 1 and text[i - 1] in "/\\" and text[max(0, i - 2):i] != "//"
 
 
-def _real_ipv4(tok: str) -> bool:
-    try:
-        ipaddress.IPv4Address(tok)
-        return True
-    except ValueError:
-        return False
-
-
 # A dotted quad right after a version word or product name ("Chrome 120.0.6.99") is not
 # an address. Explicit list: a capitalised noun ("Hosts 203.0.113.250") must still count.
 _VERSION_CTX = re.compile(
-    r"\b(?i:version|ver|v|build|rev|release|chrome|chromium|firefox|edge|safari|opera|"
-    r"python|java|openssl|node|windows|office|android|ios|macos)\s+$")
+    # Browsers keep 4-part versions; other product words ("windows 203.0.113.9") could hide a fake IP.
+    r"\b(?i:version|ver|v|build|rev|chrome|chromium|firefox|safari|opera)\s+$")
 # ATT&CK id followed by a sentence join: "T1059.Then", "T1059.001.Then".
 _TECH_JOIN = re.compile(r"t\d{4}(?:\.\d{3})?\.[a-z]{2,}")
+
+
+def leaf_strings(v):
+    """Yield every string leaf (dict keys too) of a nested value; numbers as str.
+    Regexes run on these, not json.dumps, whose escapes (\\n, \\t) glue onto IOCs."""
+    if isinstance(v, str):
+        yield v
+    elif isinstance(v, dict):
+        for k, x in v.items():
+            yield from leaf_strings(k)
+            yield from leaf_strings(x)
+    elif isinstance(v, (list, tuple, set)):
+        for x in v:
+            yield from leaf_strings(x)
+    elif v is not None:
+        yield str(v)
 
 
 def evidence_index(events, valid_techniques) -> dict:
@@ -100,7 +123,7 @@ def evidence_index(events, valid_techniques) -> dict:
     for e in events:
         for ip in (getattr(e, "src_ip", None), getattr(e, "dst_ip", None)):
             if ip:
-                ips.add(_ip6(str(ip)) or str(ip).lower())
+                ips.add(_ip6(str(ip)) or _v4(str(ip)) or str(ip).lower())
         if getattr(e, "domain", None):
             domains.add(str(e.domain).lower())
         if getattr(e, "file_hash", None):
@@ -111,7 +134,7 @@ def evidence_index(events, valid_techniques) -> dict:
             users.add(str(e.user).lower())
             _note_user_domain(e.user)
         # Mine the message text too, so IOCs embedded in messages count as evidence.
-        msg = getattr(e, "message", "") or ""
+        msg = _refang(getattr(e, "message", "") or "")
         ips |= _ips(msg)
         for h in _HASH_RE.findall(msg):
             hashes.add(h.lower())
@@ -120,12 +143,12 @@ def evidence_index(events, valid_techniques) -> dict:
         # ...and the raw source record, which agents can read via get_event.
         raw = getattr(e, "raw", None)
         if raw:
-            raw = raw if isinstance(raw, str) else json.dumps(raw, default=str)
-            ips |= _ips(raw)
-            for h in _HASH_RE.findall(raw):
-                hashes.add(h.lower())
-            for d in _DOMAIN_RE.findall(raw):
-                domains.add(d.lower())
+            for t in map(_refang, leaf_strings(raw)):
+                ips |= _ips(t)
+                for h in _HASH_RE.findall(t):
+                    hashes.add(h.lower())
+                for d in _DOMAIN_RE.findall(t):
+                    domains.add(d.lower())
     return {"ips": ips, "domains": domains, "hashes": hashes,
             "hosts": hosts, "users": users,
             "techniques": {t.upper() for t in (valid_techniques or [])}}
@@ -136,10 +159,12 @@ def check_text(text: str, index: dict) -> dict:
     if not text:
         return {"unverified": {}, "ok": True}
     # IPv4 only if a real address (octets 0-255) and not a version string; IPv6 as before.
+    text = _refang(text)
     found_ips = {ip for ip in _ips(text) if ":" in ip}
     for m in _IP_RE.finditer(text):
-        if _real_ipv4(m.group(0)) and not _VERSION_CTX.search(text[max(0, m.start() - 32):m.start()]):
-            found_ips.add(m.group(0).lower())
+        ip = _v4(m.group(0))
+        if ip and not _VERSION_CTX.search(text[max(0, m.start() - 32):m.start()]):
+            found_ips.add(ip)
     found_hashes = {m.lower() for m in _HASH_RE.findall(text)}
     found_domains = set()
     for m in _DOMAIN_RE.finditer(text):

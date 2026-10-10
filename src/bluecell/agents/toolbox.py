@@ -608,6 +608,8 @@ class SecurityToolbox:
         if not 0.0 <= confidence <= 1.0:
             problems.append("confidence must be a number in [0, 1]")
         problems += _text_problems("title", title) + _text_problems("rationale", rationale, _RATIONALE_MAX)
+        if recommended_action is not None and not isinstance(recommended_action, str):
+            problems.append("recommended_action must be a string")  # else it skips the commander's envelope
         incident_id = incident_id or None
         if incident_id and incident_id not in self._inc:
             problems.append(f"unknown incident_id {incident_id!r}")

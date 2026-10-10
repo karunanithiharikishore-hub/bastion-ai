@@ -52,6 +52,28 @@ class BackboneUnavailable(RuntimeError):
 _RETRIES = 2   # extra attempts on 429/529; backoff 2s, 4s unless Retry-After says more
 
 
+def _cli_result(stdout: str) -> dict | None:
+    """The CLI's JSON result message in stdout (whole output or one line), if any."""
+    stdout = (stdout or "").strip()
+    for cand in [stdout, *stdout.splitlines()]:
+        try:
+            msg = json.loads(cand)
+        except ValueError:
+            continue
+        if isinstance(msg, dict) and msg.get("result"):
+            return msg
+    return None
+
+
+def _cli_failure_text(stdout: str, stderr: str) -> str:
+    """The CLI's failure message. Its JSON result line carries it in `result`
+    (e.g. an expired login), so a raw JSON line is never shown instead."""
+    msg = _cli_result(stdout)
+    if msg:
+        return str(msg["result"]).strip()
+    return (stderr or "").strip() or (stdout or "").strip()
+
+
 class _Retryable(Exception):
     def __init__(self, err, wait):
         self.err, self.wait = err, wait
@@ -145,10 +167,13 @@ class LLMBackbone:
             raise BackboneUnavailable(
                 f"claude CLI failed: {exc.strerror or type(exc).__name__}") from exc
         if proc.returncode != 0:
-            # The CLI prints some failures (e.g. usage limits) on stdout.
-            reason = (proc.stderr or "").strip() or (proc.stdout or "").strip()
+            # A failed run still reports its cost/usage in the JSON result; trace it.
+            res = _cli_result(proc.stdout)
+            if res and ("usage" in res or "total_cost_usd" in res):
+                tracing.record_llm(res.get("usage"), model=self.model,
+                                   cost_usd=res.get("total_cost_usd"), source="cli")
             raise BackboneUnavailable(
-                f"claude CLI exited {proc.returncode}: {reason[:200]}")
+                f"claude CLI exited {proc.returncode}: {_cli_failure_text(proc.stdout, proc.stderr)[:200]}")
         out = proc.stdout.strip()
         try:
             msg = json.loads(out)

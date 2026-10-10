@@ -30,6 +30,7 @@ own process. The way to avoid per-agent processes is the API driver.
 """
 from __future__ import annotations
 
+import atexit
 import inspect
 import json
 import os
@@ -41,6 +42,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import weakref
 
 from .. import tracing
 from .base import Agent, AgentContext, Finding
@@ -101,6 +103,12 @@ def task_prompt(agent_name: str, role: str) -> str:
 # ---------------------------------------------------------------------------
 # Session: shared state for one swarm run (pickled context + shared board)
 # ---------------------------------------------------------------------------
+# Sessions still open at interpreter exit (e.g. `bluecell serve` stopped mid-analysis,
+# where the analysis thread's finally never runs) get their workers killed here.
+_LIVE: "weakref.WeakSet[SwarmSession]" = weakref.WeakSet()
+atexit.register(lambda: [s.close() for s in list(_LIVE) if not s.closed])
+
+
 class SwarmSession:
     """One swarm run. The board persists across tiers; ``stage`` swaps in the
     context and seed for the next tier (tiers run one after another)."""
@@ -113,6 +121,7 @@ class SwarmSession:
         self.halted: str | None = None
         self.procs: set = set()     # live worker `claude` processes, killed on close
         self.closed = False
+        _LIVE.add(self)
         self.stage(ctx, seed)
 
     def stage(self, ctx: AgentContext, seed: list) -> None:
@@ -324,6 +333,8 @@ def _run_api(agent, session: SwarmSession, backbone, max_turns: int,
     per_request = _takes_timeout(backbone.messages)
     try:
         while turns < max_turns:
+            if session.closed:      # the case closed / user aborted: stop spending
+                break
             if time.monotonic() >= deadline:
                 timed_out = True
                 break

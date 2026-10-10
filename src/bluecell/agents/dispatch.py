@@ -176,8 +176,11 @@ class CommanderToolbox(SecurityToolbox):
 
     def _wrap_fields(self, obj: dict, cap: int) -> None:
         for k in self._WORKER_TEXT:
-            if isinstance(obj.get(k), str) and obj[k]:
-                obj[k] = self.env.wrap(obj[k], cap)
+            v = obj.get(k)
+            if v is None or v == "":
+                continue
+            # Non-string worker values are wrapped as their JSON text, never passed raw.
+            obj[k] = self.env.wrap(v if isinstance(v, str) else json.dumps(v, default=str), cap)
 
     def t_list_roles(self):
         return self._forward("list_roles", {})
