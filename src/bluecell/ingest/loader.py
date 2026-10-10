@@ -29,7 +29,7 @@ from typing import Iterable, Iterator, Optional
 
 from ..models import Event
 from .parsers import (_REPEAT_CAP, STRUCTURED_PARSERS, parse_dns, parse_edr,
-                      parse_syslog_line)
+                      parse_syslog_line, parse_text_line)
 
 # Order matters: more specific / multi-word tokens first so e.g. a filename
 # "MTSummary_Message trace report" matches "mtsummary" before "message trace".
@@ -117,6 +117,14 @@ def _detect(filename: str, record: Optional[dict]) -> str:
             return "network"      # PAN-OS traffic CSV
         if {"src_ip", "dst_ip"} <= set(low):
             return "network"      # firewall-shaped rows; beats a filename hint like "azure_firewall"
+        # Other vendor JSON: distinctive keys -> an existing parser (its key aliases cover the shape).
+        if {"eventtype", "actor", "outcome"} <= set(low):
+            return "auth"         # Okta System Log
+        if "protopayload" in low or {"verb", "sourceips"} <= set(low):
+            return "cloud"        # GCP audit / k8s audit
+        if ("id.orig_h" in low or {"src_ip", "dest_ip"} <= set(low) or {"rule", "agent", "data"} <= set(low)
+                or {"output", "output_fields"} <= set(low) or {"receive_time", "src", "dst"} <= set(low)):
+            return "network"      # Zeek, Suricata, Wazuh, Falco, PAN-OS JSON
         if any(k in low for k in ("sender_address", "sender address", "senderaddress",
                                   "recipient_address", "recipient address",
                                   "recipientaddress", "recipient_status")):
@@ -301,6 +309,14 @@ def _fold_overflow(rec: dict, fieldnames: list) -> dict:
     # unquoted comma really belonged to a later column; upgrade to per-pair validation.
     if "recipientstatus" in names:
         i, k = names.index("recipientstatus"), len(extra)
+        # shortcut: an unquoted comma in Subject pushes the "addr##" pair right by d
+        # fields; those d fields go back to Subject, the rest to Recipient_status.
+        # Only a Subject column before Recipient_status is handled, upgrade if needed.
+        j = next((x for x in range(i, len(raw)) if "##" in str(raw[x])), i)
+        if i < j <= i + k and "subject" in names[:i]:
+            s, d = names.index("subject"), j - i
+            raw[s:s + d + 1] = [",".join(raw[s:s + d + 1])]
+            k -= d
         raw[i:i + k + 1] = [",".join(raw[i:i + k + 1])]
         return dict(zip(fieldnames, raw))
     out = dict(zip(fieldnames, raw[:width]))
@@ -392,13 +408,10 @@ def ingest_file(path: str, override: Optional[str] = None) -> list:
     text = text.replace("\r\n", "\n").replace("\r", "\n")   # universal newlines
 
     if ext in (".json", ".jsonl", ".ndjson"):
-        recs = _iter_json_records(text)
-        head = list(itertools.islice(recs, _SHAPE_SAMPLE))
-        shape = _file_shape(head)   # one source per file, decided from its first records
         count = 0
-        for rec in itertools.chain(head, recs):
+        for rec in _iter_json_records(text):   # each record detected from its own keys
             count += 1
-            source = detect_source(path, _detect_view(shape, rec), override)
+            source = detect_source(path, rec, override)
             ev = _parse_record(rec, source)
             if ev:
                 events.append(ev)
@@ -424,6 +437,9 @@ def ingest_file(path: str, override: Optional[str] = None) -> list:
                 skipped += 1
     else:  # syslog / plaintext (lines that are JSON objects are parsed as records,
            # since many SIEM exports write JSON-per-line into .log / .txt files)
+        zeek_state: dict = {}
+        last_ev = None   # previous parsed line; "last message repeated N times" re-emits it
+        repeat_seq = itertools.count()   # keeps the copies' raw (so event_id) distinct
         for line in text.split("\n"):   # not splitlines(): U+2028/0x85/\x0c would forge lines
             recs = list(_iter_json_records(line))
             if recs:
@@ -435,11 +451,22 @@ def ingest_file(path: str, override: Optional[str] = None) -> list:
                         events.append(ev)
                     elif not _is_blank(rec):
                         skipped += 1
+            elif (lm := _LAST_REPEAT_RE.search(line.strip())) and last_ev is not None:
+                for _ in range(min(int(lm.group(1)), _REPEAT_CAP)):
+                    dup = copy.copy(last_ev)
+                    dup.raw = dict(last_ev.raw or {}, repeat_index=f"last{next(repeat_seq)}")
+                    dup.attack, dup.tags = list(last_ev.attack), list(last_ev.tags)
+                    events.append(dup)
             else:
-                ev = parse_syslog_line(line)
+                ev = parse_text_line(line, zeek_state)
+                if ev is False:
+                    continue
+                if ev is None:
+                    ev = parse_syslog_line(line)
                 if ev and override:
                     ev.source = override
                 if ev:
+                    last_ev = ev
                     events.extend(_expand_repeats(ev))
     if skipped:
         print(f"bluecell: skipped {skipped} unrecognized record(s) in {path}", file=sys.stderr)
@@ -463,6 +490,9 @@ def _expand_repeats(ev: Event) -> list:
         out.append(dup)
     return out
 
+
+# syslog dedup marker that follows a burst: "... last message repeated 9 times"
+_LAST_REPEAT_RE = re.compile(r"\blast message repeated (\d+) times$", re.I)
 
 _EVAL_VERDICTS = ("likely-malicious", "likely-benign", "needs-review")
 

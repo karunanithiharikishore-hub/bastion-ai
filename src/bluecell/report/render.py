@@ -293,9 +293,11 @@ def _render_trace(meta: dict) -> str:
            f"({t.get('cost_note') or 'n/a'})"]
     if meta.get("cache") == "hit":
         orig = meta.get("original_run_id")
+        orig_txt = ("original run not saved" if not meta.get("original_run_persisted", True)
+                    else f"original run `{orig}`" if orig else "")
         out.append("- Served from the run cache (stored "
                    f"{meta.get('cached_at') or '?'}"
-                   + (f"; original run `{orig}`" if orig else "") + "); no model calls this run")
+                   + (f"; {orig_txt}" if orig_txt else "") + "); no model calls this run")
     costly = [a for a in t.get("per_agent") or [] if a.get("llm_calls") or a.get("tool_calls")]
     for a in costly:
         out.append(f"    - T{a.get('tier')} `{a.get('agent')}`: {a.get('tool_calls', 0)} tool calls, "

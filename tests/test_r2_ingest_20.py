@@ -35,7 +35,7 @@ def test_cloudtrail_shape_detected_without_filename_hint(tmp_path):
         "eventSource": "cloudtrail.amazonaws.com", "sourceIPAddress": "1.2.3.4",
         "awsRegion": "us-east-1"}]}))
     ev = ingest_file(str(p))[0]
-    assert ev.source == "cloudtrail.amazonaws.com"
+    assert ev.source == "cloudtrail"  # one source; service kept as a tag (sweep I36)
     assert ev.action == "DeleteTrail"
     assert ev.src_ip == "1.2.3.4"
 
@@ -46,7 +46,7 @@ def test_column_shape_beats_misleading_filename(tmp_path):
         "eventTime": TS, "eventName": "StopLogging",
         "eventSource": "cloudtrail.amazonaws.com", "awsRegion": "us-east-1"}]))
     ev = ingest_file(str(p))[0]
-    assert ev.source == "cloudtrail.amazonaws.com" and ev.action == "StopLogging"
+    assert ev.source == "cloudtrail" and ev.action == "StopLogging"
 
 
 def test_azure_activity_shape_routes_to_cloud(tmp_path):

@@ -37,7 +37,6 @@ import os
 import pickle
 import re
 import shutil
-import signal
 import subprocess
 import sys
 import tempfile
@@ -45,7 +44,7 @@ import time
 import weakref
 
 from .. import tracing
-from ..llm.backbone import BackboneUnavailable
+from ..llm.backbone import BackboneUnavailable, group_kwargs, kill_tree
 from .base import Agent, AgentContext, Finding
 from .toolbox import Blackboard, SecurityToolbox, BASE_TOOLS, file_slug
 from .budget import TIER_MAX_TURNS
@@ -217,11 +216,8 @@ def _cli_text(stdout, stderr) -> str:
 
 
 def _kill(proc) -> None:
-    """Kill a worker's whole process group (it was started as its own session)."""
-    try:
-        os.killpg(proc.pid, signal.SIGKILL)
-    except OSError:
-        pass
+    """Kill a worker's whole process tree (it was started in its own group)."""
+    kill_tree(proc)
 
 
 def _run_cli(agent, session: SwarmSession, backbone, max_turns: int,
@@ -261,8 +257,8 @@ def _run_cli(agent, session: SwarmSession, backbone, max_turns: int,
         # Popen, not run(): the session must be able to kill a worker the commander abandoned.
         with subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE, text=True, cwd=session.dir,
-                              start_new_session=True,
-                              env=dict(os.environ, **agent.cli_env) if agent.cli_env else None) as p:
+                              env=dict(os.environ, **agent.cli_env) if agent.cli_env else None,
+                              **group_kwargs()) as p:
             session.procs.add(p)
             try:
                 if session.closed:      # the case closed while this worker was starting
@@ -270,7 +266,11 @@ def _run_cli(agent, session: SwarmSession, backbone, max_turns: int,
                 out, err = p.communicate(agent.task(), timeout=timeout)
             except subprocess.TimeoutExpired as exc:
                 _kill(p)
-                exc.stdout, exc.stderr = p.communicate()
+                try:
+                    exc.stdout, exc.stderr = p.communicate(timeout=5)
+                except subprocess.TimeoutExpired:   # an escaped descendant still holds the pipes
+                    p.stdout.close()
+                    p.stderr.close()
                 raise
             except BaseException:   # SIGTERM/Ctrl-C: Popen.__exit__ would otherwise wait out the worker
                 _kill(p)

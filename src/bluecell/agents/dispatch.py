@@ -115,8 +115,47 @@ class CommanderToolbox(SecurityToolbox):
         for cap, keep, keep_ev in self._SHRINK:
             trial = self._envelope(self._shrink(out, cap, keep, keep_ev))
             if len(json.dumps(trial, default=str)) <= self.DISPATCH_RESULT_CHARS:
-                break
-        # shortcut: a batch whose verdicts alone exceed the cap is still cut by toolbox.call, upgrade by paging the results
+                return trial
+        # Verdicts alone can still exceed the cap; toolbox._fit would then drop every worker.
+        return self._squeeze(trial)
+
+    # Per-item fields kept by _squeeze (everything else, incl. rationale and evidence, goes).
+    _SLIM = {"verdicts": ("incident_id", "decision", "confidence"),
+             "findings": ("id", "incident_id", "severity", "confidence")}
+
+    def _squeeze(self, trial: dict) -> dict:
+        """Last resort: keep each item's ids and scores, and the same number of items per
+        list (the largest count that fits), recording the rest in ``more``. Every worker
+        stays in ``results``."""
+        results, full = [], {}
+        for i, res in enumerate(trial["results"]):
+            res = dict(res)
+            for key, keep in self._SLIM.items():
+                if res.get(key):
+                    full[i, key] = [{k: v for k, v in it.items() if k in keep} for it in res[key]]
+                    res["trimmed"] = "; ".join(filter(None, [res.get("trimmed"),
+                                                             f"{key} cut to ids and scores"]))
+            results.append(res)
+        trial = dict(trial, results=results)
+
+        def keep(k: int) -> None:      # each list keeps its first k items
+            for (i, key), items in full.items():
+                results[i][key] = items[:k]
+                more = results[i].setdefault("more", {})
+                if len(items) > k:
+                    more[key] = len(items) - k
+                else:
+                    more.pop(key, None)
+
+        lo, hi = 0, max((len(v) for v in full.values()), default=0)
+        while lo < hi:                 # binary search for the largest fitting k
+            mid = (lo + hi + 1) // 2
+            keep(mid)
+            if len(json.dumps(trial, default=str)) <= self.DISPATCH_RESULT_CHARS:
+                lo = mid
+            else:
+                hi = mid - 1
+        keep(lo)
         return trial
 
     @staticmethod

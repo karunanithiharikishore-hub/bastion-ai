@@ -235,7 +235,8 @@ def _prune(keep_path: str) -> None:
         print(f"bluecell: run cache prune skipped ({exc})", file=sys.stderr)
 
 
-def store(key: str, material: dict, result: dict, origin_run_id: str | None = None) -> str | None:
+def store(key: str, material: dict, result: dict, origin_run_id: str | None = None,
+          origin_persisted: bool = True) -> str | None:
     """Store a finished result. Never raises: a failed write must not lose the analysis.
 
     On failure the reason is recorded in ``result["meta"]["cache_error"]`` and
@@ -244,6 +245,7 @@ def store(key: str, material: dict, result: dict, origin_run_id: str | None = No
     entry = {"key": key, "material": material,
              "stored_at": datetime.now(timezone.utc).isoformat(),
              "origin_run_id": origin_run_id,   # trace of the run that produced it
+             "origin_persisted": origin_persisted,   # False = that run used --no-trace
              "result": result}
     try:
         data = json.dumps(entry, default=str)
@@ -330,5 +332,6 @@ def mark_hit(entry: dict, key: str, elapsed_ms: int, run_meta: dict | None = Non
     meta["original_generated"] = meta.get("generated")
     meta["original_timing_ms"] = meta.get("timing_ms")
     meta["original_run_id"] = entry.get("origin_run_id")   # `bluecell runs show <id>`
+    meta["original_run_persisted"] = entry.get("origin_persisted", True)
     meta["timing_ms"] = {"storyline": 0, "swarm": 0, "total": elapsed_ms}
     return result

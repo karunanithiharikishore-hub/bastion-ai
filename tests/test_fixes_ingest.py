@@ -92,7 +92,7 @@ def test_i5_classic_purview_ual_csv(tmp_path):
 # I6 ------------------------------------------------------------------------
 @pytest.mark.parametrize("raw_ip,expected", [
     ("2001:db8::1", "2001:db8::1"),
-    ("::ffff:1.2.3.4", "::ffff:1.2.3.4"),
+    ("::ffff:1.2.3.4", "1.2.3.4"),   # ITEM-19: mapped IPv6 unwraps
     ("[2001:db8::1]:443", "2001:db8::1"),
     ("1.2.3.4:443", "1.2.3.4"),
 ])

@@ -28,7 +28,8 @@ import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
-from .grounding import evidence_index, check_text
+from .grounding import evidence_index, check_text, leaf_strings, technique_matches, _v4
+from ..ingest.parsers import _clean_ip
 from .injection import Envelope, check_agent_text, is_flagged, event_reasons, safe_label
 from ..pipeline.attack import ATTACK_TECHNIQUES
 from .budget import MAX_TOOL_RESULT_CHARS, MAX_BOARD_ENTRIES
@@ -54,12 +55,16 @@ _BULKY_FIELDS = ("rationale", "evidence", "entities", "techniques", "tactics", "
 _INJ_TERM = r"inject|manipulat|tamper"
 _INJ_DENIAL = re.compile(
     rf"\b(?:not|no|never|isn't|wasn't|benign|harmless|false|fake)\s+"
-    rf"(?:(?:an?|the|this|that|any|real|actual|prompt|such)\s+){{0,2}}[\w-]*(?:{_INJ_TERM})"
+    rf"(?:[\w-]+\s+){{0,2}}(?:{_INJ_TERM})"
     rf"|(?:{_INJ_TERM})\w*[^.;:!?\n]{{0,30}}\b(?:is|was|are|were)\s+(?:not|benign|harmless|false|fake)\b",
     re.I)
+# The explanation must say the injected text is ignored or does not change the call, or that
+# the underlying activity was checked. A bare 'attacker' or 'steer' is not an explanation.
 _INJ_WHY = re.compile(
-    r"steer|ignor|disregard|regardless|attacker|not (?:instructions|followed)"
-    r"|treat\w* (?:it |them )?as (?:data|evidence)|(?:n't|not|never) (?:change|alter|affect)",
+    r"\b(?:ignor|disregard|not (?:follow|obey)|did not (?:follow|obey)"
+    r"|treat\w* (?:it |them )?as (?:data|evidence))"
+    r"|(?:n't|not|never) (?:change|alter|affect|follow)"
+    r"|(?:checked|verified) (?:the )?(?:underlying|actual|real) (?:activity|event|process|host)",
     re.I)
 
 
@@ -102,7 +107,15 @@ def _same_source(wanted, src) -> bool:
 # Rationale is replayed into later agents' prompts and the report. Reject (not
 # truncate) an overlong one: a silent cut drops the reasoning the analyst wrote last.
 _RATIONALE_MAX = 4000
+# Titles and actions are capped the same way: a silent cut after grounding would file text nobody checked.
+_TITLE_MAX = 200
+_ACTION_MAX = 2000
 _PLACEHOLDER_TEXT = ("", "none", "null")
+
+
+def _title_key(title) -> str:
+    """Duplicate-check key: whitespace and case differences are the same finding."""
+    return " ".join(str(title).split()).lower()
 
 
 def _text_problems(label: str, value, max_len: int | None = None) -> list:
@@ -279,6 +292,7 @@ class SecurityToolbox:
         self.calls: list = []             # audit trail: (tool, args, ok)
         self._by_id = {e.event_id: e for e in ctx.events}
         self._inc = {i.id: i for i in ctx.incidents}
+        self._raw_hay: dict = {}          # event_id -> searchable raw text (lazy)
         # Log-derived text leaves this toolbox only inside nonce-tagged envelopes.
         self.env = Envelope()
         self._flagged = [e.event_id for e in ctx.events if is_flagged(e)]
@@ -405,7 +419,14 @@ class SecurityToolbox:
 
     def _haystack(self, e) -> str:
         parts = [e.message or ""] + [str(getattr(e, f) or "") for f in _EVENT_FIELDS]
-        return " ".join(parts).lower()
+        return " ".join(parts).lower() + " " + self._raw_text(e)
+
+    def _raw_text(self, e) -> str:
+        # Raw-only values (e.g. CommandLine) are evidence to grounding, so they must be searchable.
+        # shortcut: raw text capped at 3000 chars and keys are searched too, upgrade to values-only walk if false hits show up
+        if e.event_id not in self._raw_hay:
+            self._raw_hay[e.event_id] = " ".join(leaf_strings(e.raw or {}))[:3000].lower()
+        return self._raw_hay[e.event_id]
 
     def _cites_incident(self, incident_id, evidence) -> bool:
         """At least one cited event_id belongs to the incident (submit_finding and submit_verdict)."""
@@ -479,6 +500,8 @@ class SecurityToolbox:
         low = lambda v: str(v).lower() if v is not None else None
         text, source, host, user, ip, domain, process, action = map(
             low, (text, source, host, user, ip, domain, process, action))
+        if ip:   # same spelling the parsers store (ingest _clean_ip); _v4 covers zero-padded IPv4 that _clean_ip rejects
+            ip = _clean_ip(ip) or _v4(ip) or ip.strip()
         hits = []
         for e in self.ctx.events:
             if source and not _same_source(source, e.source): continue
@@ -578,7 +601,7 @@ class SecurityToolbox:
     def t_attack_lookup(self, technique_id):
         tid = str(technique_id).upper()
         meta = ATTACK_TECHNIQUES.get(tid)
-        tagged = [e for e in self.ctx.events if tid in [t.upper() for t in e.attack]]
+        tagged = [e for e in self.ctx.events if any(technique_matches(tid, t) for t in e.attack)]
         return {"id": tid,
                 "name": meta[0] if meta else None,
                 "tactic": meta[1] if meta else None,
@@ -599,13 +622,18 @@ class SecurityToolbox:
                                        for r in store.search(terms, limit=8)], 8000)}
 
     def t_read_board(self):
-        # Newest entries only (older ones would bloat every later turn). Other
-        # agents' notes can quote log text; they are data, not instructions.
+        # Findings and verdicts always show; the newest notes fill the rest of the window.
+        # Other agents' notes can quote log text; they are data, not instructions.
         entries = self.board.read()
+        notes = [i for i, e in enumerate(entries) if e.get("kind") == "note"]
+        room = max(0, MAX_BOARD_ENTRIES - (len(entries) - len(notes)))
+        keep = {i for i, e in enumerate(entries) if e.get("kind") != "note"}
+        keep |= set(notes[len(notes) - room:])
+        shown = [entries[i] for i in sorted(keep)]
         return {"entries": [dict(e, **{k: self.env.wrap(e[k], 1500)
                                        for k in ("message", "title") if e.get(k)})
-                            for e in entries[-MAX_BOARD_ENTRIES:]],
-                "older_entries_omitted": max(0, len(entries) - MAX_BOARD_ENTRIES)}
+                            for e in shown],
+                "older_entries_omitted": len(entries) - len(shown)}
 
     def t_post_note(self, message):
         message = str(message or "").strip()
@@ -618,8 +646,13 @@ class SecurityToolbox:
         injected = self._agent_text_problems("note", message)
         if injected:
             return {"error": "note rejected", "problems": injected}
+        # One agent must not fill the board with notes; findings and verdicts are unlimited.
+        mine = [e for e in self.board.read()
+                if e.get("kind") == "note" and e.get("agent") == self.agent_name]
+        if len(mine) >= 10:
+            return {"error": "note limit reached (10 per agent); submit a finding or verdict instead"}
         self.board.post({"kind": "note", "agent": self.agent_name,
-                         "role": self.role, "message": message[:1500]})
+                         "role": self.role, "message": message[:500]})
         return {"posted": True}
 
     def t_submit_finding(self, title, severity, confidence, rationale, evidence,
@@ -634,9 +667,12 @@ class SecurityToolbox:
             confidence = -1
         if not 0.0 <= confidence <= 1.0:
             problems.append("confidence must be a number in [0, 1]")
-        problems += _text_problems("title", title) + _text_problems("rationale", rationale, _RATIONALE_MAX)
+        problems += _text_problems("title", title, _TITLE_MAX) + _text_problems("rationale", rationale, _RATIONALE_MAX)
         if recommended_action is not None and not isinstance(recommended_action, str):
             problems.append("recommended_action must be a string")  # else it skips the commander's envelope
+        elif isinstance(recommended_action, str) and len(recommended_action) > _ACTION_MAX:
+            problems.append(f"recommended_action is {len(recommended_action)} chars; the limit is "
+                            f"{_ACTION_MAX}, so shorten it and resubmit")
         incident_id = incident_id or None
         if incident_id and incident_id not in self._inc:
             problems.append(f"unknown incident_id {incident_id!r}")
@@ -655,7 +691,7 @@ class SecurityToolbox:
                             f"least one {label!r} event")
         attack = [str(t).upper() for t in _as_list(attack)]
         cited_techs = {t.upper() for e in cited for t in e.attack}
-        bad_techs = [t for t in attack if t not in cited_techs]
+        bad_techs = [t for t in attack if not any(technique_matches(t, c) for c in cited_techs)]
         if bad_techs:
             problems.append(f"techniques {bad_techs} are not tagged on the cited events "
                             f"(cited events carry {sorted(cited_techs) or 'none'})")
@@ -668,7 +704,7 @@ class SecurityToolbox:
         if problems:
             return {"error": "finding rejected", "problems": problems}
         # Same agent+incident+title is the same Finding.id downstream; a retry must not double-file it.
-        if any(f["incident_id"] == incident_id and f["title"] == title[:200]
+        if any(f["incident_id"] == incident_id and _title_key(f["title"]) == _title_key(title)
                for f in self.findings):
             return {"error": "duplicate finding", "problems": [
                 f"already filed: a finding titled {title[:200]!r} for "
@@ -694,11 +730,13 @@ class SecurityToolbox:
         decision = str(decision).lower()
         if decision not in ("confirmed", "dismissed"):
             problems.append("decision must be 'confirmed' or 'dismissed'")
-        # Without an explicit severity, a dismissal is low; a confirmation keeps
-        # the incident's own severity.
-        if severity:
+        # A dismissal is always low (an explicit severity is ignored); a confirmation
+        # keeps the incident's own severity unless one is given.
+        if decision == "dismissed":
+            severity = "low"
+        elif severity:
             severity = str(severity).lower()
-        elif str(decision).lower() == "confirmed" and inc is not None:
+        elif decision == "confirmed" and inc is not None:
             severity = inc.severity_label()
         else:
             severity = "low"

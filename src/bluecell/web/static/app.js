@@ -51,11 +51,14 @@ function renderFileList() {
   const host = $("filelist"); host.innerHTML = "";
   pending.forEach((f) => {
     const chip = el("div", "fchip",
-      `<span>${esc(f.name)}</span><span class="sz">${humanSize(f.size)}</span><span class="x" data-n="${esc(f.name)}">&times;</span>`);
+      `<span>${esc(f.name)}</span><span class="sz">${humanSize(f.size)}</span><span class="x" role="button" tabindex="0" aria-label="remove ${esc(f.name)}" data-n="${esc(f.name)}">&times;</span>`);
     host.appendChild(chip);
   });
-  host.querySelectorAll(".x").forEach((b) => b.addEventListener("click", () => {
-    pending.delete(b.dataset.n); renderFileList(); updateAnalyzeBtn(); }));
+  host.querySelectorAll(".x").forEach((b) => {
+    const rm = () => { pending.delete(b.dataset.n); renderFileList(); updateAnalyzeBtn(); };
+    b.addEventListener("click", rm);
+    b.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); rm(); } });
+  });
   updateAnalyzeBtn();
 }
 function updateAnalyzeBtn() {
@@ -111,7 +114,7 @@ function addFiles(fileList) {
   });
   $("analyze").addEventListener("click", analyzeUploads);
   $("loadsample").addEventListener("click", () => { pending.clear(); renderFileList();
-    $("status").innerHTML = '<span class="spinner"></span> loading sample…'; load("/api/refresh"); });
+    $("status").innerHTML = '<span class="spinner"></span> loading sample…'; load("/api/refresh", { method: "POST" }); });
 })();
 
 async function postJSON(url, obj) {
@@ -282,6 +285,8 @@ function renderStage(r) {
     const isImpact = /impact/.test(p.tactic), isCC = /command-and-control/.test(p.tactic);
     const layer = el("div", "layer" + (isImpact ? " sev-impact" : isCC ? " sev-cc" : ""));
     layer.dataset.i = i; layer.style.animationDelay = (i * 90) + "ms";
+    layer.setAttribute("role", "button"); layer.tabIndex = 0;
+    layer.setAttribute("aria-label", `phase ${i + 1}: ${p.tactic}`);
     layer.appendChild(el("div", "tnum", i + 1));
     layer.appendChild(el("div", "tac", esc(p.tactic)));
     layer.appendChild(el("div", "tt", "first seen " + esc((p.first_seen || "").replace("T", " ").slice(0, 19)) + ` · ${p.count} ev`));
@@ -331,6 +336,10 @@ function showPhaseDetail(i) {
     if (moved > 6) return;                       // was a rotate, not a click
     const layer = e.target.closest(".layer");
     if (layer) showPhaseDetail(parseInt(layer.dataset.i, 10));
+  });
+  stage.addEventListener("keydown", (e) => {        // keyboard: Enter/Space open a phase like a click
+    const layer = e.target.closest(".layer");
+    if (layer && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); showPhaseDetail(parseInt(layer.dataset.i, 10)); }
   });
   $("resetview").addEventListener("click", () => { rx = DEF_RX; rz = DEF_RZ; apply(); });
 
@@ -446,8 +455,8 @@ async function mergeMetaAndRender(data) {
     if (m.max_upload_bytes) { MAX_UPLOAD_MB = m.max_upload_mb; MAX_UPLOAD_BYTES = m.max_upload_bytes; } } catch (e) {}
   renderAll(data); return data;
 }
-async function load(url) {
-  try { const res = await fetch(url), data = await res.json().catch(() => ({}));
+async function load(url, init) {
+  try { const res = await fetch(url, init), data = await res.json().catch(() => ({}));
     if (!res.ok || data.error) throw new Error(data.error || ("HTTP " + res.status));
     await mergeMetaAndRender(data);
     if ($("status").textContent.includes("loading")) $("status").textContent = "sample loaded";
@@ -479,7 +488,7 @@ async function downloadIR() {
 
 // On first open, show whatever the server was launched with (samples), so the
 // deck isn't empty, but the drop zone is the primary call to action.
-load("/api/report");
+load("/api/report").then(d => d || load("/api/refresh", { method: "POST" })); // GET no longer analyzes
 
 
 /* ================= hero shortcuts ================= */

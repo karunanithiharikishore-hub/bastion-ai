@@ -74,6 +74,8 @@ def _parse_ts_or_none(value: Any) -> Optional[datetime]:
                 seconds = value / 1000.0
             else:
                 seconds = float(value)
+            if not 631152000 <= seconds <= 4102444800:   # 1990-2100: small ints are not times
+                return None
             return datetime.fromtimestamp(seconds, tz=timezone.utc)
         except (OverflowError, OSError, ValueError):
             return None
@@ -82,6 +84,7 @@ def _parse_ts_or_none(value: Any) -> Optional[datetime]:
         # in the text so they fail to parse instead of being taken as UTC.
         v = re.sub(r"\s+(UTC|GMT|Z)$", "", value.strip()).replace("Z", "+00:00")
         v = re.sub(r"(\.\d{6})\d+", r"\1", v)   # keep offset; drop sub-microsecond digits
+        v = re.sub(r"^(\d{4})/(\d\d)/(\d\d)", r"\1-\2-\3", v)   # PAN-OS "2026/10/03 22:00:00"
         try:
             return _utc(datetime.fromisoformat(v))
         except ValueError:
@@ -103,7 +106,9 @@ def _parse_ts_or_none(value: Any) -> Optional[datetime]:
         for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S", "%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %H:%M:%S",
                     "%m/%d/%Y, %I:%M:%S %p", "%m/%d/%Y %I:%M %p",
                     "%b %d, %Y %I:%M:%S %p", "%a, %d %b %Y %I:%M:%S %p",
-                    "%d/%b/%Y:%H:%M:%S %z"):          # Apache CLF
+                    "%d/%b/%Y:%H:%M:%S %z",           # Apache CLF
+                    "%Y-%m-%d %H:%M:%S.%f %z", "%d-%b-%Y %H:%M:%S",
+                    "%b %d, %Y @ %H:%M:%S.%f", "%m/%d/%Y %H:%M"):
             try:
                 return _utc(datetime.strptime(v, fmt))
             except ValueError:
@@ -178,10 +183,12 @@ def _port(v: Any) -> Optional[int]:
     """0-65535 as int, or a known service name ("https" -> 443); else (-1, 70000, True, 1.5) None."""
     if isinstance(v, bool) or isinstance(v, float) and not v.is_integer():
         return None
-    if isinstance(v, str) and v.strip().lower() in _PORT_NAMES:
-        return _PORT_NAMES[v.strip().lower()]
+    if isinstance(v, str):   # "443.0" (pandas/Excel float), "22/tcp" or "tcp/22" (firewall/nmap style)
+        v = re.sub(r"^(tcp|udp)/|/(tcp|udp)$|\.0$", "", v.strip().lower())
+        if v in _PORT_NAMES:
+            return _PORT_NAMES[v]
     try:
-        n = int(str(v).strip()) if isinstance(v, str) else int(v)
+        n = int(v)
     except (TypeError, ValueError, OverflowError):
         return None
     return n if 0 <= n <= 65535 else None

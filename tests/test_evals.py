@@ -173,11 +173,12 @@ def test_real_offline_run_on_shipped_cases():
 
 def test_cli_exit_code_and_json(tmp_path, capsys):
     out = tmp_path / "rep.json"
-    # shipped suite offline has known rule-only failures -> non-zero, reported not hidden
+    # offline the requires_llm cases are skipped (reported, not failed) -> exit 0
     rc = main(["eval", "--cases", CASES, "--llm", "off", "--no-trace", "--json", str(out)])
-    assert rc == 1
+    assert rc == 0
     data = json.loads(out.read_text())
-    assert data["schema"] == "bluecell.eval/1" and data["summary"]["cases_failed"] >= 1
+    assert data["schema"] == "bluecell.eval/1" and data["summary"]["cases_failed"] == 0
+    assert len(data["summary"]["skipped_requires_llm"]) == 5
     assert "accuracy" in capsys.readouterr().out
     rc = main(["eval", "--cases", CASES, "--case", "apt_chain_web01", "--no-trace"])
     assert rc == 0

@@ -134,6 +134,17 @@ MAX_DIRECTIVE_CHARS = 600
 MAX_SUMMARY_CHARS = 6000
 
 
+def _plan_text(value):
+    """Commander-written text as kept in the plan: capped, None kept as None."""
+    return None if value is None else sanitize(value, MAX_DIRECTIVE_CHARS)
+
+
+def _plan_request(items: list) -> list:
+    """A refused deploy request as kept in the plan: free text capped."""
+    return [dict(it, **{k: _plan_text(it[k]) for k in ("reason", "objective") if k in it})
+            if isinstance(it, dict) else sanitize(it, MAX_DIRECTIVE_CHARS) for it in items]
+
+
 class Dispatcher:
     """Runs the commander's deploy requests against an orchestrator's state.
 
@@ -248,7 +259,7 @@ class Dispatcher:
         with self._state_lock:
             if not self.closed:
                 self.plan.append(dict({"action": "refused", "t": round(self.elapsed(), 1),
-                                       "request": items, "error": error}, **extra))
+                                       "request": _plan_request(items), "error": error}, **extra))
         return dict({"error": error, "budget": self.budget()}, **extra)
 
     def _validate(self, item) -> list:
@@ -340,8 +351,10 @@ class Dispatcher:
                               "tier": agent.tier, "mode": "skipped", "error": why,
                               "findings_filed": 0}
             return []
-        requested = agent.votes if isinstance(agent, SeniorSocAnalyst) else 1
-        if isinstance(agent, SeniorSocAnalyst) and agent.votes > 1:
+        verifier = isinstance(agent, SeniorSocAnalyst)
+        requested = self.orch.votes if verifier else 1
+        budget_k = agent.votes if verifier else 1   # K the agent budget left room for (see _deploy)
+        if verifier and agent.votes > 1:
             # The K vote runs share this deploy's time: fewer votes rather than
             # a per-run timeout under MIN_WORKER_SECONDS (shortcut: K shrinks, recorded in vote_note).
             agent.votes = min(agent.votes, max(1, int(left) // MIN_WORKER_SECONDS))
@@ -353,12 +366,10 @@ class Dispatcher:
             agent.settled = frozenset(f.incident_id for f in self.orch.tier2 if f.origin == "agent")
             out = self.orch.traced_verify(agent, ctx, list(self.orch.tier1),
                                           session=self.session)
-            if agent.votes < requested:
-                # settings.votes still says `requested`; the run must say what actually ran.
-                note = (f"K reduced {requested} -> {agent.votes}: wall clock"
-                        + (" (single run, no vote)" if agent.votes == 1 else ""))
-                agent.last_run = dict(agent.last_run or {}, votes_requested=requested,
-                                      votes_effective=agent.votes, vote_note=note)
+            why = " and ".join(w for w, cut in (
+                ("agent budget (--max-agents)", budget_k < requested),
+                ("wall clock", agent.votes < budget_k)) if cut)
+            record_votes(agent, requested, why)
             return out
         if agent.tier == 3:
             ctx = AgentContext(events=ctx.events, incidents=self._scope(item),
@@ -388,8 +399,10 @@ class Dispatcher:
         self.batches += 1
         batch = self.batches
         agents = [self._build(it) for it in items]
-        self.tier1_sources.update(it["source"] for it in items if it["role"] == "tier1-analyst")
-        self.deployed += len(agents)
+        for a in agents:   # each vote is a model run against --max-agents: K is what is left
+            if isinstance(a, SeniorSocAnalyst):
+                a.votes = min(a.votes, left - len(agents) + 1)
+        self.deployed += sum(a.votes if isinstance(a, SeniorSocAnalyst) else 1 for a in agents)
         # Every worker in the batch sees all conclusions filed so far.
         orch = self.orch
         self.session.stage(self.ctx, seed=orch._seed(orch.tier1 + orch.tier2 + orch.tier3))
@@ -437,6 +450,9 @@ class Dispatcher:
             self.workers.append(agent)
             orch._register(agent)
             orch.agent_runs.append(agent.last_run)
+            # A fallback (rules) run after a model error does not count: the commander may retry the source.
+            if item["role"] == "tier1-analyst" and (agent.last_run or {}).get("mode") == "autonomous":
+                self.tier1_sources.add(item["source"])
             if agent.tier == 1:
                 orch.tier1.extend(findings)
             elif agent.tier == 2:
@@ -446,8 +462,8 @@ class Dispatcher:
             results.append(self._result(agent, findings))
             self.plan.append({
                 "action": "deploy", "batch": batch, "t": round(self.elapsed(), 1),
-                "role": item["role"], "agent": agent.name, "reason": item.get("reason"),
-                "objective": item.get("objective"), "incident_id": item.get("incident_id"),
+                "role": item["role"], "agent": agent.name, "reason": _plan_text(item.get("reason")),
+                "objective": _plan_text(item.get("objective")), "incident_id": item.get("incident_id"),
                 "source": item.get("source"), "outcome": self._outcome(agent, findings)})
         return {"results": results, "budget": self.budget()}
 
@@ -489,6 +505,15 @@ class Dispatcher:
                 "rationale": f.rationale[:500],
                 "recommended_action": f.recommended_action} for f in findings]
         return out
+
+
+def record_votes(agent, requested: int, why: str) -> None:
+    """Run record for a verifier whose K votes were cut: what was asked and what ran."""
+    if agent.votes < requested:
+        note = (f"K reduced {requested} -> {agent.votes}: {why}"
+                + (" (single run, no vote)" if agent.votes == 1 else ""))
+        agent.last_run = dict(agent.last_run or {}, votes_requested=requested,
+                              votes_effective=agent.votes, vote_note=note)
 
 
 def _tally(votes: dict) -> str:
@@ -558,6 +583,9 @@ class IncidentCommander(AutonomousAgent):
             err = str(exc) if isinstance(exc, RuntimeError) else f"{type(exc).__name__}: {exc}"
             self.last_run = dict(self.last_run or {}, agent=self.name, role=self.role,
                                  tier=self.tier, mode="failed", error=err)
+        except BaseException:   # Ctrl-C / SIGTERM: kill the workers now, not after relay.stop()'s join
+            session.close()
+            raise
         finally:
             self.dispatcher.close()
             if relay is not None and not relay.stop():

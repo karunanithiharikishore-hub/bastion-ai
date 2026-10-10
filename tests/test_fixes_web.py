@@ -115,7 +115,7 @@ def test_w5_report_md_matches_result_id(srv):
                  {"files": [{"name": "auth.log", "content": SYSLOG}], "window": 120})
     rid = up["meta"]["result_id"]
     # a later analysis replaces the "latest" result ...
-    _, launch = _req(port, "GET", "/api/refresh")
+    _, launch = _req(port, "POST", "/api/refresh", {})
     assert launch["meta"]["result_id"] != rid
     # ... but the report for the upload is still the upload's analysis.
     s, md = _req(port, "GET", f"/api/report.md?id={rid}")

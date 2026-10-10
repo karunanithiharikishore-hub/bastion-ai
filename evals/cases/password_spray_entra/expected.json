@@ -6,5 +6,6 @@
     "203.0.113.45",
     "k.osei@northwind.example"
   ],
-  "min_incidents": 1
+  "min_incidents": 1,
+  "requires_llm": true
 }

@@ -43,7 +43,7 @@ from .. import tracing
 from .base import AgentContext, Finding
 from .commander import (
     Dispatcher, IncidentCommander, DEFAULT_MAX_AGENTS, DEFAULT_COMMANDER_TURNS,
-    DEFAULT_BUDGET_SECONDS, MIN_WORKER_SECONDS,
+    DEFAULT_BUDGET_SECONDS, MIN_WORKER_SECONDS, record_votes,
 )
 from .roles import JuniorSocAnalyst, SeniorSocAnalyst, SPECIALISTS
 from .runtime import SwarmSession
@@ -222,7 +222,11 @@ class SwarmOrchestrator:
             left = self._cap["deadline"] - time.monotonic()
             if self._cap["agents"] <= 0 or left < MIN_WORKER_SECONDS:
                 return False
-            self._cap["agents"] -= 1
+            if isinstance(agent, SeniorSocAnalyst):   # each vote is a model run against --max-agents
+                agent.votes = min(agent.votes, self._cap["agents"])
+                self._cap["agents"] -= agent.votes
+            else:
+                self._cap["agents"] -= 1
         if isinstance(agent, SeniorSocAnalyst) and agent.votes > 1:
             # The K votes share the time left (as in Dispatcher._run_worker): fewer votes, each a share.
             agent.votes = min(agent.votes, max(1, int(left) // MIN_WORKER_SECONDS))
@@ -295,6 +299,7 @@ class SwarmOrchestrator:
             session.stage(ctx, seed=self._seed(self.tier1))
         sess2 = session if session is not None and self._admit(senior) else None
         self.tier2 = self.traced_verify(senior, ctx, self.tier1, session=sess2)
+        record_votes(senior, self.votes, "fallback agent budget or wall clock left room for fewer votes")
         if ctx.incidents:
             self.agent_runs.append(senior.last_run)
 

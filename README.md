@@ -259,7 +259,10 @@ hit its turn budget, the Incident Commander errored or fell back to the fixed
 flow, the AI analyst/reviewer call failed, or an LLM narrative failed
 (`meta.cache` then says `miss (not stored: <reason>)`). `--llm off` runs are
 not cached: they are already deterministic and take under a second. `bluecell
-eval` never uses the cache. The cache guarantees that you get the same result
+eval` never uses the cache. The cache keeps the newest 200 entries
+(`$BLUECELL_CACHE_KEEP` changes this) and drops entries written by other BlueCell
+versions when it stores. There is no `cache clear` command: to clear it, delete
+the cache directory. The cache guarantees that you get the same result
 back; it does not guarantee that the stored result is correct.
 
 **3. Stable verdicts by self-consistency voting.** `--votes K` runs the Tier-2
@@ -321,7 +324,7 @@ agent span and every worker it dispatches (including workers run on the CLI
 file-relay thread) and every Tier-2 verification (all K votes) is an agent
 span under it. Traces are saved to `~/.bluecell/runs/<run_id>/trace.jsonl` and
 `summary.json` (override with `BLUECELL_RUNS_DIR`; skip with `--no-trace` or
-`BLUECELL_NO_TRACE=1`). Tracing errors never fail an analysis. Each report
+`BLUECELL_NO_TRACE=1`). The newest 200 run folders are kept (`$BLUECELL_RUNS_KEEP` changes this). Tracing errors never fail an analysis. Each report
 ends with a "Run cost & trace" section (and says when the result was served
 from the cache).
 
@@ -353,7 +356,8 @@ and a directory walk skips an eval label file):
 {"description": "...", "verdict": "likely-malicious | likely-benign | needs-review",
  "tier2": "confirmed | dismissed | null",
  "must_mention": ["optional, case-insensitive, checked against report + findings"],
- "must_not_mention": ["optional"], "min_incidents": 1}
+ "must_not_mention": ["optional"], "min_incidents": 1,
+ "requires_llm": "optional, true = skipped in rules mode (--llm off)"}
 ```
 
 ```bash
@@ -376,13 +380,13 @@ change ticket), and three prompt-injection cases (an attack with injected
 hidden by zero-width characters and base64).
 
 Be aware of what the offline numbers mean. The deterministic rules cannot read
-a change ticket, so with `--llm off` the three benign-maintenance cases
-(`approved_maintenance_*`, `psexec_change_window`,
-`injection_benign_ignore_wording`) are expected to fail (rules call them
-malicious; only a Tier-2 agent can dismiss them), and the spray and scanner
-cases land on `needs-review`: 7/12 pass offline. These failures are reported,
-not hidden: they measure the rules, and the LLM modes are what the Tier-2
-metric is for. Tier-2 agreement only counts runs where an agent produced the
+a change ticket, so the five cases marked `"requires_llm": true` (the three
+benign-maintenance cases, `approved_maintenance_*`, `psexec_change_window`,
+`injection_benign_ignore_wording`, where rules call the activity malicious; and
+the spray and scanner cases, which land on `needs-review`) are skipped with
+`--llm off`. They are listed as skipped, not failed, so `bluecell eval` exits 0
+when the other 7 pass; run `--llm auto` to score them. The LLM modes are what
+the Tier-2 metric is for. Tier-2 agreement only counts runs where an agent produced the
 verdict, so it shows `n/a` offline. Eval data is small and synthetic; treat
 the scores as regression signals, not as accuracy claims.
 
@@ -438,7 +442,8 @@ bluecell info
 ```bash
 bluecell serve samples --window 120 --port 8787 --open
 # add --llm auto  to run every swarm agent as an autonomous Claude agent;
-# --orchestration auto|commander|fixed, --votes K and --model-tier1 work as on analyze
+# --orchestration auto|commander|fixed, --votes K, --model-tier1 and the commander limits
+# (--max-agents, --max-commander-turns, --budget-seconds) work as on analyze
 ```
 
 A dependency-free local dashboard (binds to `127.0.0.1`; analysis is read-only): a futuristic
@@ -448,8 +453,9 @@ background.
 **Drop your own logs right in the browser** — the top of the deck is a
 drag-and-drop **log intake zone**. Drag log files (or click **Browse**), pick a
 correlation window, and hit **Analyze**; the files are analyzed locally in a
-throwaway temp dir and the deck updates. **Load Sample Attack** shows the bundled
-demo. Nothing is sent to the internet.
+throwaway temp dir and the deck updates. **Load Sample Attack** re-runs the analysis
+on the paths `serve` was started with; it does not load a separate demo (start
+`serve` on `samples` to see the bundled attack). Nothing is sent to the internet.
 
 The deck shows: animated hero metrics (**agents deployed**, **time to deduce**,
 events, incidents), an **RCA Pinpointer** (radar crosshair locking onto
@@ -458,7 +464,7 @@ storyline you can drag to rotate**, the **agent-swarm constellation** (SOC core
 with tier-ringed orbiting agents), incidents, IOC tables, a prioritized
 threat-hunt checklist, and matched threat intel.
 
-JSON/HTTP API: `GET /api/report`, `GET /api/refresh`, `GET /api/meta` (also
+JSON/HTTP API: `GET /api/report`, `POST /api/refresh` (re-runs the analysis), `GET /api/meta` (also
 reports the server's orchestration, votes and Tier-1 model),
 `GET /api/report.md[?id=<meta.result_id>]` (Markdown IR report),
 `GET /api/runs[?limit=N]` and `GET /api/runs/<run_id>` (traced runs: cost,
@@ -473,6 +479,12 @@ cross-site / same-site requests to `/api/*` (`Sec-Fetch-Site`) are refused,
 POSTs must come from the dashboard's own `Origin`, and each upload uses its own
 staging token so concurrent clients never mix files. Dashboard runs are traced
 like CLI runs; they do not use the run cache.
+
+`serve` binds to `--host 127.0.0.1` by default (`--port 8787`). A non-loopback
+`--host` has **no authentication**: anyone who can reach the port can read the
+analysis and upload logs. BlueCell prints a warning at startup. Use it only on a
+trusted network, and add any other Host name clients will use with
+`--allow-host NAME` (repeatable). `serve` has no cache flags.
 
 Output is a full incident report: risk-scored incidents, RCA storyline, ATT&CK
 phases, IOCs, and a prioritized hunt checklist. Use `--format json` for machine
@@ -510,13 +522,16 @@ python scripts/update_intel.py --days 7 --keyword ransomware
 
 Schedule it (cron / launchd / your scheduler) so every analysis retrieves the
 latest vulnerability and TTP context. Network failures are non-fatal.
-The store lives at `~/.bluecell/intel.json` (override with `$BLUECELL_INTEL_DB` or `--intel-db`).
+The default store is `~/.bluecell/intel.json`; `$BLUECELL_INTEL_DB` or `--intel-db` override it.
+A source checkout that already has `data/intel.json` and no `~/.bluecell/intel.json` keeps using that file.
 
 ## Supported inputs & sources
 
-- **Formats:** `.json` (array or `{Records:[...]}`), `.jsonl`/`.ndjson`, `.csv`, `.log`/`.txt`/`.syslog`
-- **Sources:** `edr`/`endpoint`, `dns`, `network`/`firewall`/`router`/`switch`, `cloud`/`cloudtrail`, `auth`, `syslog`
-- Source type is auto-detected from a `source`/`log_type` field or the filename;
+- **Formats:** `.json` (array, `{Records:[...]}`, Elasticsearch `hits`/`_source`, Splunk `results`), `.jsonl`/`.ndjson`, `.csv`, `.log`/`.txt`/`.syslog`
+- **Text lines:** syslog, CEF, auditd, common/combined web access logs, Squid, VPC flow logs v2, Zeek TSV (`#fields` headers are skipped), UFW. Windows XML events are not parsed.
+- **Vendor JSON/CSV:** Sysmon and Event Viewer exports are EDR events; Okta System Log is `auth`; GCP and Kubernetes audit are `cloud`; Zeek, Suricata, Wazuh, Falco and PAN-OS are `network` (Suricata `alert.severity` is not mapped).
+- **Sources:** `--source` accepts 24 names (the list `bluecell analyze --help` prints): `aad`, `auditlog`, `auth`, `azure`, `cloud`, `cloudtrail`, `dns`, `edr`, `endpoint`, `entra`, `firewall`, `m365`, `messagetrace`, `messagetraceresult`, `mtsummary`, `network`, `o365`, `router`, `signin`, `signins`, `switch`, `syslog`, `ual`, `unifiedaudit`. Aliases map to one canonical name: `entra`/`aad` to `azure`, `signin` to `signins`, `auditlog`/`unifiedaudit` to `ual`, `messagetraceresult`/`mtsummary` to `messagetrace`.
+- Source type is auto-detected from a `source`/`log_type` field, known column shapes, or the filename;
   override with `--source`.
 
 ## Layout

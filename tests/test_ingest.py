@@ -57,7 +57,7 @@ def test_ingest_all_samples():
     # syslog, edr, dns, firewall, cloud all represented
     assert "syslog" in sources
     assert "dns" in sources
-    assert any("iam" in s or s == "cloud" for s in sources)
+    assert any("iam" in s or s in ("cloud", "cloudtrail") for s in sources)
 
 
 def test_ragged_csv_with_extra_columns_does_not_crash(tmp_path):

@@ -273,7 +273,8 @@ def _analyze(paths, *, source_override=None, window_minutes=60,
         if reason is None:
             tr = tracing.current()
             if run_cache.store(cache_key, material, result,
-                               origin_run_id=getattr(tr, "run_id", None)) is None:
+                               origin_run_id=getattr(tr, "run_id", None),
+                               origin_persisted=getattr(tr, "persist", True)) is None:
                 reason = result["meta"].get("cache_error")   # store() recorded it there
             else:
                 result["meta"]["cache"] = "refreshed" if cache_mode == "refresh" else "miss (stored)"

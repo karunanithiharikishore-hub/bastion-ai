@@ -2,6 +2,9 @@
   "description": "The bundled benign sample (samples_benign/): approved maintenance window CHG0042117 that trips brute-force, persistence, lateral-movement, tool-download and exfil rules. Rules alone call it a critical attack; Tier-2 should dismiss it.",
   "verdict": "likely-benign",
   "tier2": "dismissed",
-  "must_mention": ["CHG0042117"],
-  "min_incidents": 1
+  "must_mention": [
+    "CHG0042117"
+  ],
+  "min_incidents": 1,
+  "requires_llm": true
 }

@@ -7,8 +7,7 @@ Two execution paths, selected automatically (override with mode=):
 - "cli"  : shell out to the local `claude` CLI — keyless, uses the user's
            existing Claude Code session. Best for interactive local runs.
 - "api"  : call the Anthropic API using ANTHROPIC_API_KEY. Best for headless /
-           scheduled runs. Uses the `anthropic` package if installed, else a
-           dependency-free urllib call.
+           scheduled runs. Dependency-free urllib call (no SDK).
 
 If neither path is available the backbone raises BackboneUnavailable, and
 callers fall back to the deterministic storyline. The pipeline NEVER requires
@@ -23,6 +22,7 @@ runs use the CLI's default sampling; see README "Repeatability & cost".
 """
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import shutil
@@ -46,13 +46,35 @@ _API_VERSION = "2023-06-01"
 DEFAULT_TEMPERATURE = 0.0
 
 
+def group_kwargs() -> dict:
+    """Popen flags that give a child its own process group, so kill_tree reaches its helpers."""
+    if os.name == "nt":
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+def kill_tree(proc) -> None:
+    """Kill a child and its helpers: its process group on POSIX, `taskkill /T` on Windows."""
+    if hasattr(os, "killpg"):
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        return
+    try:
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True)
+    except OSError:
+        proc.kill()
+
+
 class BackboneUnavailable(RuntimeError):
     def __init__(self, message: str = "", status: int | None = None):
         super().__init__(message)
         self.status = status    # HTTP status of an API error response, else None
 
 
-_RETRIES = 2   # extra attempts on 429/529; backoff 2s, 4s unless Retry-After says more
+_RETRIES = 2   # extra attempts on _RETRY_STATUS; backoff 2s, 4s unless Retry-After says more
+_RETRY_STATUS = (429, 500, 502, 503, 504, 529)   # rate limit + transient server errors
 
 
 def _cli_result(stdout: str) -> dict | None:
@@ -156,17 +178,14 @@ class LLMBackbone:
             cmd += ["--append-system-prompt", system]
         try:
             with tempfile.TemporaryDirectory(prefix="bluecell-llm-") as cwd:
-                # Own session, so a timeout kills the CLI's helpers too (as runtime._run_cli).
+                # Own process group, so a timeout kills the CLI's helpers too (as runtime._run_cli).
                 with subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                       stderr=subprocess.PIPE, text=True, cwd=cwd,
-                                      start_new_session=True) as p:
+                                      **group_kwargs()) as p:
                     try:
                         out, err = p.communicate(prompt, timeout=self.timeout)
                     except subprocess.TimeoutExpired as exc:
-                        try:
-                            os.killpg(p.pid, signal.SIGKILL)
-                        except OSError:
-                            pass
+                        kill_tree(p)
                         exc.stderr = p.communicate()[1]
                         raise
                 proc = subprocess.CompletedProcess(cmd, p.returncode, out, err)
@@ -222,7 +241,7 @@ class LLMBackbone:
     def messages(self, body: dict, timeout: float | None = None) -> dict:
         """Raw Messages API call (used by the tool-using agent loop).
 
-        429/529 are retried up to _RETRIES times with backoff (honouring
+        _RETRY_STATUS (429 and 5xx) are retried up to _RETRIES times with backoff (honouring
         Retry-After), but never past ``timeout`` (the caller's remaining budget).
         A persistent 429 still raises, so the swarm halts cleanly."""
         timeout = self.timeout if timeout is None else timeout
@@ -253,9 +272,12 @@ class LLMBackbone:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 payload = json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", "replace")[:200]
+            try:
+                detail = exc.read().decode("utf-8", "replace")[:200]
+            except (OSError, http.client.HTTPException):   # body cut off mid-read
+                detail = "(error body unreadable)"
             err = BackboneUnavailable(f"API HTTP {exc.code}: {detail}", status=exc.code)
-            if exc.code in (429, 529):
+            if exc.code in _RETRY_STATUS:
                 try:
                     wait = float(exc.headers.get("retry-after"))
                 except (AttributeError, TypeError, ValueError):
@@ -264,6 +286,9 @@ class LLMBackbone:
                     wait = None
                 raise _Retryable(err, wait) from exc
             raise err from exc
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError,
+                http.client.HTTPException) as exc:   # ValueError: bad JSON/UTF-8
             raise BackboneUnavailable(f"API request failed: {exc}") from exc
+        if not isinstance(payload, dict):
+            raise BackboneUnavailable("API response is not a JSON object")
         return payload

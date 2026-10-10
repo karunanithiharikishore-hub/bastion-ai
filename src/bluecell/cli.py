@@ -74,6 +74,12 @@ def _port(value: str) -> int:
     return n
 
 
+def _model_id(value: str) -> str:
+    if not value.strip() or any(c.isspace() for c in value):
+        raise argparse.ArgumentTypeError(f"expected a model id with no spaces, got {value!r}")
+    return value
+
+
 def _make_backbone(mode: str, model: str):
     if mode == "off":
         return None
@@ -123,6 +129,9 @@ def cmd_analyze(args) -> int:
         max_commander_turns=args.max_commander_turns,
         budget_seconds=args.budget_seconds,
     )
+    if not result["meta"]["events_ingested"]:
+        print("[bluecell] warning: 0 events ingested; nothing was analysed. "
+              "Check the path and --source.", file=sys.stderr)
     output = render_json(result) if args.format == "json" else render_markdown(result)
     if args.output:
         try:
@@ -148,6 +157,12 @@ _VERDICT_ICON = {"likely-malicious": "🔴 LIKELY REAL ATTACK",
                  "needs-review": "🟡 NEEDS REVIEW"}
 
 
+def _printable(text: str) -> str:
+    """Replace what stdout cannot encode (ASCII or cp1252 consoles) instead of raising after the report is written."""
+    enc = getattr(sys.stdout, "encoding", None) or "utf-8"
+    return text.encode(enc, "replace").decode(enc)
+
+
 def _print_verdicts(result) -> None:
     """Print the per-incident verdict to the terminal so the real-vs-noise call
     is visible without opening the report file."""
@@ -159,13 +174,13 @@ def _print_verdicts(result) -> None:
         v = inc.get("verdict") or {}
         s = inc["storyline"]["structured"]
         icon = _VERDICT_ICON.get(v.get("level"), (v.get("level") or "?").upper())
-        print(f"[bluecell] {s['incident_id']}: {icon} "
-              f"({round(v.get('confidence', 0) * 100)}%): {v.get('headline', '')}")
+        print(_printable(f"[bluecell] {s['incident_id']}: {icon} "
+                         f"({round(v.get('confidence', 0) * 100)}%): {v.get('headline', '')}"))
         if v.get("overrides_rules"):
             rv = v.get("rule_verdict") or {}
             rule_icon = _VERDICT_ICON.get(rv.get("level"), (rv.get("level") or "?").upper())
-            print(f"[bluecell]   (overruled the rule-based score: {rule_icon} "
-                  f"{round((rv.get('confidence') or 0) * 100)}%)")
+            print(_printable(f"[bluecell]   (overruled the rule-based score: {rule_icon} "
+                             f"{round((rv.get('confidence') or 0) * 100)}%)"))
 
 
 def _print_cache(result) -> None:
@@ -266,7 +281,9 @@ def cmd_serve(args) -> int:
           llm_mode=args.llm, model=args.model, intel_db=args.intel_db,
           open_browser=args.open, max_upload_mb=args.max_upload_mb,
           orchestration=args.orchestration, votes=args.votes,
-          tier1_model=args.model_tier1, allow_host=args.allow_host)
+          tier1_model=args.model_tier1, allow_host=args.allow_host,
+          max_agents=args.max_agents, max_commander_turns=args.max_commander_turns,
+          budget_seconds=args.budget_seconds)
     return 0 if httpd is not None else 2
 
 
@@ -300,8 +317,8 @@ def _print_ai(result) -> None:
         return
     lead = ai.get("lead", {})
     seen = " (checked against the Tier-2 verdict)" if ai.get("tier2_verdicts_seen") else ""
-    print(f"[bluecell] AI analyst (model-driven){seen}: {ai.get('final_verdict')} "
-          f"(conf {lead.get('confidence')}): {lead.get('headline', '')}")
+    print(_printable(f"[bluecell] AI analyst (model-driven){seen}: {ai.get('final_verdict')} "
+                     f"(conf {lead.get('confidence')}): {lead.get('headline', '')}"))
 
 
 def cmd_info(args) -> int:
@@ -380,6 +397,11 @@ def _cost_text(s, dollar=False) -> str:
     return f">= {text}" if s.get("cost_unknown_calls") else text
 
 
+def _tokens(s) -> dict:
+    t = s.get("tokens")  # a hand-edited or old summary may hold a bare number
+    return t if isinstance(t, dict) else {}
+
+
 def cmd_runs(args) -> int:
     from . import tracing
     if args.runs_cmd == "show":
@@ -391,8 +413,8 @@ def cmd_runs(args) -> int:
         s = run["summary"]
         print(f"run {s.get('run_id')}  started {s.get('started')}  "
               f"verdict {s.get('verdict')}  backbone {s.get('backbone')}")
-        print(f"inputs: {', '.join(s.get('inputs') or [])}")
-        tok = s.get("tokens") or {}
+        print(f"inputs: {', '.join(str(p) for p in s.get('inputs') or [])}")
+        tok = _tokens(s)
         print(f"duration {s.get('duration_ms')} ms · LLM calls {s.get('llm_calls')} · "
               f"tool calls {s.get('tool_calls')} · tokens {tok.get('total', 0)} · "
               f"cost {_cost_text(s, dollar=True)} ({s.get('cost_note')})")
@@ -410,7 +432,7 @@ def cmd_runs(args) -> int:
         name = tracing.input_label(s.get("inputs"))
         rows.append((s.get("run_id"), (s.get("started") or "")[:19].replace("T", " "),
                      name[:40], s.get("verdict") or "-", s.get("agents", 0),
-                     s.get("tool_calls", 0), (s.get("tokens") or {}).get("total", 0),
+                     s.get("tool_calls", 0), _tokens(s).get("total", 0),
                      _cost_text(s) + ("~" if s.get("cost_estimated") and s.get("total_cost_usd") is not None else ""),
                      f"{(s.get('duration_ms') or 0) / 1000:.1f}"))
     widths = [max(len(str(r[i])) for r in rows) for i in range(len(rows[0]))]
@@ -468,11 +490,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Skip the agent swarm (pipeline only)")
     a.add_argument("--llm", choices=["auto", "cli", "api", "off"], default="auto",
                    help="LLM backbone mode (default auto; 'off' = deterministic)")
-    a.add_argument("--model", default="claude-sonnet-5", help="Claude model")
+    a.add_argument("--model", type=_model_id, default="claude-sonnet-5", help="Claude model")
     a.add_argument("--format", choices=["markdown", "json"], default="markdown")
     a.add_argument("--output", "-o", help="Write report to file instead of stdout")
     a.add_argument("--intel-db", dest="intel_db", help="Path to intel JSON store")
-    a.add_argument("--model-tier1", dest="model_tier1", default=None,
+    a.add_argument("--model-tier1", dest="model_tier1", type=_model_id, default=None,
                    help="Cheaper model for Tier-1 triage agents, e.g. claude-haiku-4-5 "
                         "(default: same as --model)")
     a.add_argument("--votes", type=_positive_int, default=1,
@@ -496,7 +518,7 @@ def build_parser() -> argparse.ArgumentParser:
     ev.add_argument("--case", action="append", help="Run only this case (repeatable)")
     ev.add_argument("--llm", choices=["auto", "cli", "api", "off"], default="off",
                     help="LLM backbone (default off = rules only)")
-    ev.add_argument("--model", default="claude-sonnet-5", help="Claude model")
+    ev.add_argument("--model", type=_model_id, default="claude-sonnet-5", help="Claude model")
     ev.add_argument("--repeat", type=_positive_int, default=1,
                     help="Runs per case; reports verdict stability")
     ev.add_argument("--json", help="Write the full eval report as JSON")
@@ -504,7 +526,7 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Do not save run traces")
     ev.add_argument("--votes", type=_positive_int, default=1,
                     help="Tier-2 self-consistency runs per verdict (default 1)")
-    ev.add_argument("--model-tier1", dest="model_tier1", default=None,
+    ev.add_argument("--model-tier1", dest="model_tier1", type=_model_id, default=None,
                     help="Cheaper model for Tier-1 triage agents (default: --model)")
     _add_swarm_args(ev)
     ev.set_defaults(func=cmd_eval)
@@ -540,7 +562,7 @@ def build_parser() -> argparse.ArgumentParser:
     sv.add_argument("--window", type=_window, default=60, help="Correlation window minutes")
     sv.add_argument("--llm", choices=["auto", "cli", "api", "off"], default="off",
                     help="LLM backbone for RCA/agents (default off for speed)")
-    sv.add_argument("--model", default="claude-sonnet-5")
+    sv.add_argument("--model", type=_model_id, default="claude-sonnet-5")
     sv.add_argument("--intel-db", dest="intel_db", help="Path to intel JSON store")
     sv.add_argument("--open", action="store_true", help="Open the browser automatically")
     sv.add_argument("--allow-host", dest="allow_host", action="append", default=[], metavar="NAME",
@@ -553,8 +575,9 @@ def build_parser() -> argparse.ArgumentParser:
                     default="auto", help=ORCH_HELP)
     sv.add_argument("--votes", type=_positive_int, default=1,
                     help="Tier-2 self-consistency runs per verdict (default 1)")
-    sv.add_argument("--model-tier1", dest="model_tier1", default=None,
+    sv.add_argument("--model-tier1", dest="model_tier1", type=_model_id, default=None,
                     help="Cheaper model for Tier-1 triage agents (default: --model)")
+    _add_commander_limits(sv)
     sv.set_defaults(func=cmd_serve)
 
     pl = sub.add_parser("plan", help="Offline cost plan for analyzing some logs")

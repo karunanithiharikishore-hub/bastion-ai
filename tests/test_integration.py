@@ -500,6 +500,7 @@ def test_web_exposes_new_endpoints_with_protections(tmp_path, monkeypatch):
         c.close()
         return r.status, body
     try:
+        state.run_analysis()  # GET /api/report is read-only now (sweep R25); POST /api/refresh runs it
         st, body = get("/api/report")
         report = json.loads(body)
         assert st == 200 and report["meta"]["trace"]["run_id"]

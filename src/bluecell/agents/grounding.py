@@ -35,9 +35,10 @@ _IDEO_DOTS = str.maketrans({"。": "."})   # NFKC does not fold ideographic full
 _PCT_DOT = re.compile(r"(?<=\w)(?:%2E|\\\.)(?=\w)", re.I)   # bad%2Eru, bad\.ru
 # IPv6 candidates (validated with ipaddress, so "10:22:33" is rejected).
 _IP6_RE = re.compile(r"(?<![\w:.])[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}(?![\w:]|\.\d)")
-_HASH_RE = re.compile(r"(?<![0-9a-fA-F])(?:[a-fA-F0-9]{128}|[a-fA-F0-9]{64}|[a-fA-F0-9]{40}|[a-fA-F0-9]{32})(?![0-9a-fA-F])")
+_HASH_RE = re.compile(r"(?<![0-9a-fA-F])(?:[a-fA-F0-9]{128}|[a-fA-F0-9]{96}|[a-fA-F0-9]{64}|[a-fA-F0-9]{56}|[a-fA-F0-9]{40}|[a-fA-F0-9]{32})(?![0-9a-fA-F])")
 # Labels and TLDs may be Unicode (IDN "пример.рф") or punycode ("xn--p1ai"); _dom() folds them to ASCII.
-_DOMAIN_RE = re.compile(r"(?<![^\W_]|-)(?:(?:[^\W_]|-){1,63}\.){1,10}(?:xn--[a-z0-9-]{1,59}|[^\W\d_]{2,24})(?![^\W_]|-)", re.I)
+# 127 prefix labels = the RFC 1035 maximum; a shorter cap chops a legit long name into a fragment.
+_DOMAIN_RE = re.compile(r"(?<![^\W_]|-)(?:(?:[^\W_]|-){1,63}\.){1,127}(?:xn--[a-z0-9-]{1,59}|[^\W\d_]{2,24})(?![^\W_]|-)", re.I)
 # ATT&CK technique ids the model might cite.
 _TECH_RE = re.compile(r"\bT1\d{3}(?:\.\d{3})?\b")
 
@@ -146,6 +147,12 @@ _HAY_FIELDS = ("message", "source", "category", "action", "host", "user", "proce
                "src_ip", "dst_ip", "domain", "file_path", "file_hash")
 
 
+def technique_matches(cited, present) -> bool:
+    """A cited ATT&CK id is grounded by an equal id or a sub-technique of it (T1059 <- T1059.001)."""
+    c, p = str(cited).upper(), str(present).upper()
+    return p == c or p.startswith(c + ".")
+
+
 def evidence_index(events, valid_techniques) -> dict:
     """Build the set of indicators that ACTUALLY appear in the evidence."""
     ips, domains, hashes, hosts, users = set(), set(), set(), set(), set()
@@ -234,7 +241,8 @@ def check_text(text: str, index: dict) -> dict:
     bad_domains = sorted(d for d in found_domains
                          if d not in known
                          and not any(kd.endswith("." + d) for kd in known))
-    bad_tech = sorted(found_tech - index["techniques"])
+    bad_tech = sorted(t for t in found_tech
+                      if not any(technique_matches(t, p) for p in index["techniques"]))
 
     if bad_ips:
         unverified["ips"] = bad_ips

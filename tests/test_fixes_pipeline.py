@@ -122,10 +122,10 @@ def test_p6_compound_tactic_is_split_into_real_phases():
     s = deterministic_storyline(_t1078_incident())
     tactics = [p["tactic"] for p in s["phases"]]
     assert all("/" not in t for t in tactics)
-    assert "persistence" in tactics and "defense-evasion" in tactics
     steps = " ".join(s["attack_summary"]["what_they_did"])
     assert "defense-evasion/persistence" not in steps
-    assert "disabled or evaded defenses" in steps   # a real verb, not the raw key
+    # Sweep I10: a T1078 sign-in is credential activity, not "disabled defenses / persistence".
+    assert "credential-access" in tactics and "disabled or evaded defenses" not in steps
 
 
 def test_p6_t1078_signin_counts_as_credential_activity():

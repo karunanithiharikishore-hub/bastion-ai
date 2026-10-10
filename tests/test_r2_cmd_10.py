@@ -3,6 +3,8 @@
 # WATERMARK: BLUECELL::AUTHOR::Harikishore-Karunanithi
 """BUG-CMD-10: wrong-typed deploy fields are a validation refusal, and the
 refusal is logged with its problems. No real model calls."""
+import pytest
+
 from bluecell.agents.commander import Dispatcher
 from bluecell.agents.orchestrator import SwarmOrchestrator
 from bluecell.agents.runtime import SwarmSession
@@ -18,8 +20,14 @@ def _dispatcher():
                       SwarmSession(ctx, seed=[]))
 
 
-def test_unhashable_role_is_a_logged_validation_refusal():
-    d = _dispatcher()
+@pytest.fixture
+def d():
+    disp = _dispatcher()
+    yield disp
+    disp.session.close()   # each dispatcher owns a temp swarm dir
+
+
+def test_unhashable_role_is_a_logged_validation_refusal(d):
     r = d.handle("deploy", {"agents": [{"role": ["x"], "reason": "r"}]})
     assert r["error"] == "deploy rejected"
     assert any("unknown role" in p for p in r["problems"]), r
@@ -27,8 +35,7 @@ def test_unhashable_role_is_a_logged_validation_refusal():
     assert d.plan[0]["problems"] == r["problems"]
 
 
-def test_unhashable_tier1_source_is_refused_not_a_crash():
-    d = _dispatcher()
+def test_unhashable_tier1_source_is_refused_not_a_crash(d):
     r = d.handle("deploy", {"agents": [
         {"role": "tier1-analyst", "source": ["dns"], "reason": "r"},
         {"role": "tier1-analyst", "source": ["dns"], "reason": "r"}]})
@@ -37,8 +44,7 @@ def test_unhashable_tier1_source_is_refused_not_a_crash():
     assert len(d.plan) == 1 and d.plan[0]["problems"] == r["problems"]
 
 
-def test_non_list_agents_is_a_logged_refusal():
-    d = _dispatcher()
+def test_non_list_agents_is_a_logged_refusal(d):
     r = d.handle("deploy", {"agents": 5})
     assert r["error"] == "deploy rejected" and "must be a list" in r["problems"][0]
     assert len(d.plan) == 1 and d.plan[0]["action"] == "refused"

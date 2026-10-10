@@ -17,6 +17,7 @@ from __future__ import annotations
 import atexit
 import json
 import os
+import re
 import shutil
 import signal
 import socket
@@ -40,14 +41,47 @@ _CTYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset
            ".svg": "image/svg+xml", ".ico": "image/x-icon"}
 
 
+_CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'"
+
+
+def _tmpdir(kind):
+    """Private staging dir named with the owning pid, so a later start can tell leftovers of a dead server."""
+    return tempfile.mkdtemp(prefix=f"bluecell_{kind}_p{os.getpid()}_")
+
+
+_STALE = re.compile(r"bluecell_(?:stage|upload)_p(\d+)_")
+
+
+def _pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:  # alive, owned by another user
+        pass
+    return True
+
+
+def sweep_stale_uploads():
+    """Remove staged-upload dirs whose server died without cleanup (kill -9, OOM, power loss)."""
+    tmp = tempfile.gettempdir()
+    for name in os.listdir(tmp):
+        m = _STALE.match(name)
+        if m and not _pid_alive(int(m.group(1))):
+            shutil.rmtree(os.path.join(tmp, name), ignore_errors=True)
+
+
 class _State:
     """Holds launch config + recent analysis results (thread-safe)."""
     _KEEP_RESULTS = 8    # recent results kept so /api/report.md?id= matches the screen
     _MAX_STAGES = 32     # concurrent staging slots (oldest is dropped beyond this)
 
     def __init__(self, paths, window, llm_mode, model, intel_db, max_upload_mb=256,
-                 orchestration="auto", votes=1, tier1_model=None, allow_hosts=None):
+                 orchestration="auto", votes=1, tier1_model=None, allow_hosts=None,
+                 max_agents=None, max_commander_turns=None, budget_seconds=None):
         self.paths = paths
+        self.commander = dict(max_agents=max_agents, max_commander_turns=max_commander_turns,
+                              budget_seconds=budget_seconds)  # None = analyzer default
         self.allow_hosts = allow_hosts or set(_LOOPBACK)  # Host names served (DNS rebinding guard)
         self.window = window
         self.llm_mode = llm_mode
@@ -58,6 +92,7 @@ class _State:
         self.intel_db = intel_db
         self.max_upload_mb = max(1, int(max_upload_mb))
         self.max_upload = self.max_upload_mb * 1024 * 1024  # request-body cap
+        self.max_stage = 4 * self.max_upload  # staged characters per slot
         self.lock = threading.Lock()
         self.result = None       # last *good* result (failures never clear it)
         self.results = OrderedDict()   # result_id -> result, bounded
@@ -82,7 +117,7 @@ class _State:
                 backbone=self._backbone(), intel_store=intel,
                 run_agents=True, use_llm=(self.llm_mode != "off"),
                 orchestration=self.orchestration, votes=self.votes,
-                tier1_model=self.tier1_model,
+                tier1_model=self.tier1_model, **self.commander,
             )
 
     def _run(self, paths, window, label=None):
@@ -136,7 +171,7 @@ class _State:
         """Start a fresh staging slot; return its token (sent back on add/run)."""
         with self.stage_lock:
             token = uuid.uuid4().hex
-            self.stages[token] = [tempfile.mkdtemp(prefix="bluecell_stage_"), 0]
+            self.stages[token] = [_tmpdir("stage"), 0, 0]
             while len(self.stages) > self._MAX_STAGES:
                 shutil.rmtree(self.stages.popitem(last=False)[1][0], ignore_errors=True)
             return token
@@ -149,9 +184,14 @@ class _State:
             if slot is None:
                 if token:
                     raise ValueError("unknown or expired staging token")
-                slot = self.stages[""] = [tempfile.mkdtemp(prefix="bluecell_stage_"), 0]
+                slot = self.stages[""] = [_tmpdir("stage"), 0, 0]
+            size = len(str(content or ""))
+            if slot[2] + size > self.max_stage:
+                raise ValueError(f"staged files exceed the {self.max_stage >> 20} MB limit "
+                                 "for one run; run it or start a new staging slot")
             self._write_unique(slot[0], name, content)
             slot[1] += 1
+            slot[2] += size
             return slot[1]
 
     def stage_run(self, window=None, token=None) -> dict:
@@ -179,7 +219,7 @@ class _State:
         staged endpoints (/api/stage/*) are preferred."""
         window = window or self.window
         with self.lock:
-            tmp = tempfile.mkdtemp(prefix="bluecell_upload_")
+            tmp = _tmpdir("upload")
             try:
                 safe_count = 0
                 for f in files:
@@ -197,7 +237,7 @@ class _State:
         """Remove every staging dir (uploaded log content) - call on shutdown.
         Takes only stage_lock, so it does not wait for a running analysis."""
         with self.stage_lock:
-            for folder, _ in self.stages.values():
+            for folder, *_ in self.stages.values():
                 shutil.rmtree(folder, ignore_errors=True)
             self.stages.clear()
             for folder in self.inflight:
@@ -264,16 +304,21 @@ def _opt_str(obj, key):
 def _make_handler(state: _State):
     class Handler(BaseHTTPRequestHandler):
         server_version = f"BlueCell/{__version__}"
+        timeout = 60  # a stalled client must not hold its handler thread forever
 
         def log_message(self, *args):  # keep the console quiet
             pass
 
-        def _send(self, code, body: bytes, ctype: str):
+        def _send(self, code, body: bytes, ctype: str, extra=()):
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("X-BlueCell-Author", provenance.AUTHOR)
             self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Content-Security-Policy", _CSP)
+            for key, value in extra:
+                self.send_header(key, value)
             self.end_headers()
             if self.command != "HEAD":
                 self.wfile.write(body)
@@ -291,8 +336,8 @@ def _make_handler(state: _State):
             if _host_name(host) not in state.allow_hosts:
                 self._send(403, b"forbidden host", "text/plain")
                 return False
-            # A cross-site <img>/<link> can still fire a GET (e.g. /api/refresh,
-            # which re-runs analysis); browsers label those with Sec-Fetch-Site.
+            # A cross-site <img>/<link> can still fire a GET (e.g. /api/report,
+            # which may start analysis); browsers label those with Sec-Fetch-Site.
             site = (self.headers.get("Sec-Fetch-Site") or "").lower()
             if (site in ("cross-site", "same-site")
                     and urlparse(self.path).path.startswith("/api/")):
@@ -320,41 +365,42 @@ def _make_handler(state: _State):
             self.do_GET()
 
         def do_GET(self):
-            if not self._request_allowed():
-                return
+            self._guard(self._get)
+
+        def _guard(self, route_fn):
+            """Backstop for every request: a malformed target or handler bug gets an error reply, never a dropped connection."""
+            try:
+                if self._request_allowed():
+                    route_fn()
+            except ValueError as exc:  # e.g. urlparse on "http://[/x"
+                self._json({"error": f"bad request: {exc}"}, 400)
+            except OSError as exc:  # e.g. disk full while staging an upload
+                self._json({"error": f"could not store upload: {exc}"}, 500)
+            except Exception as exc:
+                self._json({"error": f"internal error: {type(exc).__name__}"}, 500)
+
+        def _get(self):
             route = urlparse(self.path)
             path = route.path
-            if path == "/api/report":
-                res = state.result or state.run_analysis()
+            if path == "/api/report":  # read-only: analysis starts only via POST /api/refresh
+                res = state.result
                 if res is None:
-                    self._json({"error": state.error or "analysis failed"}, 500)
+                    self._json({"error": state.error or "no analysis yet: POST /api/refresh"}, 404)
                 else:
                     self._json(res)
-            elif path == "/api/refresh":
-                res = state.run_analysis()
-                self._json(res if res else {"error": state.error}, 200 if res else 500)
             elif path == "/api/report.md":
                 # ?id= renders the exact analysis on screen, not just the latest.
                 rid = (parse_qs(route.query).get("id") or [""])[0]
-                res = state.get_result(rid) if rid else (state.result or state.run_analysis())
+                res = state.get_result(rid) if rid else state.result  # GET never starts an analysis
                 if res is None:
-                    if rid:
-                        self._send(404, b"report expired: re-run the analysis", "text/plain")
-                    else:
-                        self._send(500, (state.error or "analysis failed").encode(), "text/plain")
+                    msg = b"report expired: re-run the analysis" if rid else b"no analysis yet: POST /api/refresh"
+                    self._send(404, msg, "text/plain")
                     return
                 import datetime
                 md = render_markdown(res)
                 fname = "bluecell_IR_report_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + ".md"
-                body = md.encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "text/markdown; charset=utf-8")
-                self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
-                self.send_header("Content-Length", str(len(body)))
-                self.send_header("X-BlueCell-Author", provenance.AUTHOR)
-                self.end_headers()
-                if self.command != "HEAD":
-                    self.wfile.write(body)
+                self._send(200, md.encode("utf-8"), "text/markdown; charset=utf-8",
+                           [("Content-Disposition", f'attachment; filename="{fname}"')])
             elif path == "/api/meta":
                 self._json({
                     "version": __version__, "author": provenance.AUTHOR,
@@ -418,19 +464,13 @@ def _make_handler(state: _State):
             return body
 
         def do_POST(self):
-            if not self._request_allowed():
-                return
-            try:
-                self._post()
-            except ValueError as exc:
-                self._json({"error": f"bad request: {exc}"}, 400)
-            except OSError as exc:  # e.g. disk full while staging an upload
-                self._json({"error": f"could not store upload: {exc}"}, 500)
-            except Exception as exc:  # backstop: a handler bug must not drop the connection
-                self._json({"error": f"internal error: {type(exc).__name__}"}, 500)
+            self._guard(self._post)
 
         def _post(self):
             path = urlparse(self.path).path
+            if path == "/api/refresh":  # re-runs the analysis, so POST (Origin-checked) not GET
+                res = state.run_analysis()
+                self._json(res if res else {"error": state.error}, 200 if res else 500); return
             # Preferred: staged upload — one file per request, then run.
             if path == "/api/stage/reset":
                 token = state.stage_reset()
@@ -486,14 +526,17 @@ def _interrupt(signum, frame):
 
 def serve(paths, host="127.0.0.1", port=8787, window=60, llm_mode="off",
           model="claude-sonnet-5", intel_db=None, open_browser=False,
-          max_upload_mb=256, orchestration="auto", votes=1, tier1_model=None, allow_host=()):
+          max_upload_mb=256, orchestration="auto", votes=1, tier1_model=None, allow_host=(),
+          max_agents=None, max_commander_turns=None, budget_seconds=None):
     """Start the dashboard server (blocking). Returns the httpd, or None if the
     address could not be bound."""
     provenance.enforce(strict=True)
+    sweep_stale_uploads()
     allow = _allowed_hosts(host, allow_host)
     state = _State(paths, window, llm_mode, model, intel_db, max_upload_mb=max_upload_mb,
                    orchestration=orchestration, votes=votes, tier1_model=tier1_model,
-                   allow_hosts=allow)
+                   allow_hosts=allow, max_agents=max_agents,
+                   max_commander_turns=max_commander_turns, budget_seconds=budget_seconds)
     if llm_mode != "off" and state._backbone() is None:
         if llm_mode != "auto":  # an explicit backbone must not silently fall back to rules
             print(f"[bluecell] WARNING: --llm {llm_mode} requested but that backbone is "

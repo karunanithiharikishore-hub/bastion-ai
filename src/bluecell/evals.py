@@ -11,7 +11,8 @@ A case is a directory ``evals/cases/<name>/`` holding log files plus
      "tier2": "confirmed" | "dismissed" | null,
      "must_mention": ["substring", ...],        # optional, case-insensitive
      "must_not_mention": ["substring", ...],    # optional
-     "min_incidents": 0}                        # optional
+     "min_incidents": 0,                        # optional
+     "requires_llm": false}                     # optional; true = skipped in rules mode
 
 Scoring per run:
 - verdict   : the headline verdict (incidents[0] after BlueCell's own ordering)
@@ -63,6 +64,8 @@ def validate_expected(exp) -> list:
     mi = exp.get("min_incidents", 0)
     if not isinstance(mi, int) or isinstance(mi, bool) or mi < 0:
         probs.append("min_incidents must be a non-negative integer")
+    if not isinstance(exp.get("requires_llm", False), bool):
+        probs.append("requires_llm must be true or false")
     return probs
 
 
@@ -320,7 +323,14 @@ def run_eval(cases_dir: str = DEFAULT_CASES, *, names=None, repeat: int = 1,
              progress=None, options: dict | None = None) -> dict:
     """Run every case and return the report dict (schema ``bluecell.eval/1``)."""
     cases = load_cases(cases_dir, names)
-    use_llm = llm != "off" and backbone is not None
+    # an injected analyze_fn (tests, custom runners) decides itself whether it can answer
+    use_llm = (llm != "off" and backbone is not None) or analyze_fn is not None
+    # rules mode cannot answer requires_llm cases: report them as skipped, never as failed
+    skipped = [] if use_llm else [c["name"] for c in cases if c["expected"].get("requires_llm")]
+    cases = [c for c in cases if c["name"] not in skipped]
+    if not cases:  # an all-skipped run must not pass a CI gate vacuously
+        raise FileNotFoundError(f"case(s) {', '.join(skipped)} requires an LLM backbone "
+                                "(--llm auto|api|cli)")
     results = []
     for c in cases:
         r = run_case(c, repeat=repeat, analyze_fn=analyze_fn, backbone=backbone,
@@ -335,7 +345,7 @@ def run_eval(cases_dir: str = DEFAULT_CASES, *, names=None, repeat: int = 1,
                    "backbone": (backbone.resolved if backbone else "none (rules)"),
                    "model": getattr(backbone, "model", None), "repeat": repeat,
                    "options": {k: v for k, v in (options or {}).items() if v is not None}},
-        "summary": aggregate(results),
+        "summary": {**aggregate(results), "skipped_requires_llm": skipped},
         "cases": results,
     }
 
@@ -349,6 +359,10 @@ _SHORT = {"likely-malicious": "malicious", "likely-benign": "benign",
 
 def _pct(v):
     return "n/a" if v is None else f"{v * 100:.0f}%"
+
+
+def _ms(v):
+    return "n/a" if v is None else f"{v} ms"
 
 
 def format_report(report: dict) -> str:
@@ -386,10 +400,13 @@ def format_report(report: dict) -> str:
         out.append(f"{s['run_errors']} run error(s) of {s['runs']}, counted as wrong")
     out += [f"Tier-2 agreement {_pct(s['tier2_agreement'])} over {s['tier2_scored_runs']} scored run(s)"
             + ("" if s["tier2_scored_runs"] else " (no Tier-2 agent verdicts: rules mode)"),
-            f"mean duration {s['mean_duration_ms']} ms · tokens {s['total_tokens']} · "
+            f"mean duration {_ms(s['mean_duration_ms'])} · tokens {s['total_tokens']} · "
             f"LLM calls {s['llm_calls']} · tool calls {s['tool_calls']} · "
             "cost " + ("n/a" if s["total_cost_usd"] is None else
                        f"{'>= ' if s['cost_unknown_runs'] else ''}${s['total_cost_usd']:.4f}")
             + (f" ({'/'.join(s['cost_basis'])})" if s["cost_basis"] else ""),
             f"mean verdict stability {_pct(s['mean_verdict_stability'])}"]
+    if s.get("skipped_requires_llm"):
+        out.append(f"skipped {len(s['skipped_requires_llm'])} case(s) that need an LLM "
+                   f"(rules mode): {', '.join(s['skipped_requires_llm'])}")
     return "\n".join(out)

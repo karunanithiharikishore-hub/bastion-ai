@@ -22,7 +22,7 @@ def test_device_network_json_maps_columns(tmp_path):
     assert (ev.host, ev.user, ev.process) == ("pc1", "bob", "powershell.exe")
     assert (ev.src_ip, ev.dst_ip, ev.domain) == ("10.0.0.5", "8.8.8.8", "dns.google")
     assert ev.action == "ConnectionSuccess"
-    assert ev.message == "10.0.0.5 -> 8.8.8.8:443"
+    assert ev.message.startswith("10.0.0.5 -> 8.8.8.8:443")  # full RemoteUrl may follow (sweep I38)
 
 
 def test_device_process_csv_uses_filename_as_process_and_command_line(tmp_path):

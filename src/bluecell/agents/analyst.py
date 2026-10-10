@@ -211,6 +211,8 @@ def tier2_context(events, tier2_verdicts, max_verdicts=5, max_cited=15,
         lines += [f"    {e.event_id}{' [INJECTION-SUSPECTED]' if is_flagged(e) else ''} "
                   f"{env.wrap(f'{e.compact()} | {e.message[:180]}', 600)}" for e in cited]
         blocks.append("\n".join(lines))
+    if len(tier2_verdicts) > max_verdicts:
+        blocks.append(f"(+{len(tier2_verdicts) - max_verdicts} more not shown)")
     return _TIER2_HEADER.format(verdicts="\n".join(blocks))
 
 
@@ -252,7 +254,7 @@ def ai_analyze(events, iocs, backbone, want_review=True, tier2_verdicts=None) ->
     idx = evidence_index(events, [t for e in events for t in e.attack])
 
     out = {"available": True, "brief_tokens": max(1, len(brief) // 4),
-           "tier2_verdicts_seen": len((tier2_verdicts or [])[:5]),
+           "tier2_verdicts_seen": len(tier2_verdicts or []),
            "agents": []}
     try:
         lead_raw = backbone.complete(_LEAD_PROMPT.format(brief=brief, tier2=tier2),
@@ -276,9 +278,10 @@ def ai_analyze(events, iocs, backbone, want_review=True, tier2_verdicts=None) ->
             review = _extract_json(rev_raw) or {"raw": rev_raw}
         except Exception as exc:
             review = {"error": str(exc)}
+        review["_grounding"] = _ground(review, idx)
         out["review"] = review
         out["agents"].append({"name": "reviewer-tier2", "role": "Tier-2 Reviewer",
-                              "grounded": _ground(review, idx)["ok"]})
+                              "grounded": review["_grounding"]["ok"]})
 
     # Final verdict = reviewer's corrected verdict if present, else lead's.
     final = _norm_verdict((out.get("review", {}) or {}).get("corrected_verdict")

@@ -108,7 +108,7 @@ function renderTable() {
   if (!RUNS.length) { body.innerHTML = '<tr><td colspan="10" class="empty">No runs.</td></tr>'; return; }
   body.innerHTML = RUNS.map((s) => {
     const v = s.verdict || "-";
-    return `<tr data-id="${esc(s.run_id)}">` +
+    return `<tr data-id="${esc(s.run_id)}" role="button" tabindex="0">` +
       `<td>${esc((s.started || "").slice(0, 19).replace("T", " "))}</td>` +
       `<td title="${esc((s.inputs || []).join(", "))}">${esc(inputLabel(s.inputs))}</td>` +
       `<td><span class="vd ${esc(v)}">${esc(v)}</span></td>` +
@@ -120,8 +120,10 @@ function renderTable() {
       `<td class="num">${costCell(s)}</td>` +
       `<td class="num">${esc(secs(s.duration_ms))}</td></tr>`;
   }).join("");
-  body.querySelectorAll("tr[data-id]").forEach((tr) =>
-    tr.addEventListener("click", () => select(tr.dataset.id)));
+  body.querySelectorAll("tr[data-id]").forEach((tr) => {
+    tr.addEventListener("click", () => select(tr.dataset.id));
+    tr.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(tr.dataset.id); } });
+  });
 }
 
 async function select(id) {

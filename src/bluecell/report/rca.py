@@ -52,9 +52,9 @@ def assess_incident(inc) -> dict:
 
 
 def _assess_rules(inc) -> dict:
-    tactics = set(inc.tactics)
-    sources = set(inc.sources)
     events = inc.events
+    tactics = _incident_tactics(events)
+    sources = set(inc.sources)
 
     def _is_success(e):
         # Only a sign-in is a success; same predicate as attack.map_attack.
@@ -74,16 +74,7 @@ def _assess_rules(inc) -> dict:
     has_success = any(_is_success(e) for e in events)
     fail_ct = sum(1 for e in events if _is_fail(e))
     single_source = len(sources) <= 1
-    # Valid Accounts (T1078) on a sign-in is the credential story itself, not
-    # separate defense-evasion/persistence activity.
-    cred_tactics = set()
-    for e in events:
-        for tid in e.attack:
-            if tid == "T1078" and e.category == "authentication":
-                cred_tactics.add("credential-access")
-            elif tid in ATTACK_TECHNIQUES:
-                cred_tactics.update(_split_tactic(ATTACK_TECHNIQUES[tid][1]))
-    only_cred = bool(cred_tactics) and cred_tactics.issubset({"credential-access", "authentication"})
+    only_cred = bool(tactics) and tactics.issubset({"credential-access", "authentication"})
     # A port-only T1021 (tag remote-port:N, no tool/session evidence) is weak: it counts as
     # lateral movement only alongside a successful auth from an external IP.
     strong_lateral = any(
@@ -149,13 +140,21 @@ def _assess_rules(inc) -> dict:
             ],
         }
     if only_cred and has_success:
+        if fail_ct:
+            headline = "Failed sign-ins followed by a success. Verify it was the real user."
+            why = (f"{fail_ct} failed sign-in(s) and at least one SUCCESS. This is "
+                   f"either the user finally entering the right password, or an "
+                   f"account takeover. It needs a human check.")
+        else:
+            headline = "Flagged sign-in succeeded with no failures. Verify it was the real user."
+            why = ("No failed sign-ins in this incident, only a SUCCESS on a flagged "
+                   "valid-account sign-in. This is either the real user or an account "
+                   "takeover. It needs a human check.")
         return {
             "level": "needs-review",
             "confidence": 0.55,
-            "headline": "Failed sign-ins followed by a success. Verify it was the real user.",
-            "why": (f"{fail_ct} failed sign-in(s) and at least one SUCCESS. This is "
-                    f"either the user finally entering the right password, or an "
-                    f"account takeover. It needs a human check."),
+            "headline": headline,
+            "why": why,
             "recommended_checks": [
                 "Was the successful sign-in from a known device / IP / location?",
                 "Any impossible-travel or new-device sign-in around that time?",
@@ -260,6 +259,19 @@ def _split_tactic(tactic: str) -> list:
     return [t for t in tactic.split("/") if t] or ["other"]
 
 
+def _tactics_of(ev, tid: str) -> list:
+    """Tactics one technique on one event implies. Valid Accounts (T1078) on a
+    sign-in is the credential use itself, not defense evasion or persistence."""
+    if tid == "T1078" and ev.category == "authentication":
+        return ["credential-access"]
+    meta = ATTACK_TECHNIQUES.get(tid)
+    return _split_tactic(meta[1]) if meta else []
+
+
+def _incident_tactics(events) -> set:
+    return {t for e in events for tid in e.attack for t in _tactics_of(e, tid)}
+
+
 def _patient_zero(events):
     """First ATT&CK-tagged event, else None (no suspicious starting point)."""
     return next((e for e in events if e.attack), None)
@@ -282,8 +294,7 @@ def deterministic_storyline(inc) -> dict:
     phases = {}
     for ev in events:
         for tid in ev.attack:
-            meta = ATTACK_TECHNIQUES.get(tid)
-            for tactic in _split_tactic(meta[1] if meta else "other"):
+            for tactic in _tactics_of(ev, tid) or ["other"]:
                 phases.setdefault(tactic, []).append((ev, tid))
 
     ordered_phases = []
@@ -315,7 +326,7 @@ def deterministic_storyline(inc) -> dict:
         })
 
     objective = "unknown"
-    tset = inc.tactics
+    tset = {p["tactic"] for p in ordered_phases}
     if "impact" in tset:
         objective = "impact (destruction/ransomware), highest urgency"
     elif "exfiltration" in tset:
@@ -325,7 +336,7 @@ def deterministic_storyline(inc) -> dict:
     elif "persistence" in tset:
         objective = "establishing persistence / foothold"
     elif "credential-access" in tset:
-        objective = "credential theft / account takeover"
+        objective = "credential access (account takeover not proven)"
 
     return {
         "incident_id": inc.id,
@@ -353,7 +364,7 @@ _TACTIC_VERB = {
     "persistence": "established persistence to survive reboots/log-offs",
     "privilege-escalation": "escalated privileges",
     "defense-evasion": "disabled or evaded defenses",
-    "credential-access": "went after credentials (e.g. brute force or theft)",
+    "credential-access": "used or went after credentials (e.g. brute force, theft, or a valid account)",
     "discovery": "mapped internal systems",
     "lateral-movement": "moved to other machines",
     "collection": "collected data of interest",

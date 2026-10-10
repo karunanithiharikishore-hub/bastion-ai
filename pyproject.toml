@@ -14,7 +14,7 @@ keywords = ["security", "blue-team", "siem", "mitre-attack", "dfir", "threat-hun
 dependencies = []  # stdlib-only core
 
 [project.optional-dependencies]
-api = ["anthropic>=0.40"]  # optional; API path also works via stdlib urllib
+api = []   # kept so `bluecell[api]` still installs; the API path is stdlib urllib
 dev = ["pytest>=7"]
 
 [project.scripts]

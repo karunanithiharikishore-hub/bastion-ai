@@ -15,10 +15,12 @@ be layered on later without changing this interface.
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import re
 import sys
+import tempfile
 import time
 from datetime import datetime, timezone
 
@@ -100,12 +102,34 @@ class IntelStore:
         if self.load_error:
             raise RuntimeError(f"refusing to overwrite {self.path}: it could not be loaded "
                                f"({self.load_error}). Repair or move the file, then retry.")
-        os.makedirs(os.path.dirname(os.path.abspath(self.path)), exist_ok=True)
-        tmp = self.path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump({"updated": datetime.now(timezone.utc).isoformat(),
-                       "entries": self.entries}, fh, indent=2)
-        os.replace(tmp, self.path)
+        d = os.path.dirname(os.path.abspath(self.path))
+        os.makedirs(d, exist_ok=True)
+        # Lock covers re-read + write, so a concurrent writer's entries are merged, not lost.
+        with open(self.path + ".lock", "a") as lk:
+            fcntl.flock(lk, fcntl.LOCK_EX)
+            try:
+                self._merge_disk()
+                fd, tmp = tempfile.mkstemp(dir=d, prefix=".intel.", suffix=".tmp")
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    json.dump({"updated": datetime.now(timezone.utc).isoformat(),
+                               "entries": self.entries}, fh, indent=2)
+                os.replace(tmp, self.path)
+            finally:
+                fcntl.flock(lk, fcntl.LOCK_UN)
+
+    def _merge_disk(self) -> None:
+        """Fold in entries another process saved since we loaded (caller holds the lock)."""
+        if not os.path.exists(self.path):
+            return
+        try:
+            with open(self.path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
+            raise RuntimeError(f"refusing to overwrite {self.path}: it changed on disk and is "
+                               f"unreadable ({exc}). Repair or move the file, then retry.") from exc
+        disk = [e for e in data.get("entries", []) if isinstance(e, dict)] if isinstance(data, dict) else []
+        ids = {e.get("id") for e in disk}
+        self.entries = disk + [e for e in self.entries if e.get("id") not in ids]
 
     # ---- ingest -------------------------------------------------------------
     def add(self, entry: dict) -> bool:
@@ -157,7 +181,7 @@ class IntelStore:
             return []
         scored = []
         for e in self.entries:
-            hay = set(_as_list(e.get("keywords")))
+            hay = {k.lower() for k in _as_list(e.get("keywords"))}
             hay.update(str(e.get("title", "")).lower().split())
             hay.update(t.lower() for t in _as_list(e.get("techniques")))
             overlap = len(wanted & hay)

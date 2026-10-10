@@ -31,6 +31,11 @@ ATTACK_TECHNIQUES = {
     "T1136": ("Create Account", "persistence"),
     "T1098": ("Account Manipulation", "persistence"),
     "T1562": ("Impair Defenses", "defense-evasion"),
+    "T1562.004": ("Disable or Modify System Firewall", "defense-evasion"),
+    "T1562.008": ("Disable or Modify Cloud Logs", "defense-evasion"),
+    "T1070.001": ("Clear Windows Event Logs", "defense-evasion"),
+    "T1547.001": ("Registry Run Keys / Startup Folder", "persistence"),
+    "T1003": ("OS Credential Dumping", "credential-access"),
     "T1567": ("Exfiltration Over Web Service", "exfiltration"),
     "T1490": ("Inhibit System Recovery", "impact"),
     # Identity / M365 cloud techniques
@@ -62,9 +67,9 @@ _CDN_PARENTS = ("cloudfront.net", "akamaiedge.net", "akamai.net", "azureedge.net
 # chat.exe do not fire.
 # Scheduled-job *creation* only: a task that merely ran or completed is not persistence.
 _SCHED_RE = re.compile(r"scheduled tasks?\b[^.;]{0,80}?\b(?:created|registered|updated)\b"
-                       r"|schtasks\s+/create|eventid\D{0,3}470[28]\b|crontab|(?:^|[\\/\s\"'])at\.exe\b"
+                       r"|schtasks\s+/create|eventid\D{0,3}470[28]\b|crontab(?!\s+-l)|(?:^|[\\/\s\"'])at\.exe\b"
                        r"|new cron job|cron job created")
-_REMOTE_RE = re.compile(r"psexec|\bwmic\s|\brdp|\bsmb(?!ios|d\b)|\bwinrm\b")
+_REMOTE_RE = re.compile(r"psexec|\bwmic\s|\brdp(?![a-z0-9])|\bsmb(?!ios|d\b)|\bwinrm\b")
 _REMOTE_PORTS = {22, 445, 139, 3389, 5985, 5986}  # SSH, SMB, RDP, WinRM
 # Allowlist: only an established/allowed connection is a remote-service hit. Teardown/close
 # rows (ASA "connection", FortiGate "close") would double-count the session, so they are skipped.
@@ -80,6 +85,29 @@ _FAIL_RE = re.compile(
 # "unsuccessful" and "not accepted" are not successes; "logonsuccess" and "login_success" are.
 _SUCCESS_RE = re.compile(r"(?<!un)success(?:ful|fully)?(?![a-z])")
 _ACCEPTED_RE = re.compile(r"(?<!not )(?<![a-z])accepted(?![a-z])")
+_NET_ADD_RE = re.compile(r"\bnet1?\s+user\b.*\s/add\b")  # name (and optional password) sit between "user" and "/add"
+# Argument-aware forms: match the invocation, not the bare tool name ("useradd: ..." is an error line).
+_USERADD_RE = re.compile(r"\buseradd\b(?!:)")
+_SERVICE_RE = re.compile(r"\bnew service (?:was )?(?:installed|created)\b|\bnew service \S+\.service\b"
+                         r"|\bsc\s+create\b|\bsystemctl\s+(?:--?\S+\s+)*enable\s+(?:--?\S+\s+)*\S*(?:/|\.service\b)")
+_TOOL_DL_RE = re.compile(r"\bcertutil\b[^\n]*-urlcache\b|\bbitsadmin\b[^\n]*/(?:transfer|addfile)\b"
+                         r"|\b(?:wget|curl)\s[^\n]*(?:https?|ftp)://|invoke-webrequest")
+_PS_EXEC_RE = re.compile(r"-enc(?:odedcommand)?\b|\biex\b")  # not "-Encoding" or "index"
+# "upload completed" is a success notice (backup job), not an outbound transfer.
+# ...unless it names an outbound destination: "upload completed to <dest>" still tags.
+_EXFIL_RE = re.compile(r"exfil|\bupload(?:ed|ing|s)?\b(?!\s+(?:completed?|finished|succeeded)\b(?!\s+to\s+\S))")
+# (technique, reason, pattern) — invocation-shaped, so reading/querying the same
+# artifact (wevtutil qe, reg query ...\Run, netsh ... show) does not fire.
+_RULES = tuple((t, r, re.compile(p)) for t, r, p in (
+    ("T1070.001", "log-cleared", r"\bwevtutil(?:\.exe)?\s+(?:/\S+\s+)*(?:cl|clear-log)\b|\bclear-eventlog\b"
+                                  r"|eventid\D{0,3}(?:1102|104)\b|\b(?:audit|event|security) log (?:was|has been) cleared\b"),
+    ("T1562.004", "firewall-off", r"\bnetsh\s+(?:advfirewall|firewall)\b[^\n]*\bstate\s+off\b"
+                                  r"|\bset-netfirewallprofile\b[^\n]*-enabled\s+false\b"),
+    ("T1547.001", "run-key", r"\breg(?:\.exe)?\s+add\b[^\n]*\\currentversion\\run(?:once)?\b"),
+    ("T1003", "cred-dump", r"(?<!\w)(?<!anti-)mimikatz\b|\b(?:sekurlsa|lsadump)::\w+"),
+    ("T1136", "account-created", r"eventid\D{0,3}4720\b|\ba user account was created\b"),
+    ("T1562.008", "cloud-logging-off", r"(?<![a-z])(?:stoplogging|deletetrail)(?![a-z])"),
+))
 
 
 def _is_auth_success(ev) -> bool:
@@ -162,11 +190,11 @@ def map_attack(events: list) -> list:
                     if "powershell" in lol:
                         _tag(ev, "T1059.001", "powershell")
                     break
-        if "powershell" in msg and ("-enc" in msg or "downloadstring" in msg or "iex" in msg):
+        if "powershell" in msg and ("downloadstring" in msg or _PS_EXEC_RE.search(msg)):
             _tag(ev, "T1059.001", "encoded-powershell")
 
         # Ingress tool transfer.
-        if any(t in msg for t in ("certutil", "bitsadmin", "wget ", "curl ", "invoke-webrequest")):
+        if _TOOL_DL_RE.search(msg):
             _tag(ev, "T1105", "tool-download")
 
         # Ransomware impact signals.
@@ -181,10 +209,14 @@ def map_attack(events: list) -> list:
         # ("CRON[123]: (root) CMD (run-parts /etc/cron.hourly)" is routine).
         if _SCHED_RE.search(msg) or _SCHED_RE.search(act):
             _tag(ev, "T1053", "scheduled-task")
-        if any(t in msg or t in act for t in ("new service", "sc create", "systemctl enable")):
+        if _SERVICE_RE.search(msg) or _SERVICE_RE.search(act):
             _tag(ev, "T1543", "new-service")
-        if any(t in msg or t in act for t in ("useradd", "net user /add", "create account", "createuser")):
+        if any(t in msg or t in act for t in ("net user /add", "create account", "createuser")) \
+                or proc in ("useradd", "adduser") or _USERADD_RE.search(msg) or _USERADD_RE.search(act) \
+                or _NET_ADD_RE.search(msg) or _NET_ADD_RE.search(act):
             _tag(ev, "T1136", "account-created")
+        if proc == "usermod" and msg.startswith("add "):  # "add 'evil' to group 'sudo'"
+            _tag(ev, "T1098", "group-membership")
 
         # Lateral movement.
         if _REMOTE_RE.search(msg) or _REMOTE_RE.search(proc):
@@ -204,7 +236,10 @@ def map_attack(events: list) -> list:
             _tag(ev, "T1098", "cloud-account-manip")
 
         # Exfiltration heuristics.
-        if ev.category == "network" and any(
-            t in msg for t in ("upload", "exfil")) or "large transfer" in msg:
+        if ev.category == "network" and _EXFIL_RE.search(msg) or "large transfer" in msg:
             _tag(ev, "T1048", "possible-exfil")
+
+        for tid, reason, rx in _RULES:
+            if rx.search(msg) or rx.search(act):
+                _tag(ev, tid, reason)
     return events

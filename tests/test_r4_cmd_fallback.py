@@ -51,7 +51,7 @@ def test_cmd1_fallback_votes_share_the_deadline(monkeypatch):
 def test_cmd1_votes_cut_when_time_is_short():
     ag = orchestrator.SeniorSocAnalyst(name="s", votes=5)
     o = orchestrator.SwarmOrchestrator(_ctx())
-    o._cap = {"agents": 1, "deadline": orchestrator.time.monotonic() + 130}
+    o._cap = {"agents": 5, "deadline": orchestrator.time.monotonic() + 130}   # 5 runs: only the clock cuts K
     assert o._admit(ag) and ag.votes == 2 and ag.timeout <= 65
 
 

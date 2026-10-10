@@ -12,7 +12,9 @@ from __future__ import annotations
 import ipaddress
 import json
 import re
+from datetime import datetime
 from typing import Optional
+from urllib.parse import urlsplit
 
 from ..models import Event
 
@@ -31,6 +33,8 @@ def _get(d: dict, *keys, default=None):
         v = lower.get(str(k).lower())
         if v is None and "." in str(k):
             v = _dotted(d, str(k))
+        if isinstance(v, list):   # ECS arrays (host.name: ["DC01"]): first non-empty element
+            v = next((x for x in v if x not in (None, "", [])), None)
         if v not in (None, "", []):
             return v
     return default
@@ -38,6 +42,8 @@ def _get(d: dict, *keys, default=None):
 
 def _dotted(d: dict, path: str):
     """ECS nested value: "host.name" -> d["host"]["name"]. Flat dotted keys win (checked first in _get)."""
+    if d.get(path) is not None:   # flat dotted key inside a nested object (Falco output_fields["fd.sip"])
+        return d[path]
     head, _, rest = path.partition(".")
     v = _get(d, head)
     if not rest:
@@ -53,8 +59,9 @@ def _entity(r: dict, *keys):
 def _clean_ip(val) -> Optional[str]:
     """IP text with control chars, port and brackets removed; None if it is not an IP.
 
-    "1.2.3.4:443" -> "1.2.3.4", "[2001:db8::1]:443" -> "2001:db8::1"; bare IPv6
-    ("2001:db8::1", "::ffff:1.2.3.4") is kept intact. Unspecified addresses
+    "1.2.3.4:443" -> "1.2.3.4", "[2001:db8::1]:443" -> "2001:db8::1"; IPv6 is
+    returned in compressed lowercase and "::ffff:1.2.3.4" as "1.2.3.4", so one
+    host always has one spelling. Unspecified addresses
     ("0.0.0.0", "::") mean "any"/"unset" in firewall and syslog exports, so they
     are dropped too: kept, they would link every such record into one incident.
     """
@@ -66,18 +73,21 @@ def _clean_ip(val) -> Optional[str]:
     if m:
         s = m.group(1)
     try:
-        ip = ipaddress.ip_address(s)
+        ip = ipaddress.ip_address(s.split("%", 1)[0])   # zone id (fe80::1%eth0) is not part of the address
     except ValueError:
         return None
-    return None if ip.is_unspecified else s
+    if getattr(ip, "ipv4_mapped", None):   # ::ffff:1.2.3.4 is the same host as 1.2.3.4
+        ip = ip.ipv4_mapped
+    return None if ip.is_unspecified else str(ip)
 
 
 def _ip_field(r: dict, *keys) -> Optional[str]:
     """First of keys whose value is a real IP; placeholders ('-', 'N/A') fall through."""
     for k in keys:
-        ip = _clean_ip(_get(r, k))
-        if ip:
-            return ip
+        for part in str(_get(r, k) or "").split(","):   # "a, b" (X-Forwarded-For style) -> first valid
+            ip = _clean_ip(part)
+            if ip:
+                return ip
     return None
 
 
@@ -135,16 +145,32 @@ _EDR_KEYS = (
     "hash", "file_hash", "sha1", "md5", "RemoteUrl",
     "EventID", "Computer", "MachineName", "TimeCreated", "AlertName", "AlertSeverity", "CompromisedEntity",
     "event.action", "source.ip", "destination.ip",
+    "UtcTime", "CommandLine", "Hashes", "TargetFilename", "QueryName", "DestinationIp", "DestinationPort",
+    "Date and Time", "Event ID", "Task Category",
 )
+
+
+def _sysmon_sha256(r: dict) -> Optional[str]:
+    """Sysmon Hashes is "MD5=..,SHA256=..,IMPHASH=.."; keep only the SHA256 value."""
+    m = re.search(r"SHA256=([0-9A-Fa-f]+)", str(_get(r, "Hashes", default="")))
+    return m.group(1) if m else None
+
+
+def _url_host(u: str) -> Optional[str]:
+    try:
+        return urlsplit(u if "//" in u else "//" + u).hostname
+    except ValueError:  # malformed IPv6 brackets in a log row: keep the row, drop the host
+        return None
 
 
 def parse_edr(r: dict) -> Optional[Event]:
     """Endpoint / EDR alerts, process telemetry, and Defender Advanced Hunting Device* tables."""
     if _get(r, *_EDR_KEYS) is None:
         return None
-    action = _get(r, "action", "event.action", "event_type", "operation", "activity", "ActionType", default="edr_event")
-    # Sentinel SecurityEvent / Get-WinEvent logons (R4-INGEST-2). shortcut: 4776 (NTLM) skipped, its success is in Status.
-    eid = str(_get(r, "EventID", default=_get(r, "Id") if _get(r, "MachineName") else "")).strip()
+    action = _get(r, "action", "event.action", "event_type", "operation", "activity", "ActionType", "Task Category",
+                  default="edr_event")
+    # Sentinel SecurityEvent / Get-WinEvent logons (R4-INGEST-2).
+    eid = str(_get(r, "EventID", "Event ID", default=_get(r, "Id") if _get(r, "MachineName") else "")).strip()
     # ECS event.action "logon-failed" (winlogbeat 4625) is the same failure.
     # Generic EDR/ECS failures (ITEM-12): ECS event.category/outcome, or an sshd-style message with no action.
     ecs = {"failure": "login_failed", "failed": "login_failed", "success": "login_success"}.get(
@@ -152,7 +178,13 @@ def parse_edr(r: dict) -> Optional[Event]:
         if "authentication" in str(_get(r, "event.category", default="")).lower() else None
     if ecs is None and re.match(r"failed (?:password|login|logon)\b", str(_get(r, "message", default="")), re.I):
         ecs = "login_failed"
-    winauth = {"4624": "login_success", "4625": "login_failed", "4771": "login_failed"}.get(eid) or \
+    # 4776 (NTLM) / 4768 / 4769 outcome is in Status (0x0 = success); 4769 success is a ticket, not a sign-in.
+    status = str(_get(r, "Status", default="")).strip().lower()
+    status_auth = ("login_success" if status in ("0x0", "0") else "login_failed") if status else None
+    if eid == "4769" and status_auth == "login_success":
+        status_auth = None
+    winauth = {"4624": "login_success", "4625": "login_failed", "4771": "login_failed", "4740": "account_lockout"}.get(eid) or \
+        (status_auth if eid in ("4776", "4768", "4769") else None) or \
         {"logon-failed": "login_failed", "logon_failed": "login_failed", "failed_login": "login_failed",
          "login_failed": "login_failed"}.get(str(action).lower()) or ecs
     if winauth:
@@ -170,9 +202,9 @@ def parse_edr(r: dict) -> Optional[Event]:
     # DeviceLogonEvents: a sign-in, not a connection. Its message names "failed"
     # as a word, because attack.py's _FAIL_RE does not match "LogonFailed".
     logon = str(action).lower() in ("logonsuccess", "logonfailed", "logonattempted")
-    net = _get(r, "RemoteIP", "LocalIP") is not None and not logon
-    src_ip = _ip_field(r, "src_ip", "source_ip", "source.ip", "local_ip", "LocalIP")
-    dst_ip = _ip_field(r, "dst_ip", "dest_ip", "destination.ip", "remote_ip", "RemoteIP")
+    net = _get(r, "RemoteIP", "LocalIP", "DestinationIp") is not None and not logon
+    src_ip = _ip_field(r, "src_ip", "source_ip", "source.ip", "local_ip", "LocalIP", "SourceIp")
+    dst_ip = _ip_field(r, "dst_ip", "dest_ip", "destination.ip", "remote_ip", "RemoteIP", "DestinationIp")
     if logon:
         # Inbound logon: RemoteIP is the client, so it is the source (INGEST-22).
         # dst_ip falls back to RemoteIP when there is no LocalIP (INGEST-2 asserts it).
@@ -184,27 +216,29 @@ def parse_edr(r: dict) -> Optional[Event]:
         verb = {"logonfailed": "failed", "logonsuccess": "succeeded"}.get(str(action).lower(), "attempted")
         default_msg = f"logon {verb} for {_get(r, 'AccountName', default='?')} from {src_ip or '?'}"
     src_ip = src_ip or (_ip_field(r, "IpAddress") if winauth else None)
+    url = str(_get(r, "RemoteUrl", default=""))  # full URL stays in message; domain gets the host only
     return Event(
         ts=_get(r, "timestamp", "ts", "time", "@timestamp", "eventTime", "TimeGenerated", "TimeGenerated [UTC]",
-                "TimeCreated", default=None),
+                "TimeCreated", "UtcTime", "Date and Time", default=None),
         source="edr",
         category="alert" if alert else ("authentication" if logon or winauth else "network" if net else "process"),
         action=str(action),
         message=str(_get(r, "AlertName", "message", "description", "threat_name", "name",
-                         "ProcessCommandLine", "InitiatingProcessCommandLine", default=default_msg)),
+                         "ProcessCommandLine", "InitiatingProcessCommandLine", "CommandLine", "TargetFilename", "QueryName",
+                         default=default_msg)) + (f" url={url}" if url else ""),
         severity=_severity(_get(r, "severity", "risk", "level", "AlertSeverity")),
         host=_entity(r, "host.name", "host", "hostname", "device", "endpoint", "computer_name", "DeviceName",
                      "Computer", "MachineName", "CompromisedEntity"),
         user=_entity(r, "user.name", "user", "username", "account", "user_name", "AccountName", "TargetUserName",
                      "InitiatingProcessAccountName"),
         process=proc,
-        file_path=_get(r, "file_path", "path", "target_file"),
-        file_hash=_get(r, "sha256", "hash", "file_hash", "sha1", "md5"),
+        file_path=_get(r, "file_path", "path", "target_file", "TargetFilename"),
+        file_hash=_get(r, "sha256", "hash", "file_hash", "sha1", "md5", default=_sysmon_sha256(r)),
         src_ip=src_ip,
         dst_ip=dst_ip,
-        src_port=_get(r, "LocalPort") if net else None,
-        dst_port=_get(r, "RemotePort") if net else None,
-        domain=_get(r, "RemoteUrl"),
+        src_port=_get(r, "LocalPort", "SourcePort") if net else None,
+        dst_port=_get(r, "RemotePort", "DestinationPort") if net else None,
+        domain=(_url_host(url) if url else None) or _get(r, "QueryName", "DestinationHostname"),
         raw=r,
     )
 
@@ -221,9 +255,9 @@ def parse_dns(r: dict) -> Optional[Event]:
         action="dns_query",
         message=f"DNS query {domain} -> {_get(r, 'answer', 'response', 'resolved_ip', default='?')}",
         severity=_severity(_get(r, "severity")),
-        host=_entity(r, "host.name", "host", "client", "source_host"),
-        src_ip=_ip_field(r, "src_ip", "client_ip", "source_ip"),
-        dst_ip=_ip_field(r, "resolved_ip", "answer_ip"),
+        host=_entity(r, "host.name", "host", "source_host"),
+        src_ip=_ip_field(r, "src_ip", "client_ip", "source_ip", "client", "srcip", "src", "id.orig_h"),
+        dst_ip=_ip_field(r, "resolved_ip", "answer_ip", "answer", "response"),
         domain=str(domain).rstrip("."),
         raw=r,
     )
@@ -232,9 +266,10 @@ def parse_dns(r: dict) -> Optional[Event]:
 def parse_network(r: dict) -> Optional[Event]:
     """Firewall / router / switch / netflow style connection records, and
     Defender DeviceNetworkEvents (routed here by its filename)."""
-    src_ip = _ip_field(r, "src_ip", "source_ip", "source", "source_address", "source address", "src_addr", "src", "LocalIP")
+    src_ip = _ip_field(r, "src_ip", "source_ip", "source", "source_address", "source address", "src_addr", "src", "LocalIP",
+                       "id.orig_h", "data.srcip", "output_fields.fd.cip")
     dst_ip = _ip_field(r, "dst_ip", "dest_ip", "destination", "destination_address", "destination address", "dst_addr", "dst",
-                       "destination_ip", "RemoteIP")
+                       "destination_ip", "RemoteIP", "id.resp_h", "output_fields.fd.sip")
     return Event(
         ts=_get(r, "timestamp", "ts", "time", "@timestamp", "TimeGenerated", "TimeGenerated [UTC]",
                 "receive time", "generate time", "receive_time", default=None),
@@ -242,17 +277,17 @@ def parse_network(r: dict) -> Optional[Event]:
         category="network",
         action=str(_get(r, "action", "verdict", "disposition", "ActionType", default="connection")),
         message=str(_get(
-            r, "message",
+            r, "message", "alert.signature", "rule.description", "output",
             default=f"{src_ip or '?'} -> {dst_ip or '?'}:"
-                    f"{_get(r, 'dst_port', 'destination port', 'port', 'RemotePort', default='?')}")),
-        severity=_severity(_get(r, "severity", "level")),
-        host=_entity(r, "host.name", "host", "device", "hostname", "DeviceName", "device name"),
-        user=_entity(r, "user.name", "user", "AccountName", "InitiatingProcessAccountName"),
+                    f"{_get(r, 'dst_port', 'dest_port', 'dport', 'id.resp_p', 'destination port', 'port', 'RemotePort', default='?')}")),
+        severity=_severity(_get(r, "severity", "level", "priority")),
+        host=_entity(r, "host.name", "host", "device", "hostname", "DeviceName", "device name", "agent.name"),
+        user=_entity(r, "user.name", "user", "AccountName", "InitiatingProcessAccountName", "data.srcuser"),
         process=_get(r, "InitiatingProcessFileName"),
         src_ip=src_ip,
         dst_ip=dst_ip,
-        src_port=_get(r, "src_port", "source_port", "sport", "source port", "LocalPort"),
-        dst_port=_get(r, "dst_port", "dest_port", "destination_port", "dport", "destination port", "port", "RemotePort"),
+        src_port=_get(r, "src_port", "source_port", "sport", "source port", "LocalPort", "id.orig_p"),
+        dst_port=_get(r, "dst_port", "dest_port", "destination_port", "dport", "destination port", "port", "RemotePort", "id.resp_p"),
         domain=_get(r, "RemoteUrl"),
         raw=r,
     )
@@ -267,7 +302,7 @@ def parse_cloud(r: dict) -> Optional[Event]:
     """Cloud audit logs (AWS CloudTrail / Azure Activity / Entra audit / GCP),
     normalized loosely."""
     action = _value(_get(r, "eventName", "operationName", "activityDisplayName",
-                         "methodName", "action", default="cloud_api"))
+                         "methodName", "protoPayload.methodName", "verb", "action", default="cloud_api"))
     # CloudTrail failures: errorCode, or (ConsoleLogin) only errorMessage /
     # responseElements.ConsoleLogin == "Failure". Azure: status.value / result.
     resp = r.get("responseElements") if isinstance(r.get("responseElements"), dict) else {}
@@ -277,20 +312,26 @@ def parse_cloud(r: dict) -> Optional[Event]:
         any(w in status for w in ("fail", "denied"))
     category = "cloud_api"
     tags = []
+    service = _get(r, "eventSource")   # CloudTrail: one trail = one source, the service is a tag
     if failed and str(action) == "ConsoleLogin":
         action, category = "login_failed", "authentication"
         tags.append("aws:console-login-failed")
+    elif str(action) == "ConsoleLogin" and str(resp.get("ConsoleLogin", "")).lower() == "success":
+        action, category = "login_success", "authentication"
+    if service:
+        tags.append(f"service:{service}")
     ev = Event(
-        ts=_get(r, "eventTime", "timestamp", "time", "@timestamp", "activityDateTime", "eventTimestamp", "TimeGenerated", "TimeGenerated [UTC]",
+        ts=_get(r, "eventTime", "timestamp", "time", "@timestamp", "activityDateTime", "eventTimestamp", "stageTimestamp", "TimeGenerated", "TimeGenerated [UTC]",
                 default=None),
-        source=str(_get(r, "eventSource", "provider", default="cloud")),
+        source="cloudtrail" if service else str(_get(r, "provider", default="cloud")),
         category=category,
         action=str(action),
         message=str(_get(r, "message", "errorMessage", default=action)),
         severity=_severity(_get(r, "severity", default=("high" if failed else "info"))),
         user=_cloud_user(r),
         # Service principals ("ec2.amazonaws.com") sit in sourceIPAddress too.
-        src_ip=_ip_field(r, "sourceIPAddress", "callerIp", "callerIpAddress", "src_ip"),
+        src_ip=_ip_field(r, "sourceIPAddress", "callerIp", "callerIpAddress", "src_ip",
+                      "sourceIPs", "protoPayload.requestMetadata.callerIp"),
         raw=r,
     )
     ev.tags.extend(tags)
@@ -301,7 +342,9 @@ def _cloud_user(r: dict):
     """CloudTrail userIdentity.userName, else a flat user field, else the
     role/session name from the ARN (AssumedRole identities have no userName)."""
     ident = r.get("userIdentity") if isinstance(r.get("userIdentity"), dict) else {}
-    user = ident.get("userName") or _get(r, "userName", "principal", "caller")
+    user = ("root" if ident.get("type") == "Root" else
+            ident.get("userName") or _get(r, "userName", "principal", "caller", "user.username",
+                                      "protoPayload.authenticationInfo.principalEmail"))
     if not user and ident.get("arn"):
         user = str(ident["arn"]).rsplit("/", 1)[-1]
     by = r.get("initiatedBy") if isinstance(r.get("initiatedBy"), dict) else {}
@@ -328,23 +371,29 @@ def _auth_verdict(r: dict) -> Optional[bool]:
     return None
 
 
+# Wording that makes an auth row a logon attempt; anything else is a generic event.
+_LOGON_RE = re.compile(r"\b(?:log[-_ ]?(?:on|in)|sign[-_ ]?in|auth|password|credential)", re.I)
+
+
 def parse_auth(r: dict) -> Optional[Event]:
     """Generic authentication events (server auth, IdP, VPN)."""
-    action = str(_get(r, "action", "event", default="auth"))
+    action = str(_get(r, "action", "event", "eventType", default="auth"))
     verdict = _auth_verdict(r)
     failed = ("fail" in action.lower()) if verdict is None else verdict
     if verdict is not None:
         action = "login_failed" if failed else "login_success"
+    elif not _LOGON_RE.search(action):
+        action = "auth_event"  # "service failed" is not a sign-in; _FAIL_RE must not see it
     return Event(
-        ts=_get(r, "timestamp", "ts", "time", "TimeGenerated", "TimeGenerated [UTC]", default=None),
+        ts=_get(r, "timestamp", "ts", "time", "published", "TimeGenerated", "TimeGenerated [UTC]", default=None),
         source=_log_source(r, "auth"),
         category="authentication",
         action=str(action),
-        message=str(_get(r, "message", default=action)),
+        message=str(_get(r, "message", "displayMessage", default=action)),
         severity=_severity(_get(r, "severity", default=("high" if failed else "info"))),
         host=_entity(r, "host.name", "host", "hostname", "server"),
-        user=_entity(r, "user.name", "user", "username", "account"),
-        src_ip=_ip_field(r, "src_ip", "source_ip", "source", "client_ip"),
+        user=_entity(r, "user.name", "user", "username", "account", "actor.alternateId"),
+        src_ip=_ip_field(r, "src_ip", "source_ip", "source", "client_ip", "client.ipAddress"),
         raw=r,
     )
 
@@ -356,41 +405,50 @@ _RFC5424_RE = re.compile(
     r"^<\d{1,3}>\d{1,2}\s+(?P<ts>\S+)\s+(?P<host>\S+)\s+(?P<proc>\S+)\s+(?P<pid>\S+)\s+"
     r"(?P<msgid>\S+)\s+(?P<sd>-|(?:\[(?:[^\]\\]|\\.)*\])+)(?:\s+(?P<msg>.*))?$"
 )
+# Syslog stamp: BSD "Oct  3 22:00:00[.123]" (year may sit before the time), journalctl
+# short-full "Sat 2026-10-03 22:00:02 UTC", or ISO "2026-10-03T22:00:00.123+00:00".
+_TS = (r"(?:\w{3}\s+\d+(?:\s+\d{4})?\s+\d{2}:\d{2}:\d{2}(?:\.\d+)?"
+       r"|\w{3}\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:\.\d+)?\s+[A-Z]{2,5}"
+       r"|\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)")
 _SYSLOG_RE = re.compile(
-    # BSD "Oct  3 22:00:00" or ISO timestamp "2026-10-03T22:00:00.123+00:00"
-    r"^(?:<\d+>\d?\s*)?"
-    r"(?P<ts>\w{3}\s+\d+\s+\d{2}:\d{2}:\d{2}"
-    r"|\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)\s+"
+    rf"^(?:<\d+>\d?\s*)?(?P<ts>{_TS})\s+"
     r"(?P<host>\S+)\s+"
-    r"(?P<proc>[\w\-/.]+)(?:\[(?P<pid>\d+)\])?:\s*"
+    r"(?P<proc>[\w\-/.()]+)(?:\[(?P<pid>\d+)\])?:\s*"
     r"(?P<msg>.*)$"
 )
-# sshd: "Accepted password|publickey|keyboard-interactive/pam|... for USER from IP"
-_SSH_ACCEPTED_RE = re.compile(r"\baccepted\s+\S+\s+for\s+", re.I)
+# Cisco IOS: "*Oct  3 22:00:07.123: %SEC_LOGIN-4-LOGIN_FAILED: ..." has no host field.
+_CISCO_RE = re.compile(rf"^\*?(?P<ts>{_TS})\s*:\s*%(?P<proc>[A-Z_]+)-\d-\w+:\s*(?P<host>)(?P<msg>.*)$")
+_BRACKET_USER_RE = re.compile(r"\[user:\s*(?P<u>[^\]\s]+)\]")   # Cisco "[user: admin]"
+# sshd: "Accepted password|publickey|keyboard-interactive/pam|... for USER from IP"; dropbear: "Password auth succeeded"
+_SSH_ACCEPTED_RE = re.compile(r"\baccepted\s+\S+\s+for\s+|\bauth succeeded\b", re.I)
 # Whole-word "fail" only: "failover", "testfail" in a username are not failures.
 _FAIL_WORD_RE = re.compile(r"\bfail(?:ed|ing|s|ure)?\b")
 # sudo: "jsmith : TTY=pts/0 ; PWD=/home/jsmith ; USER=root ; COMMAND=..."
 _SUDO_RE = re.compile(r"^\s*(?P<u>[\w.\-\\@]+)\s+:\s+.*\bCOMMAND=", re.I)
+# su: "FAILED SU (to root) bob on pts/0"; vsftpd: "[bob] FAIL LOGIN: Client ..." (the account is the actor)
+_SU_RE = re.compile(r"^FAILED SU \(to \S+\)\s+(?P<u>[\w.\-\\@]+)", re.I)
+_VSFTPD_RE = re.compile(r"^\[(?P<u>[\w.\-\\@]+)\]\s+FAIL LOGIN", re.I)
 _IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 _IP6_RE = re.compile(r"(?<![\w:])[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}(?![\w:])")
 _RHOST_RE = re.compile(r"\brhost=(?P<h>\S+)")
 # pam: "authentication failure; logname= uid=0 ... rhost=1.2.3.4  user=root"
-_USER_EQ_RE = re.compile(r"(?<![\w])user=(?P<u>[\w.\-\\@]+)")
+_USER_EQ_RE = re.compile(r"(?<![\w])user=(?P<u>[\w.\-\\@]+)", re.I)   # sudo prints USER=root
 # rsyslog/journald dedup: "message repeated 5 times: [ Failed password ...]"
 _REPEAT_RE = re.compile(r"^message repeated (?P<n>\d+) times: \[\s*(?P<msg>.*?)\s*\]$", re.I)
 _REPEAT_CAP = 1000
 # Processes whose failures are authentication failures.
 _AUTH_PROCS = ("sshd", "sshd-session", "login", "su", "sudo", "pam", "gdm-password",
-               "polkitd", "vsftpd", "dovecot", "systemd-logind", "passwd", "chage")
-# Failure wording that does not itself contain "fail" (sshd probes, PAM, sudo).
+               "polkitd", "vsftpd", "dovecot", "systemd-logind", "passwd", "chage", "sec_login", "dropbear")
+# Failure wording that does not itself contain "fail" (sshd probes, PAM, sudo, dropbear).
 _AUTH_FAIL_PHRASES = ("invalid user", "illegal user", "authentication failure",
-                      "maximum authentication attempts", "incorrect password")
+                      "maximum authentication attempts", "incorrect password", "not allowed",
+                      "bad password attempt", "nonexistent user")
 # "for"/"user"/"account" followed by the account name. Filler words that can sit
 # in between ("session closed for user X", "for invalid user X") are skipped so
-# they are never taken as the account itself.
+# they are never taken as the account itself. "for 'root'" (dropbear) may be quoted.
 _USER_RE = re.compile(
-    r"\b(?:user|for|account)\s+"
-    r"(?!(?:user|for|account|invalid|illegal|from)\b)(?P<u>[\w.\-\\@]+)", re.I)
+    r"\b(?:user|for|account)\s+'?"
+    r"(?!(?:user|for|account|invalid|illegal|from|nonexistent|directory|file)\b)(?P<u>[\w.\-\\@]+)", re.I)
 
 
 def _syslog_ip(msg: str) -> Optional[str]:
@@ -404,13 +462,14 @@ def _syslog_ip(msg: str) -> Optional[str]:
     return None
 
 
-_FRAME_RE = re.compile(r"^(?:<\d+>\d?\s*)?(?P<ts>\w{3}\s+\d+\s+\d{2}:\d{2}:\d{2}"
-                       r"|\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)\s+(?P<host>\S+)\s+")
+_FRAME_RE = re.compile(rf"^(?:<\d+>\d?\s*)?(?P<ts>{_TS})\s+(?P<host>\S+)\s+")
 _KV_RE = re.compile(r'(\w+)=("[^"]*"|\S+)')
 # ASA 106023 "src outside:IP/port dst inside:IP/port", 302013 "for outside:IP/port (..) to inside:IP/port"
 _ASA_RE = re.compile(r"%ASA-\d-\d+:\s*(?P<m>.*?(?P<act>Deny|Built|Teardown)\b.*?(?:src|for)\s+\S+?:(?P<s>[\w.:]+)/(?P<sp>[\w-]+)"
                      r".*?(?:dst|to)\s+\S+?:(?P<d>[\w.:]+)/(?P<dp>[\w-]+).*)", re.I)
 _ASA_ID_RE = re.compile(r"%ASA-\d-(\d{6}):")
+# shortcut: _ASA_RE is still quadratic up to this cap, upgrade by anchoring its .*? chain if real ASA messages run longer
+_ASA_MAX = 512
 # Connection ids -> action (None: "denied"/"permitted" in the text). Endpoints are "from|src X[/p] to|dst Y[/p]",
 # except 106100's "outside/X(p) -> inside/Y(p)".
 _ASA_CONN = {"106001": "deny", "106006": "deny", "106007": "deny", "106014": "deny", "106015": "deny",
@@ -430,13 +489,24 @@ def _asa_ip(tok: str) -> Optional[str]:
     return _clean_ip(tok) or _clean_ip(tok.split(":", 1)[-1])
 
 
+def _syslog_ts(ts: Optional[str]) -> Optional[str]:
+    """Stamp -> the form models.py reads: drop weekday, zone and fraction; year-in-stamp to ISO."""
+    if not ts:
+        return None
+    ts = re.sub(r"^\w{3}\s+(?=\d{4}-)|\s+[A-Z]{2,5}$|(?<=:\d{2})\.\d+", "", ts)
+    try:
+        return datetime.strptime(ts, "%b %d %Y %H:%M:%S").strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return ts
+
+
 def _vendor_firewall(line: str) -> Optional[Event]:
     """Syslog-framed or bare FortiGate key=value / Cisco ASA line -> firewall event (None if neither)."""
     f = _FRAME_RE.match(line)
     body = line[f.end():] if f else line
-    r = {"ts": f.group("ts"), "host": f.group("host")} if f else {}
+    r = {"ts": _syslog_ts(f.group("ts")), "host": f.group("host")} if f else {}
     kv = {k.lower(): v.strip('"') for k, v in _KV_RE.findall(body)}
-    a = _ASA_RE.search(body)
+    a = _ASA_RE.search(body[:_ASA_MAX])
     aid = _ASA_ID_RE.search(body)
     aid = aid.group(1) if aid else None
     if "srcip" in kv or "dstip" in kv:
@@ -470,17 +540,17 @@ def parse_syslog_line(line: str) -> Optional[Event]:
     line = line.strip()
     if not line:
         return None
-    m = _RFC5424_RE.match(line) or _SYSLOG_RE.match(line)
+    m = _RFC5424_RE.match(line) or _SYSLOG_RE.match(line) or _CISCO_RE.match(line)
     if not m:
         # Not RFC3164-ish: vendor firewall formats, else an 'other' event (keeping any syslog ts+host).
         ev = _vendor_firewall(line)
         if ev:
             return ev
         f = _FRAME_RE.match(line)
-        return Event(ts=f.group("ts") if f else None, source="syslog", category="other",
+        return Event(ts=_syslog_ts(f.group("ts")) if f else None, source="syslog", category="other",
                      action="log", message=line[:500], host=f.group("host") if f else None,
                      src_ip=_syslog_ip(line[f.end():]) if f else None, raw={"line": line})
-    nil = lambda g: None if m.group(g) in (None, "-") else m.group(g)   # noqa: E731
+    nil = lambda g: None if m.group(g) in (None, "", "-") else m.group(g)   # noqa: E731
     msg = (m.group("msg") or "").lstrip("\ufeff")   # RFC 5424 MSG may carry a BOM
     repeat = 0
     rp = _REPEAT_RE.match(msg)
@@ -488,7 +558,7 @@ def parse_syslog_line(line: str) -> Optional[Event]:
         repeat, msg = min(int(rp.group("n")), _REPEAT_CAP), rp.group("msg")
     proc = nil("proc")
     low = msg.lower()
-    sm = _SUDO_RE.match(msg) if "sudo" in (proc or "").lower() else None
+    sm = (_SUDO_RE.match(msg) if "sudo" in (proc or "").lower() else None) or _SU_RE.match(msg) or _VSFTPD_RE.match(msg)
     um = sm or _USER_RE.search(msg) or _USER_EQ_RE.search(msg)
     # A failure is only a failed *login* with auth context: an auth process, or
     # password / authentication-failure wording naming a user ("systemd: Failed
@@ -514,12 +584,12 @@ def parse_syslog_line(line: str) -> Optional[Event]:
         # "for/user/account X" names an account only in auth context; elsewhere
         # ("Waiting for network", "for 10.0.0.5") it is not a user.
         auth_user = action in ("login_failed", "login_success") or auth_proc or "pam_" in low
-        um = (_USER_RE.search(msg) if auth_user else None) or _USER_EQ_RE.search(msg)
+        um = sm or (_USER_RE.search(msg) if auth_user else None) or _USER_EQ_RE.search(msg) or _BRACKET_USER_RE.search(msg)
     raw = {"line": line}
     if repeat:
         raw["repeated"] = repeat   # the loader expands this into N events
     return Event(
-        ts=nil("ts"),
+        ts=_syslog_ts(nil("ts")),
         source="syslog",
         category=category,
         action=action,
@@ -614,9 +684,12 @@ def parse_azure_signin(r: dict) -> Optional[Event]:
 
     is_devicecode = "devicecode" in str(transfer or "").lower().replace(" ", "")
 
+    ts = _get(r, "Date (UTC)", "Date", "date", "createdDateTime", "Timestamp", "TimeGenerated", "TimeGenerated [UTC]")
+    local_only = ts is None and _get(r, "Date (local)") is not None  # naive local time: offset unknown, not guessed
+    if local_only:
+        ts = _get(r, "Date (local)")
     ev = Event(
-        ts=_get(r, "Date (UTC)", "Date", "date", "createdDateTime", "Timestamp", "TimeGenerated", "TimeGenerated [UTC]",
-                "Date (local)"),
+        ts=ts,
         source="azure_ad",
         category="authentication",
         action=action,
@@ -638,6 +711,8 @@ def parse_azure_signin(r: dict) -> Optional[Event]:
         process=str(app) if app else None,
         raw=r,
     )
+    if local_only:
+        ev.tags.append("ts-local")
     if risky:
         # Risky/valid-account abuse -> Valid Accounts.
         ev.attack.append("T1078")
@@ -832,3 +907,86 @@ STRUCTURED_PARSERS = {
     "unifiedaudit": parse_ual,
     "auditlog": parse_ual,
 }
+
+# --- ITEM-24: non-syslog plaintext formats (CEF, auditd, CLF, Squid, VPC flow, Zeek, UFW) ---
+_CEF_RE = re.compile(r"CEF:\d\|[^|]{0,100}\|[^|]{0,100}\|[^|]{0,50}\|[^|]{0,50}\|(?P<name>[^|]{0,200})\|[^|]{0,20}\|(?P<ext>.{0,4000})$")
+_AUDIT_RE = re.compile(r"^(?:node=\S{1,64} )?type=(?P<t>[A-Z_]{1,40}) msg=audit\((?P<ts>\d{9,10}\.\d{3}):\d+\):(?P<kv>.{0,4000})$")
+_CLF_RE = re.compile(r'^(?P<ip>[\da-fA-F.:]{3,45}) \S{1,64} (?P<u>\S{1,64}) \[(?P<ts>[^\]]{1,40})\] "(?P<req>[^"]{0,2048})" (?P<st>\d{3}) ')
+_SQUID_RE = re.compile(r"^(?P<ts>\d{9,10}\.\d{3})\s+\d+\s+(?P<ip>\S{3,45})\s+(?P<code>[A-Z_]+)/(?P<st>\d{3})\s+\d+\s+(?P<m>[A-Z]{3,10})\s+(?P<url>\S{1,2048})\s+(?P<u>\S+)")
+_UFW_RE = re.compile(r"\[UFW (?P<act>[A-Z ]{1,12})\]")
+_ZEEK_HDR = ("#separator", "#fields", "#types", "#set_separator", "#empty_field", "#unset_field", "#path", "#open", "#close")
+
+
+def _kv(s: str) -> dict:
+    return {k: v.strip("'\"") for k, v in _KV_RE.findall(s)}
+
+
+def _port(v) -> Optional[int]:
+    return int(v) if v and str(v).isdigit() and int(v) < 65536 else None
+
+
+def parse_text_line(line: str, state: dict) -> "Event | None | bool":
+    """Try the structured plaintext formats; None -> caller falls back to
+    parse_syslog_line, False -> header/comment line to skip. `state` is a
+    per-file dict (holds the Zeek #fields header).
+    shortcut: CEF/UFW values containing spaces are cut at the space; Windows
+    XML (EVTX export) is not handled; upgrade when a real feed needs it."""
+    line = line.rstrip("\r")
+    if line.startswith("#"):
+        if line.startswith("#fields\t"):
+            state["zeek"] = line.split("\t")[1:]
+        return False if line.startswith(_ZEEK_HDR) else None
+    if "CEF:" in line and (m := _CEF_RE.search(line)):
+        k = _kv(m["ext"])
+        act = k.get("act") or m["name"]
+        auth = bool(k.get("suser")) and re.search(r"log(?:in|on)|auth", m["name"], re.I)
+        return Event(ts=k.get("rt"), source="syslog", category="authentication" if auth else "network",
+                     action=act, message=line[:500], user=k.get("suser"), src_ip=k.get("src"),
+                     dst_ip=k.get("dst"), src_port=_port(k.get("spt")), dst_port=_port(k.get("dpt")))
+    if (m := _AUDIT_RE.match(line)):
+        k = _kv(m["kv"])
+        auth = m["t"] in ("USER_LOGIN", "USER_AUTH")
+        ok = k.get("res", "").lower() in ("success", "yes")
+        user = k.get("acct") or k.get("auid")
+        return Event(ts=m["ts"], source="syslog", category="authentication" if auth else "process",
+                     action=("login_success" if ok else "login_failed") if auth else m["t"].lower(),
+                     message=line[:500], severity=0 if ok or not auth else 1,
+                     user=None if user in (None, "4294967295", "unset") else user,
+                     src_ip=next((k[x] for x in ("addr", "hostname") if _IP_RE.fullmatch(k.get(x, ""))), None),
+                     process=k.get("exe"))
+    if (m := _SQUID_RE.match(line)):
+        try:
+            host = urlsplit(m["url"]).hostname
+        except ValueError:
+            host = None
+        denied = "DENIED" in m["code"] or m["st"] in ("403", "407")
+        return Event(ts=m["ts"], source="syslog", category="network", action="proxy_denied" if denied else "proxy_request",
+                     message=line[:500], severity=1 if denied else 0, src_ip=m["ip"], domain=host, user=m["u"])
+    if (m := _CLF_RE.match(line)):
+        st = m["st"]
+        auth = st in ("401", "403")
+        return Event(ts=m["ts"], source="syslog", category="authentication" if auth else "network",
+                     action="login_failed" if auth else "http_request", message=line[:500],
+                     severity=1 if auth else 0, src_ip=m["ip"], user=m["u"])
+    f = line.split()
+    if len(f) == 14 and f[0] == "2" and f[12] in ("ACCEPT", "REJECT") and f[9].isdigit():
+        return Event(ts=f[10], source="syslog", category="network", action=f[12].lower(), message=line[:500],
+                     severity=1 if f[12] == "REJECT" else 0, src_ip=f[3], dst_ip=f[4],
+                     src_port=_port(f[5]), dst_port=_port(f[6]))
+    cols = state.get("zeek")
+    if cols and "\t" in line:
+        v = line.split("\t")
+        if len(v) == len(cols) and "id.orig_h" in cols:
+            r = dict(zip(cols, v))
+            return Event(ts=r.get("ts"), source="syslog", category="network", action=r.get("conn_state") or "zeek",
+                         message=line[:500], src_ip=r["id.orig_h"], dst_ip=r.get("id.resp_h"),
+                         src_port=_port(r.get("id.orig_p")), dst_port=_port(r.get("id.resp_p")))
+    if "[UFW " in line and (m := _UFW_RE.search(line)):
+        k = _kv(line[m.end():])
+        fr = _FRAME_RE.match(line)
+        blocked = "BLOCK" in m["act"]
+        return Event(ts=fr["ts"] if fr else None, source="syslog", category="network",
+                     action="blocked" if blocked else "allowed", message=line[:500], severity=1 if blocked else 0,
+                     host=fr["host"] if fr else None, src_ip=k.get("SRC"), dst_ip=k.get("DST"),
+                     src_port=_port(k.get("SPT")), dst_port=_port(k.get("DPT")))
+    return None
