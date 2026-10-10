@@ -38,7 +38,7 @@ def test_asa_ipv4_and_ipv6_endpoints():
 
 
 def test_invalid_ports_dropped():
-    for bad in ("https", -1, 70000, "65536", True, 1.5, "", None, "80x"):
+    for bad in ("nosuchservice", -1, 70000, "65536", True, 1.5, "", None, "80x"):
         e = Event(ts=datetime.now(timezone.utc), source="s", category="network", action="a", message="m",
                   src_port=bad, dst_port=bad)
         assert e.src_port is None and e.dst_port is None, bad
@@ -64,3 +64,8 @@ def test_toolbox_dst_port_filter(tmp_path):
     box = SecurityToolbox(AgentContext(events=evs, incidents=[], iocs={}, digest=""), "t", "T",
                           Blackboard(str(tmp_path / "b.jsonl")))
     assert json.loads(box.call("search_events", {"dst_port": 22}))["matches"] == 1
+
+
+def test_named_ports_map_to_numbers():
+    from bluecell.models import _port
+    assert _port("https") == 443 and _port("SSH") == 22 and _port("netbios-ssn") == 139

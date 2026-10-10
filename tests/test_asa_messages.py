@@ -84,3 +84,9 @@ def test_six_113015_failures_from_one_ip_are_t1110():
     map_attack(events)
     assert all("T1110" in ev.attack for ev in events)
     assert all(ev.src_ip == "203.0.113.5" for ev in events)
+
+
+def test_named_port_keeps_destination_and_maps_number():
+    e = parse_syslog_line('Oct  3 22:00:02 fw01 %ASA-4-106023: Deny tcp src outside:203.0.113.5/4444 '
+                          'dst inside:10.0.0.10/https by access-group "OUT" [0x0, 0x0]')
+    assert (e.src_ip, e.src_port, e.dst_ip, e.dst_port) == ("203.0.113.5", 4444, "10.0.0.10", 443)

@@ -159,10 +159,25 @@ def _flat(value: Any) -> str:
                    for c in str(value))
 
 
+# Service keywords firewalls (Cisco ASA, PAN-OS) log in place of numbers.
+_PORT_NAMES = {
+    "ftp-data": 20, "ftp": 21, "ssh": 22, "telnet": 23, "smtp": 25, "domain": 53, "dns": 53,
+    "tftp": 69, "http": 80, "www": 80, "kerberos": 88, "pop3": 110, "sunrpc": 111, "nntp": 119,
+    "ntp": 123, "netbios-ns": 137, "netbios-dgm": 138, "netbios-ssn": 139, "imap4": 143,
+    "imap": 143, "snmp": 161, "snmptrap": 162, "bgp": 179, "ldap": 389, "https": 443,
+    "microsoft-ds": 445, "smb": 445, "isakmp": 500, "syslog": 514, "rsh": 514, "lpd": 515,
+    "ldaps": 636, "imaps": 993, "pop3s": 995, "sqlnet": 1521, "mssql": 1433, "radius": 1645,
+    "radius-acct": 1646, "pptp": 1723, "nfs": 2049, "mysql": 3306, "rdp": 3389,
+    "sip": 5060, "winrm": 5985, "citrix-ica": 1494, "h323": 1720, "aol": 5190,
+}
+
+
 def _port(v: Any) -> Optional[int]:
-    """0-65535 as int; anything else ("https", -1, 70000, True, 1.5) -> None."""
+    """0-65535 as int, or a known service name ("https" -> 443); else (-1, 70000, True, 1.5) None."""
     if isinstance(v, bool) or isinstance(v, float) and not v.is_integer():
         return None
+    if isinstance(v, str) and v.strip().lower() in _PORT_NAMES:
+        return _PORT_NAMES[v.strip().lower()]
     try:
         n = int(str(v).strip()) if isinstance(v, str) else int(v)
     except (TypeError, ValueError, OverflowError):

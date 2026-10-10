@@ -381,15 +381,15 @@ _FRAME_RE = re.compile(r"^(?:<\d+>\d?\s*)?(?P<ts>\w{3}\s+\d+\s+\d{2}:\d{2}:\d{2}
                        r"|\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)\s+(?P<host>\S+)\s+")
 _KV_RE = re.compile(r'(\w+)=("[^"]*"|\S+)')
 # ASA 106023 "src outside:IP/port dst inside:IP/port", 302013 "for outside:IP/port (..) to inside:IP/port"
-_ASA_RE = re.compile(r"%ASA-\d-\d+:\s*(?P<m>.*?(?P<act>Deny|Built|Teardown)\b.*?(?:src|for)\s+\S+?:(?P<s>[\w.:]+)/(?P<sp>\d+)"
-                     r".*?(?:dst|to)\s+\S+?:(?P<d>[\w.:]+)/(?P<dp>\d+).*)", re.I)
+_ASA_RE = re.compile(r"%ASA-\d-\d+:\s*(?P<m>.*?(?P<act>Deny|Built|Teardown)\b.*?(?:src|for)\s+\S+?:(?P<s>[\w.:]+)/(?P<sp>[\w-]+)"
+                     r".*?(?:dst|to)\s+\S+?:(?P<d>[\w.:]+)/(?P<dp>[\w-]+).*)", re.I)
 _ASA_ID_RE = re.compile(r"%ASA-\d-(\d{6}):")
 # Connection ids -> action (None: "denied"/"permitted" in the text). Endpoints are "from|src X[/p] to|dst Y[/p]",
 # except 106100's "outside/X(p) -> inside/Y(p)".
 _ASA_CONN = {"106001": "deny", "106006": "deny", "106007": "deny", "106014": "deny", "106015": "deny",
              "106021": "deny", "106100": None, "710003": "deny", "305011": "allow", "305012": "connection"}
-_ASA_EP_RE = re.compile(r"\b(?:from|src)\s+(?P<s>\S+?)(?:/(?P<sp>\d+))?\s+(?:to|dst)\s+"
-                        r"(?P<d>\S+?)(?:/(?P<dp>\w+))?(?=[\s(]|$)")
+_ASA_EP_RE = re.compile(r"\b(?:from|src)\s+(?P<s>\S+?)(?:/(?P<sp>[\w-]+))?\s+(?:to|dst)\s+"
+                        r"(?P<d>\S+?)(?:/(?P<dp>[\w-]+))?(?=[\s(]|$)")
 _ASA_106100_RE = re.compile(r"\S+?/(?P<s>[\w.:]+)\(\d+\)\s+->\s+\S+?/(?P<d>[\w.:]+)\((?P<dp>\d+)\)")
 # AAA / login ids -> authentication events, so attack.py's failure (T1110) rule applies.
 _ASA_AUTH = {"113004": "login_success", "113005": "login_failed", "113015": "login_failed",

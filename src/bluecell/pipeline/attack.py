@@ -10,6 +10,7 @@ on top of it. It is NOT a replacement for a full detection engine.
 """
 from __future__ import annotations
 
+import ipaddress
 import re
 
 # Minimal embedded technique catalog (id -> (name, tactic)).
@@ -64,6 +65,8 @@ _SCHED_RE = re.compile(r"scheduled tasks?\b[^.;]{0,80}?\b(?:created|registered|u
                        r"|schtasks\s+/create|eventid\D{0,3}470[28]\b|crontab|(?:^|[\\/\s\"'])at\.exe\b"
                        r"|new cron job|cron job created")
 _REMOTE_RE = re.compile(r"psexec|\bwmic\s|\brdp|\bsmb(?!ios|d\b)|\bwinrm\b")
+_REMOTE_PORTS = {22, 445, 139, 3389, 5985, 5986}  # SSH, SMB, RDP, WinRM
+_BLOCKED_RE = re.compile(r"den(?:y|ied)|drop|block|reject|fail|refus|reset|timeout")
 # Whole-word failure: "failover" is not a failed login.
 _FAIL_RE = re.compile(r"(?<![a-z])fail(?:ed|ure|ures|ing|s)?(?![a-z])")
 _SEC_TOOL = (r"(?:defender|windefend|mpssvc|antivirus|anti-virus|antimalware|"
@@ -92,6 +95,13 @@ def _looks_dga(domain: str) -> bool:
     ratio = vowels / max(1, len(label))
     has_digit = any(c.isdigit() for c in label)
     return ratio < 0.30 and (has_digit or len(label) >= 16)
+
+
+def _is_private(ip) -> bool:
+    try:
+        return ipaddress.ip_address(ip).is_private
+    except ValueError:  # None or unparseable
+        return False
 
 
 def _tag(ev, tid: str, reason: str) -> None:
@@ -159,6 +169,9 @@ def map_attack(events: list) -> list:
         # Lateral movement.
         if _REMOTE_RE.search(msg) or _REMOTE_RE.search(proc):
             _tag(ev, "T1021", "remote-service")
+        elif ev.category == "network" and ev.dst_port in _REMOTE_PORTS and not _BLOCKED_RE.search(act) \
+                and _is_private(ev.dst_ip):
+            _tag(ev, "T1021", f"remote-port:{ev.dst_port}")
 
         # Defense evasion — disabling/stopping a security product or service
         # (not "account was disabled" from Microsoft-Windows-Security-Auditing).
