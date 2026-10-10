@@ -110,6 +110,8 @@ def _detect(filename: str, record: Optional[dict]) -> str:
                 "status" in low or "sign-in error code" in low or "user" in low
                 or "username" in low or "userprincipalname" in low or "resulttype" in low):
             return "signins"
+        if {"source address", "destination address"} <= set(low):
+            return "network"      # PAN-OS traffic CSV
         if any(k in low for k in ("sender_address", "sender address", "senderaddress",
                                   "recipient_address", "recipient address",
                                   "recipientaddress", "recipient_status")):

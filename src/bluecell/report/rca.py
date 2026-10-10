@@ -59,8 +59,14 @@ def _assess_rules(inc) -> dict:
     def _is_success(e):
         # Only a sign-in is a success; same predicate as attack.map_attack.
         a = (e.action or "").lower(); m = (e.message or "").lower()
-        return e.category == "authentication" and (
-            "success" in a or "accepted" in m or a == "login_success")
+        if e.category == "authentication" and (
+                "success" in a or "accepted" in m or a == "login_success"):
+            return True
+        # CloudTrail console success stays cloud_api/ConsoleLogin; only its raw
+        # responseElements says Success.
+        resp = e.raw.get("responseElements") if isinstance(e.raw, dict) else None
+        return a == "consolelogin" and isinstance(resp, dict) and \
+            str(resp.get("ConsoleLogin", "")).lower() == "success"
     def _is_fail(e):
         return "fail" in (e.action or "").lower() or "login_failed" == (e.action or "").lower()
 

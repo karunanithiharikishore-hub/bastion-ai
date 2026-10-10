@@ -29,9 +29,25 @@ def _get(d: dict, *keys, default=None):
     lower = {str(k).lower(): v for k, v in d.items() if k is not None}
     for k in keys:
         v = lower.get(str(k).lower())
+        if v is None and "." in str(k):
+            v = _dotted(d, str(k))
         if v not in (None, "", []):
             return v
     return default
+
+
+def _dotted(d: dict, path: str):
+    """ECS nested value: "host.name" -> d["host"]["name"]. Flat dotted keys win (checked first in _get)."""
+    head, _, rest = path.partition(".")
+    v = _get(d, head)
+    if not rest:
+        return v
+    return _dotted(v, rest) if isinstance(v, dict) else None
+
+
+def _entity(r: dict, *keys):
+    """Host/user name. A dict is an ECS object (host: {ip: ...}), not a name, so it is skipped."""
+    return _get(r, *(k for k in keys if not isinstance(_get(r, k), dict)))
 
 
 def _clean_ip(val) -> Optional[str]:
@@ -117,6 +133,8 @@ _EDR_KEYS = (
     "endpoint", "computer_name", "DeviceName", "user", "username", "account", "user_name",
     "AccountName", "InitiatingProcessAccountName", "file_path", "path", "target_file", "sha256",
     "hash", "file_hash", "sha1", "md5", "RemoteUrl",
+    "EventID", "Computer", "MachineName", "TimeCreated", "AlertName", "AlertSeverity", "CompromisedEntity",
+    "event.action", "source.ip", "destination.ip",
 )
 
 
@@ -124,10 +142,17 @@ def parse_edr(r: dict) -> Optional[Event]:
     """Endpoint / EDR alerts, process telemetry, and Defender Advanced Hunting Device* tables."""
     if _get(r, *_EDR_KEYS) is None:
         return None
-    action = _get(r, "action", "event_type", "operation", "activity", "ActionType", default="edr_event")
+    action = _get(r, "action", "event.action", "event_type", "operation", "activity", "ActionType", default="edr_event")
+    # Sentinel SecurityEvent / Get-WinEvent logons (R4-INGEST-2). shortcut: 4776 (NTLM) skipped, its success is in Status.
+    eid = str(_get(r, "EventID", default=_get(r, "Id") if _get(r, "MachineName") else "")).strip()
+    # ECS event.action "logon-failed" (winlogbeat 4625) is the same failure.
+    winauth = {"4624": "login_success", "4625": "login_failed", "4771": "login_failed"}.get(eid) or \
+        {"logon-failed": "login_failed"}.get(str(action).lower())
+    if winauth:
+        action = winauth
     # CSV gives "false"/"0" as text, which is truthy; treat those as no alert.
     alert = any(str(v).strip().lower() not in ("false", "0", "no", "none", "")
-                for v in (_get(r, "alert"), _get(r, "detection"), _get(r, "threat_name"))
+                for v in (_get(r, "alert"), _get(r, "detection"), _get(r, "threat_name"), _get(r, "AlertName"))
                 if v is not None)
     # DeviceProcessEvents: FileName is the process itself; InitiatingProcess* is its parent.
     proc = _get(r, "process", "process_name", "image", "proc")
@@ -139,29 +164,32 @@ def parse_edr(r: dict) -> Optional[Event]:
     # as a word, because attack.py's _FAIL_RE does not match "LogonFailed".
     logon = str(action).lower() in ("logonsuccess", "logonfailed", "logonattempted")
     net = _get(r, "RemoteIP", "LocalIP") is not None and not logon
-    src_ip = _ip_field(r, "src_ip", "source_ip", "local_ip", "LocalIP")
-    dst_ip = _ip_field(r, "dst_ip", "dest_ip", "remote_ip", "RemoteIP")
+    src_ip = _ip_field(r, "src_ip", "source_ip", "source.ip", "local_ip", "LocalIP")
+    dst_ip = _ip_field(r, "dst_ip", "dest_ip", "destination.ip", "remote_ip", "RemoteIP")
     if logon:
         # Inbound logon: RemoteIP is the client, so it is the source (INGEST-22).
         # dst_ip falls back to RemoteIP when there is no LocalIP (INGEST-2 asserts it).
-        src_ip = _ip_field(r, "RemoteIP") or _ip_field(r, "src_ip", "source_ip")
+        src_ip = _ip_field(r, "RemoteIP") or _ip_field(r, "src_ip", "source_ip", "source.ip")
         dst_ip = _ip_field(r, "LocalIP") or dst_ip
     default_msg = (f"{src_ip or '?'} -> {dst_ip or '?'}:{_get(r, 'RemotePort', default='?')}"
                    if net else action)
     if logon:
         verb = {"logonfailed": "failed", "logonsuccess": "succeeded"}.get(str(action).lower(), "attempted")
         default_msg = f"logon {verb} for {_get(r, 'AccountName', default='?')} from {src_ip or '?'}"
+    src_ip = src_ip or (_ip_field(r, "IpAddress") if winauth else None)
     return Event(
-        ts=_get(r, "timestamp", "ts", "time", "@timestamp", "eventTime", "TimeGenerated", "TimeGenerated [UTC]", default=None),
+        ts=_get(r, "timestamp", "ts", "time", "@timestamp", "eventTime", "TimeGenerated", "TimeGenerated [UTC]",
+                "TimeCreated", default=None),
         source="edr",
-        category="alert" if alert else ("authentication" if logon else "network" if net else "process"),
+        category="alert" if alert else ("authentication" if logon or winauth else "network" if net else "process"),
         action=str(action),
-        message=str(_get(r, "message", "description", "threat_name", "name",
+        message=str(_get(r, "AlertName", "message", "description", "threat_name", "name",
                          "ProcessCommandLine", "InitiatingProcessCommandLine", default=default_msg)),
-        severity=_severity(_get(r, "severity", "risk", "level")),
-        host=_get(r, "host", "hostname", "device", "endpoint", "computer_name", "DeviceName"),
-        user=_get(r, "user", "username", "account", "user_name", "AccountName",
-                  "InitiatingProcessAccountName"),
+        severity=_severity(_get(r, "severity", "risk", "level", "AlertSeverity")),
+        host=_entity(r, "host.name", "host", "hostname", "device", "endpoint", "computer_name", "DeviceName",
+                     "Computer", "MachineName", "CompromisedEntity"),
+        user=_entity(r, "user.name", "user", "username", "account", "user_name", "AccountName", "TargetUserName",
+                     "InitiatingProcessAccountName"),
         process=proc,
         file_path=_get(r, "file_path", "path", "target_file"),
         file_hash=_get(r, "sha256", "hash", "file_hash", "sha1", "md5"),
@@ -184,7 +212,7 @@ def parse_dns(r: dict) -> Optional[Event]:
         action="dns_query",
         message=f"DNS query {domain} -> {_get(r, 'answer', 'response', 'resolved_ip', default='?')}",
         severity=_severity(_get(r, "severity")),
-        host=_get(r, "host", "client", "source_host"),
+        host=_entity(r, "host.name", "host", "client", "source_host"),
         src_ip=_ip_field(r, "src_ip", "client_ip", "source_ip"),
         dst_ip=_ip_field(r, "resolved_ip", "answer_ip"),
         domain=str(domain).rstrip("."),
@@ -195,21 +223,22 @@ def parse_dns(r: dict) -> Optional[Event]:
 def parse_network(r: dict) -> Optional[Event]:
     """Firewall / router / switch / netflow style connection records, and
     Defender DeviceNetworkEvents (routed here by its filename)."""
-    src_ip = _ip_field(r, "src_ip", "source_ip", "source", "source_address", "src_addr", "src", "LocalIP")
-    dst_ip = _ip_field(r, "dst_ip", "dest_ip", "destination", "destination_address", "dst_addr", "dst",
+    src_ip = _ip_field(r, "src_ip", "source_ip", "source", "source_address", "source address", "src_addr", "src", "LocalIP")
+    dst_ip = _ip_field(r, "dst_ip", "dest_ip", "destination", "destination_address", "destination address", "dst_addr", "dst",
                        "destination_ip", "RemoteIP")
     return Event(
-        ts=_get(r, "timestamp", "ts", "time", "@timestamp", "TimeGenerated", "TimeGenerated [UTC]", default=None),
+        ts=_get(r, "timestamp", "ts", "time", "@timestamp", "TimeGenerated", "TimeGenerated [UTC]",
+                "receive time", "generate time", "receive_time", default=None),
         source=_log_source(r, "firewall"),
         category="network",
         action=str(_get(r, "action", "verdict", "disposition", "ActionType", default="connection")),
         message=str(_get(
             r, "message",
             default=f"{src_ip or '?'} -> {dst_ip or '?'}:"
-                    f"{_get(r, 'dst_port', 'port', 'RemotePort', default='?')}")),
+                    f"{_get(r, 'dst_port', 'destination port', 'port', 'RemotePort', default='?')}")),
         severity=_severity(_get(r, "severity", "level")),
-        host=_get(r, "host", "device", "hostname", "DeviceName"),
-        user=_get(r, "user", "AccountName", "InitiatingProcessAccountName"),
+        host=_entity(r, "host.name", "host", "device", "hostname", "DeviceName", "device name"),
+        user=_entity(r, "user.name", "user", "AccountName", "InitiatingProcessAccountName"),
         process=_get(r, "InitiatingProcessFileName"),
         src_ip=src_ip,
         dst_ip=dst_ip,
@@ -282,8 +311,8 @@ def parse_auth(r: dict) -> Optional[Event]:
         action=str(action),
         message=str(_get(r, "message", default=action)),
         severity=_severity(_get(r, "severity", default=("high" if "fail" in str(action).lower() else "info"))),
-        host=_get(r, "host", "hostname", "server"),
-        user=_get(r, "user", "username", "account"),
+        host=_entity(r, "host.name", "host", "hostname", "server"),
+        user=_entity(r, "user.name", "user", "username", "account"),
         src_ip=_ip_field(r, "src_ip", "source_ip", "source", "client_ip"),
         raw=r,
     )
@@ -307,6 +336,8 @@ _SYSLOG_RE = re.compile(
 )
 # sshd: "Accepted password|publickey|keyboard-interactive/pam|... for USER from IP"
 _SSH_ACCEPTED_RE = re.compile(r"\baccepted\s+\S+\s+for\s+", re.I)
+# Whole-word "fail" only: "failover", "testfail" in a username are not failures.
+_FAIL_WORD_RE = re.compile(r"\bfail(?:ed|ing|s|ure)?\b")
 # sudo: "jsmith : TTY=pts/0 ; PWD=/home/jsmith ; USER=root ; COMMAND=..."
 _SUDO_RE = re.compile(r"^\s*(?P<u>[\w.\-\\@]+)\s+:\s+.*\bCOMMAND=", re.I)
 _IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
@@ -342,15 +373,50 @@ def _syslog_ip(msg: str) -> Optional[str]:
     return None
 
 
+_FRAME_RE = re.compile(r"^(?:<\d+>\d?\s*)?(?P<ts>\w{3}\s+\d+\s+\d{2}:\d{2}:\d{2}"
+                       r"|\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)\s+(?P<host>\S+)\s+")
+_KV_RE = re.compile(r'(\w+)=("[^"]*"|\S+)')
+# ASA 106023 "src outside:IP/port dst inside:IP/port", 302013 "for outside:IP/port (..) to inside:IP/port"
+_ASA_RE = re.compile(r"%ASA-\d-\d+:\s*(?P<m>.*?(?P<act>Deny|Built|Teardown)\b.*?(?:src|for)\s+\S+?:(?P<s>[\w.:]+)/(?P<sp>\d+)"
+                     r".*?(?:dst|to)\s+\S+?:(?P<d>[\w.:]+)/(?P<dp>\d+).*)", re.I)
+
+
+def _vendor_firewall(line: str) -> Optional[Event]:
+    """Syslog-framed or bare FortiGate key=value / Cisco ASA line -> firewall event (None if neither)."""
+    f = _FRAME_RE.match(line)
+    body = line[f.end():] if f else line
+    r = {"ts": f.group("ts"), "host": f.group("host")} if f else {}
+    kv = {k.lower(): v.strip('"') for k, v in _KV_RE.findall(body)}
+    a = _ASA_RE.search(body)
+    if "srcip" in kv or "dstip" in kv:
+        r.update(src_ip=kv.get("srcip"), dst_ip=kv.get("dstip"), dst_port=kv.get("dstport"),
+                 action=kv.get("action") or "connection", host=kv.get("devname") or r.get("host"))
+        if kv.get("date") and kv.get("time"):
+            r["ts"] = f"{kv['date']} {kv['time']}"
+    elif a:
+        r.update(src_ip=a.group("s"), dst_ip=a.group("d"), dst_port=a.group("dp"),
+                 action={"deny": "deny", "built": "allow"}.get(a.group("act").lower(), "connection"))
+    else:
+        return None
+    ev = parse_network({**r, "message": body[:500]})
+    ev.raw = {"line": line}
+    return ev
+
+
 def parse_syslog_line(line: str) -> Optional[Event]:
     line = line.strip()
     if not line:
         return None
     m = _RFC5424_RE.match(line) or _SYSLOG_RE.match(line)
     if not m:
-        # Not RFC3164-ish; keep the line as an 'other' event so nothing is lost.
-        return Event(ts=None, source="syslog", category="other",
-                     action="log", message=line[:500], raw={"line": line})
+        # Not RFC3164-ish: vendor firewall formats, else an 'other' event (keeping any syslog ts+host).
+        ev = _vendor_firewall(line)
+        if ev:
+            return ev
+        f = _FRAME_RE.match(line)
+        return Event(ts=f.group("ts") if f else None, source="syslog", category="other",
+                     action="log", message=line[:500], host=f.group("host") if f else None,
+                     src_ip=_syslog_ip(line[f.end():]) if f else None, raw={"line": line})
     nil = lambda g: None if m.group(g) in (None, "-") else m.group(g)   # noqa: E731
     msg = (m.group("msg") or "").lstrip("\ufeff")   # RFC 5424 MSG may carry a BOM
     repeat = 0
@@ -367,13 +433,15 @@ def parse_syslog_line(line: str) -> Optional[Event]:
     auth_proc = (proc or "").lower().rsplit("/", 1)[-1] in _AUTH_PROCS
     auth_ctx = auth_proc or "pam_" in low or \
         (("password" in low or "authentication failure" in low) and um is not None)
-    failed = "fail" in low or any(p in low for p in _AUTH_FAIL_PHRASES)
+    accepted = _SSH_ACCEPTED_RE.search(msg)   # "Accepted ..." is a success whatever the user is named
+    failed = not accepted and (bool(_FAIL_WORD_RE.search(low))
+                               or any(p in low for p in _AUTH_FAIL_PHRASES))
     # In an auth process the failure wording alone is enough (sshd "Failed publickey",
     # "Invalid user"); elsewhere the message must also name password/auth/login.
     if failed and auth_ctx and (auth_proc or "password" in low or "authentication" in low
                                 or "login" in low):
         action, category, sev = "login_failed", "authentication", 3
-    elif _SSH_ACCEPTED_RE.search(msg):
+    elif accepted:
         action, category, sev = "login_success", "authentication", 1
     elif "sudo" in (proc or "").lower():
         action, category, sev = "sudo", "process", 2

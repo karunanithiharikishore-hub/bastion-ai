@@ -94,13 +94,16 @@ def _parse_ts_or_none(value: Any) -> Optional[datetime]:
             if dt <= now + timedelta(days=2):
                 return dt
         # US-style Export-Csv dates (PowerShell / Exchange message trace).
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %H:%M:%S",
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S", "%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %H:%M:%S",
                     "%m/%d/%Y, %I:%M:%S %p", "%m/%d/%Y %I:%M %p",
+                    "%b %d, %Y %I:%M:%S %p", "%a, %d %b %Y %I:%M:%S %p",
                     "%d/%b/%Y:%H:%M:%S %z"):          # Apache CLF
             try:
                 return _utc(datetime.strptime(v, fmt))
             except ValueError:
                 continue
+        if re.search(r"\b[AP]M\b", v, re.I):         # parsedate ignores AM/PM: 10 PM would read as 10 AM
+            return None
         try:                                          # RFC 2822 (mail, HTTP Date)
             return _utc(parsedate_to_datetime(v))
         except (TypeError, ValueError, IndexError):
