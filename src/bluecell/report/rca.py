@@ -13,7 +13,7 @@ Two layers:
 """
 from __future__ import annotations
 
-from ..pipeline.attack import ATTACK_TECHNIQUES
+from ..pipeline.attack import ATTACK_TECHNIQUES, _FAIL_RE, _is_private
 from ..agents.injection import BOUNDARY_INSTRUCTION, Envelope, INJECTION_TAG
 
 
@@ -68,7 +68,9 @@ def _assess_rules(inc) -> dict:
         return a == "consolelogin" and isinstance(resp, dict) and \
             str(resp.get("ConsoleLogin", "")).lower() == "success"
     def _is_fail(e):
-        return "fail" in (e.action or "").lower() or "login_failed" == (e.action or "").lower()
+        # Same predicate as map_attack's T1110 tag (action OR message), so verdict and tags agree.
+        return e.category == "authentication" and not _is_success(e) and bool(
+            _FAIL_RE.search((e.action or "").lower()) or _FAIL_RE.search((e.message or "").lower()))
 
     has_success = any(_is_success(e) for e in events)
     fail_ct = sum(1 for e in events if _is_fail(e))
@@ -83,7 +85,14 @@ def _assess_rules(inc) -> dict:
             elif tid in ATTACK_TECHNIQUES:
                 cred_tactics.update(_split_tactic(ATTACK_TECHNIQUES[tid][1]))
     only_cred = bool(cred_tactics) and cred_tactics.issubset({"credential-access", "authentication"})
-    serious = bool(tactics & {"impact", "exfiltration", "command-and-control", "lateral-movement"})
+    # A port-only T1021 (tag remote-port:N, no tool/session evidence) is weak: it counts as
+    # lateral movement only alongside a successful auth from an external IP.
+    strong_lateral = any(
+        (t.startswith("attack:T1021:") and not t.startswith("attack:T1021:remote-port")) or "T1534" in e.attack
+        for e in events for t in e.tags) or any(
+        _is_success(e) and e.src_ip and not _is_private(e.src_ip) for e in events)
+    serious = bool(tactics & {"impact", "exfiltration", "command-and-control"}) or (
+        "lateral-movement" in tactics and strong_lateral)
 
     # Distinct source IPs of the failures: breadth of a spray vs. one retrying device.
     ips = {e.src_ip for e in events if e.src_ip}

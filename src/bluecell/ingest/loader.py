@@ -106,12 +106,16 @@ def _detect(filename: str, record: Optional[dict]) -> str:
         if "devicename" in low and ("actiontype" in low or "remoteip" in low
                                     or "initiatingprocessfilename" in low):
             return "edr"          # Defender / Sentinel Advanced Hunting (DeviceNetworkEvents etc.)
-        if ("ip address" in low or "ipaddress" in low) and (
+        # A Sentinel SecurityEvent export carries Status/IpAddress too; EventID + Computer/Account wins.
+        sec_event = "eventid" in low and ("computer" in low or "account" in low)
+        if not sec_event and ("ip address" in low or "ipaddress" in low) and (
                 "status" in low or "sign-in error code" in low or "user" in low
                 or "username" in low or "userprincipalname" in low or "resulttype" in low):
             return "signins"
         if {"source address", "destination address"} <= set(low):
             return "network"      # PAN-OS traffic CSV
+        if {"src_ip", "dst_ip"} <= set(low):
+            return "network"      # firewall-shaped rows; beats a filename hint like "azure_firewall"
         if any(k in low for k in ("sender_address", "sender address", "senderaddress",
                                   "recipient_address", "recipient address",
                                   "recipientaddress", "recipient_status")):
@@ -149,7 +153,7 @@ def _parse_record(rec: dict, source: str) -> Optional[Event]:
             return None
 
 
-_WRAPPER_KEYS = ("Records", "records", "events", "logs", "data", "value")
+_WRAPPER_KEYS = ("Records", "records", "events", "logs", "data", "value", "results")
 # A dict carrying any of these is an event itself, not an envelope around a list.
 _EVENT_KEYS = frozenset({"timestamp", "time", "eventtime", "eventtimestamp", "@timestamp",
                          "createddatetime", "host", "hostname", "user", "username",
@@ -157,18 +161,37 @@ _EVENT_KEYS = frozenset({"timestamp", "time", "eventtime", "eventtimestamp", "@t
 _WS = re.compile(r"\s*")
 
 
+def _splunk_fields(rec: dict) -> dict:
+    """Splunk exports name the event time and raw line _time/_raw; map them to
+    timestamp/message unless the record already has those keys."""
+    extra = {new: rec[old] for old, new in (("_time", "timestamp"), ("_raw", "message"))
+             if old in rec and new not in rec}
+    return {**rec, **extra} if extra else rec
+
+
 def _unwrap(obj) -> Iterator[dict]:
     """Yield the record dicts in a decoded JSON value, unwrapping lists and
-    'Records'-style wrappers at every level."""
+    'Records'-style wrappers at every level, plus Elasticsearch hits
+    (``_source``), ES search responses (``hits.hits``) and Splunk exports
+    (``result`` / ``results``)."""
     if isinstance(obj, list):
         for item in obj:
             yield from _unwrap(item)
     elif isinstance(obj, dict):
-        key = next((k for k in _WRAPPER_KEYS if isinstance(obj.get(k), list)), None)
-        if key is None or any(str(k).lower() in _EVENT_KEYS for k in obj):
-            yield obj   # a single event with a list field keeps its own fields
+        if any(str(k).lower() in _EVENT_KEYS for k in obj):
+            yield _splunk_fields(obj)   # a single event with a list field keeps its own fields
+        elif isinstance(obj.get("_source"), dict):
+            yield obj["_source"]
+        elif isinstance(obj.get("result"), dict):
+            yield _splunk_fields(obj["result"])
+        elif isinstance(obj.get("hits"), dict):
+            yield from _unwrap(obj["hits"].get("hits", []))
         else:
-            yield from _unwrap(obj[key])
+            key = next((k for k in _WRAPPER_KEYS if isinstance(obj.get(k), list)), None)
+            if key is None:
+                yield _splunk_fields(obj)
+            else:
+                yield from _unwrap(obj[key])
 
 
 # Event.to_dict()/asdict recurse over raw, so records nested deeper than this

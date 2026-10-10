@@ -66,7 +66,10 @@ _SCHED_RE = re.compile(r"scheduled tasks?\b[^.;]{0,80}?\b(?:created|registered|u
                        r"|new cron job|cron job created")
 _REMOTE_RE = re.compile(r"psexec|\bwmic\s|\brdp|\bsmb(?!ios|d\b)|\bwinrm\b")
 _REMOTE_PORTS = {22, 445, 139, 3389, 5985, 5986}  # SSH, SMB, RDP, WinRM
-_BLOCKED_RE = re.compile(r"den(?:y|ied)|drop|block|reject|fail|refus|reset|timeout")
+# Allowlist: only an established/allowed connection is a remote-service hit. Teardown/close
+# rows (ASA "connection", FortiGate "close") would double-count the session, so they are skipped.
+_ALLOWED_RE = re.compile(r"\b(?:allow(?:ed)?|accept(?:ed)?|permit(?:ted)?|pass(?:ed)?|built|established|success|open|connection)\b")
+_TEARDOWN_RE = re.compile(r"teardown|\bclose[ds]?\b")
 # Whole-word failure: "failover" is not a failed login.
 _FAIL_RE = re.compile(r"(?<![a-z])fail(?:ed|ure|ures|ing|s)?(?![a-z])")
 _SEC_TOOL = (r"(?:defender|windefend|mpssvc|antivirus|anti-virus|antimalware|"
@@ -169,8 +172,8 @@ def map_attack(events: list) -> list:
         # Lateral movement.
         if _REMOTE_RE.search(msg) or _REMOTE_RE.search(proc):
             _tag(ev, "T1021", "remote-service")
-        elif ev.category == "network" and ev.dst_port in _REMOTE_PORTS and not _BLOCKED_RE.search(act) \
-                and _is_private(ev.dst_ip):
+        elif ev.category == "network" and ev.dst_port in _REMOTE_PORTS and _ALLOWED_RE.search(act) \
+                and not _TEARDOWN_RE.search(act + " " + msg) and _is_private(ev.dst_ip):
             _tag(ev, "T1021", f"remote-port:{ev.dst_port}")
 
         # Defense evasion — disabling/stopping a security product or service
