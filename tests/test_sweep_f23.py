@@ -25,3 +25,15 @@ def test_listed_and_dated_ids_have_price(model, price):
 def test_verified_prices(model, price):
     from bluecell import tracing
     assert tracing.price_for(model) == price
+
+
+def test_haiku_5_5_long_prompt_tier():
+    from bluecell import tracing
+    short = tracing.estimate_cost({"input_tokens": 100_000, "output_tokens": 1_000_000}, "claude-haiku-5-5")
+    assert short == round((100_000 * 0.10 + 1_000_000 * 0.50) / 1e6, 6)
+    # over 100k prompt tokens (cache reads count): the whole call bills at $0.50/$2.50
+    long = tracing.estimate_cost({"input_tokens": 60_000, "cache_read_input_tokens": 50_000,
+                                  "output_tokens": 1_000}, "claude-haiku-5-5")
+    assert long == round((60_000 * 0.50 + 50_000 * 0.50 * 0.10 + 1_000 * 2.50) / 1e6, 6)
+    # other models are unaffected by prompt size
+    assert tracing.estimate_cost({"input_tokens": 200_000}, "claude-sonnet-5-5") == 0.4

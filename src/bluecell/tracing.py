@@ -57,13 +57,13 @@ PRICES = {
     "claude-sonnet-4": (3.00, 15.00),
     "claude-mythos-5-1": (10.00, 50.00),
     "claude-mythos-5": (10.00, 50.00),
-    # shortcut: Haiku 5.5 bills $0.50/$2.50 for prompts over 100k tokens; the
-    # per-call prompt size isn't tracked here, so long prompts are under-counted.
     "claude-haiku-5-5": (0.10, 0.50),
     "claude-haiku-4-5": (1.00, 5.00),
     "claude-3-5-haiku": (0.80, 4.00),
 }
 # Checked against platform.claude.com/docs/en/about-claude/pricing on 2026-10-10.
+# Long-prompt tiers: above this many prompt tokens per call the whole call bills at the higher rate.
+LONG_PROMPT_PRICES = {"claude-haiku-5-5": (100_000, (0.50, 2.50))}
 _FAMILY_DEFAULT = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5",
                    "haiku": "claude-haiku-5-5", "fable": "claude-fable-5-1"}
 CACHE_WRITE_MULT = 1.25
@@ -88,29 +88,39 @@ def _iso(t: float) -> str:
 
 def price_for(model: str | None):
     """(input, output) USD/MTok for a model id, or None if unknown."""
+    key = _price_key(model)
+    return PRICES[key] if key else None
+
+
+def _price_key(model: str | None):
+    """The PRICES key a model id bills under, or None if unknown."""
     m = (model or "").lower()
     if m.startswith("anthropic."):
         m = m[len("anthropic."):]
-    for key, price in PRICES.items():
+    for key in PRICES:
         # Exact id, optionally with a date stamp or Bedrock "-v1:0" suffix.
         if re.fullmatch(re.escape(key) + r"(?:-\d{8})?(?:-v\d+(?::\d+)?)?", m):
-            return price
+            return key
     # Version-less alias (e.g. "claude-opus") -> newest listed model of that family.
     # Ids with a version number that are not listed get no price (shortcut: family
     # aliases only, add new versions to PRICES when they ship).
     if not re.search(r"\d", m):
         for fam, key in _FAMILY_DEFAULT.items():
             if fam in m:
-                return PRICES[key]
+                return key
     return None
 
 
 def estimate_cost(usage: dict, model: str | None):
     """Estimated USD for one Messages API ``usage`` block, or None."""
-    p = price_for(model)
-    if p is None or not usage:
+    key = _price_key(model)
+    if key is None or not usage:
         return None
-    pin, pout = p
+    pin, pout = PRICES[key]
+    prompt = sum(_int(usage.get(k)) for k in (
+        "input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
+    if key in LONG_PROMPT_PRICES and prompt > LONG_PROMPT_PRICES[key][0]:
+        pin, pout = LONG_PROMPT_PRICES[key][1]
     cost = (_int(usage.get("input_tokens")) * pin
             + _int(usage.get("output_tokens")) * pout
             + _int(usage.get("cache_creation_input_tokens")) * pin * CACHE_WRITE_MULT
