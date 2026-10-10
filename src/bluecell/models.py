@@ -33,6 +33,9 @@ CATEGORIES = (
 )
 
 
+_FILETIME_1970 = 116444736000000000  # FILETIME of 1970-01-01T00:00:00Z
+
+
 def _parse_ts(value: Any) -> datetime:
     """Best-effort timestamp parsing -> tz-aware UTC datetime.
 
@@ -60,7 +63,10 @@ def _parse_ts_or_none(value: Any) -> Optional[datetime]:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         # Heuristic by magnitude: nanoseconds > 1e17, micros > 1e14, millis > 1e11.
         try:
-            if value > 1e17:
+            if _FILETIME_1970 <= value < 2.5e17:
+                # Windows FILETIME (100ns ticks since 1601); as epoch-ns this range is 1973-1977.
+                seconds = (value - _FILETIME_1970) / 1e7
+            elif value > 1e17:
                 seconds = value / 1e9
             elif value > 1e14:
                 seconds = value / 1e6

@@ -379,6 +379,19 @@ _KV_RE = re.compile(r'(\w+)=("[^"]*"|\S+)')
 # ASA 106023 "src outside:IP/port dst inside:IP/port", 302013 "for outside:IP/port (..) to inside:IP/port"
 _ASA_RE = re.compile(r"%ASA-\d-\d+:\s*(?P<m>.*?(?P<act>Deny|Built|Teardown)\b.*?(?:src|for)\s+\S+?:(?P<s>[\w.:]+)/(?P<sp>\d+)"
                      r".*?(?:dst|to)\s+\S+?:(?P<d>[\w.:]+)/(?P<dp>\d+).*)", re.I)
+_ASA_ID_RE = re.compile(r"%ASA-\d-(\d{6}):")
+# Connection ids -> action (None: "denied"/"permitted" in the text). Endpoints are "from|src X[/p] to|dst Y[/p]",
+# except 106100's "outside/X(p) -> inside/Y(p)".
+_ASA_CONN = {"106001": "deny", "106006": "deny", "106007": "deny", "106014": "deny", "106015": "deny",
+             "106021": "deny", "106100": None, "710003": "deny", "305011": "allow", "305012": "connection"}
+_ASA_EP_RE = re.compile(r"\b(?:from|src)\s+(?:[A-Za-z][\w-]*:)?(?P<s>[\w.:]+?)(?:/(?P<sp>\d+))?\s+(?:to|dst)\s+"
+                        r"(?:[A-Za-z][\w-]*:)?(?P<d>[\w.:]+?)(?:/(?P<dp>\w+))?(?=[\s(]|$)")
+_ASA_106100_RE = re.compile(r"\S+?/(?P<s>[\w.:]+)\(\d+\)\s+->\s+\S+?/(?P<d>[\w.:]+)\((?P<dp>\d+)\)")
+# AAA / login ids -> authentication events, so attack.py's failure (T1110) rule applies.
+_ASA_AUTH = {"113004": "login_success", "113005": "login_failed", "113015": "login_failed",
+             "605004": "login_failed", "605005": "login_success", "611101": "login_success", "611102": "login_failed"}
+_ASA_USER_RE = re.compile(r'(?:\buser\s*=\s*|\bfor user "|\bUname:\s*)(?P<u>[^\s:,"]+)')
+_ASA_CIP_RE = re.compile(r"(?:user IP\s*=\s*|IP address:\s*|\bfrom\s+)(?P<ip>[\w.:]+)")
 
 
 def _vendor_firewall(line: str) -> Optional[Event]:
@@ -388,6 +401,8 @@ def _vendor_firewall(line: str) -> Optional[Event]:
     r = {"ts": f.group("ts"), "host": f.group("host")} if f else {}
     kv = {k.lower(): v.strip('"') for k, v in _KV_RE.findall(body)}
     a = _ASA_RE.search(body)
+    aid = _ASA_ID_RE.search(body)
+    aid = aid.group(1) if aid else None
     if "srcip" in kv or "dstip" in kv:
         r.update(src_ip=kv.get("srcip"), dst_ip=kv.get("dstip"), dst_port=kv.get("dstport"),
                  action=kv.get("action") or "connection", host=kv.get("devname") or r.get("host"))
@@ -396,10 +411,21 @@ def _vendor_firewall(line: str) -> Optional[Event]:
     elif a:
         r.update(src_ip=a.group("s"), dst_ip=a.group("d"), dst_port=a.group("dp"),
                  action={"deny": "deny", "built": "allow"}.get(a.group("act").lower(), "connection"))
+    elif aid in _ASA_CONN:
+        ep = _ASA_EP_RE.search(body) or _ASA_106100_RE.search(body)
+        if not ep:
+            return None
+        r.update(src_ip=ep.group("s"), dst_ip=ep.group("d"), dst_port=ep.group("dp"),
+                 action=_ASA_CONN[aid] or ("deny" if "denied" in body else "allow"))
+    elif aid in _ASA_AUTH:
+        um, im = _ASA_USER_RE.search(body), _ASA_CIP_RE.search(body)
+        r.update(user=um.group("u") if um else None, src_ip=im.group("ip") if im else None, action=_ASA_AUTH[aid])
     else:
         return None
     ev = parse_network({**r, "message": body[:500]})
     ev.raw = {"line": line}
+    if aid in _ASA_AUTH:
+        ev.category = "authentication"
     return ev
 
 
