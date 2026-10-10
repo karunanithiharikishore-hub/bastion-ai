@@ -909,7 +909,9 @@ STRUCTURED_PARSERS = {
 }
 
 # --- ITEM-24: non-syslog plaintext formats (CEF, auditd, CLF, Squid, VPC flow, Zeek, UFW) ---
-_CEF_RE = re.compile(r"CEF:\d\|[^|]{0,100}\|[^|]{0,100}\|[^|]{0,50}\|[^|]{0,50}\|(?P<name>[^|]{0,200})\|[^|]{0,20}\|(?P<ext>.{0,4000})$")
+_CEF_RE = re.compile(r"CEF:\d\|(?:[^|\\]|\\.){0,100}\|(?:[^|\\]|\\.){0,100}\|(?:[^|\\]|\\.){0,50}\|(?:[^|\\]|\\.){0,50}\|(?P<name>(?:[^|\\]|\\.){0,200})\|(?:[^|\\]|\\.){0,20}\|(?P<ext>.*)$")
+_CEF_UNESC = re.compile(r"\\([\\|=])")
+_CEF_KEY_SPLIT = re.compile(r" (?=[A-Za-z0-9_]+=)")
 _AUDIT_RE = re.compile(r"^(?:node=\S{1,64} )?type=(?P<t>[A-Z_]{1,40}) msg=audit\((?P<ts>\d{9,10}\.\d{3}):\d+\):(?P<kv>.{0,4000})$")
 _CLF_RE = re.compile(r'^(?P<ip>[\da-fA-F.:]{3,45}) \S{1,64} (?P<u>\S{1,64}) \[(?P<ts>[^\]]{1,40})\] "(?P<req>[^"]{0,2048})" (?P<st>\d{3}) ')
 _SQUID_RE = re.compile(r"^(?P<ts>\d{9,10}\.\d{3})\s+\d+\s+(?P<ip>\S{3,45})\s+(?P<code>[A-Z_]+)/(?P<st>\d{3})\s+\d+\s+(?P<m>[A-Z]{3,10})\s+(?P<url>\S{1,2048})\s+(?P<u>\S+)")
@@ -921,6 +923,16 @@ def _kv(s: str) -> dict:
     return {k: v.strip("'\"") for k, v in _KV_RE.findall(s)}
 
 
+def _cef_kv(s: str) -> dict:
+    # CEF values run to the next " key=" and may hold spaces; \= and \\ are escapes
+    out = {}
+    for seg in _CEF_KEY_SPLIT.split(s):
+        k, eq, v = seg.partition("=")
+        if eq:
+            out[k] = _CEF_UNESC.sub(r"\1", v)
+    return out
+
+
 def _port(v) -> Optional[int]:
     return int(v) if v and str(v).isdigit() and int(v) < 65536 else None
 
@@ -929,17 +941,18 @@ def parse_text_line(line: str, state: dict) -> "Event | None | bool":
     """Try the structured plaintext formats; None -> caller falls back to
     parse_syslog_line, False -> header/comment line to skip. `state` is a
     per-file dict (holds the Zeek #fields header).
-    shortcut: CEF/UFW values containing spaces are cut at the space; Windows
-    XML (EVTX export) is not handled; upgrade when a real feed needs it."""
+    shortcut: Windows XML (EVTX export) is not handled; upgrade when a real
+    feed needs it."""
     line = line.rstrip("\r")
     if line.startswith("#"):
         if line.startswith("#fields\t"):
             state["zeek"] = line.split("\t")[1:]
         return False if line.startswith(_ZEEK_HDR) else None
     if "CEF:" in line and (m := _CEF_RE.search(line)):
-        k = _kv(m["ext"])
-        act = k.get("act") or m["name"]
-        auth = bool(k.get("suser")) and re.search(r"log(?:in|on)|auth", m["name"], re.I)
+        k = _cef_kv(m["ext"])
+        name = _CEF_UNESC.sub(r"\1", m["name"])
+        act = k.get("act") or name
+        auth = bool(k.get("suser")) and re.search(r"log(?:in|on)|auth", name, re.I)
         return Event(ts=k.get("rt"), source="syslog", category="authentication" if auth else "network",
                      action=act, message=line[:500], user=k.get("suser"), src_ip=k.get("src"),
                      dst_ip=k.get("dst"), src_port=_port(k.get("spt")), dst_port=_port(k.get("dpt")))

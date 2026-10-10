@@ -26,8 +26,14 @@ import os
 import re
 import sys
 from typing import Iterable, Iterator, Optional
+import xml.etree.ElementTree as ET
 
 from ..models import Event
+
+try:   # defusedxml, when installed, also refuses the entity attacks the guard below catches
+    from defusedxml import ElementTree as _XML
+except ImportError:
+    _XML = ET
 from .parsers import (_REPEAT_CAP, STRUCTURED_PARSERS, parse_dns, parse_edr,
                       parse_syslog_line, parse_text_line)
 
@@ -375,6 +381,42 @@ def _detect_view(shape: dict, rec: dict) -> dict:
     return {**shape, **{k: v for k, v in rec.items() if v not in (None, "", [], {})}}
 
 
+# Windows event XML (Event Viewer "Save as XML", wevtutil qe /f:xml, Get-WinEvent ToXml).
+_MAX_XML_CHARS = 64 * 1024 * 1024   # shortcut: whole-file parse, upgrade to iterparse for bigger exports
+_XML_DECL = re.compile(r"^\s*<\?xml[^>]*\?>")
+_XML_UNSAFE = re.compile(r"<!\s*(DOCTYPE|ENTITY)", re.I)   # no DTD: no entity expansion (billion laughs)
+
+
+def _event_xml_records(text: str) -> list:
+    """One dict per <Event>: EventID, TimeCreated, Computer, Channel, Provider and each named EventData value."""
+    if _XML_UNSAFE.search(text):
+        raise ValueError("DOCTYPE/ENTITY declarations refused")
+    body = _XML_DECL.sub("", text, count=1)
+    if not body.lstrip().startswith("<Events"):
+        body = f"<Events>{body}</Events>"   # wevtutil emits bare <Event> elements
+    recs = []
+    for ev in _XML.fromstring(body).iter():
+        if _local(ev.tag) != "Event":
+            continue
+        rec: dict = {}
+        for el in ev.iter():   # System fields come first in document order, so Data cannot shadow them
+            name = _local(el.tag)
+            if name == "Provider":
+                rec["Provider"] = el.get("Name")
+            elif name == "TimeCreated":
+                rec["TimeCreated"] = el.get("SystemTime")
+            elif name in ("EventID", "Computer", "Channel"):
+                rec[name] = (el.text or "").strip()
+            elif name == "Data" and el.get("Name"):
+                rec.setdefault(el.get("Name"), (el.text or "").strip())
+        recs.append(rec)
+    return recs
+
+
+def _local(tag) -> str:
+    return str(tag).rsplit("}", 1)[-1]   # strip the {namespace} prefix
+
+
 def ingest_file(path: str, override: Optional[str] = None) -> list:
     """Parse one file into a list of Events."""
     ext = os.path.splitext(path)[1].lower()
@@ -434,6 +476,21 @@ def ingest_file(path: str, override: Optional[str] = None) -> list:
             if ev:
                 events.append(ev)
             elif not _is_blank(clean):
+                skipped += 1
+    elif ext == ".xml" or text[:256].lstrip().startswith(("<Events", "<Event ")):
+        if len(text) > _MAX_XML_CHARS:
+            print(f"bluecell: skipping {path}: XML larger than {_MAX_XML_CHARS >> 20} MiB", file=sys.stderr)
+            return []
+        try:
+            recs = _event_xml_records(text)
+        except (_XML.ParseError, ValueError) as exc:
+            print(f"bluecell: skipping {path}: {exc}", file=sys.stderr)
+            return []
+        for rec in recs:
+            ev = _parse_record(rec, "edr")
+            if ev:
+                events.append(ev)
+            elif not _is_blank(rec):
                 skipped += 1
     else:  # syslog / plaintext (lines that are JSON objects are parsed as records,
            # since many SIEM exports write JSON-per-line into .log / .txt files)
@@ -524,7 +581,7 @@ def ingest_path(path: str, override: Optional[str] = None) -> list:
                 if fname == "expected.json" and _is_eval_label(os.path.join(root, fname)):
                     continue   # an eval case's label file, not a log
                 if os.path.splitext(fname)[1].lower() in (
-                    ".json", ".jsonl", ".ndjson", ".csv", ".tsv", ".log", ".txt", ".syslog", ".gz"
+                    ".json", ".jsonl", ".ndjson", ".csv", ".tsv", ".log", ".txt", ".syslog", ".gz", ".xml"
                 ):
                     fpath = os.path.join(root, fname)
                     try:

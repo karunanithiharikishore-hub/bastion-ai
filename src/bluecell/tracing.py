@@ -50,12 +50,20 @@ PRICES = {
     "claude-sonnet-5-5": (2.00, 10.00),
     "claude-sonnet-5": (2.00, 10.00),
     "claude-sonnet-4-6": (3.00, 15.00),
-    # shortcut: 4-5 prices are the family list prices, not re-checked; verify against Anthropic's pricing page and update here when it changes.
     "claude-opus-4-5": (5.00, 25.00),
+    "claude-opus-4-1": (15.00, 75.00),
+    "claude-opus-4": (15.00, 75.00),
     "claude-sonnet-4-5": (3.00, 15.00),
+    "claude-sonnet-4": (3.00, 15.00),
+    "claude-mythos-5-1": (10.00, 50.00),
+    "claude-mythos-5": (10.00, 50.00),
+    # shortcut: Haiku 5.5 bills $0.50/$2.50 for prompts over 100k tokens; the
+    # per-call prompt size isn't tracked here, so long prompts are under-counted.
     "claude-haiku-5-5": (0.10, 0.50),
     "claude-haiku-4-5": (1.00, 5.00),
+    "claude-3-5-haiku": (0.80, 4.00),
 }
+# Checked against platform.claude.com/docs/en/about-claude/pricing on 2026-10-10.
 _FAMILY_DEFAULT = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5",
                    "haiku": "claude-haiku-5-5", "fable": "claude-fable-5-1"}
 CACHE_WRITE_MULT = 1.25

@@ -5,7 +5,7 @@ from bluecell import tracing
 
 
 @pytest.mark.parametrize("model", [
-    "claude-opus-4-1",  # 4-5 models are priced now (sweep F23)
+    "claude-opus-4-9",  # not a released version: must stay unpriced
     "claude-3-5-sonnet-20241022", "claude-3-opus-20240229",
     "claude-opus-5-1", "totally-unknown-model", "gpt-x",
 ])
@@ -16,7 +16,7 @@ def test_unlisted_versions_have_no_price(model):
 def test_unlisted_version_usage_is_unknown_not_estimated(tmp_path, monkeypatch):
     monkeypatch.setenv("BLUECELL_RUNS_DIR", str(tmp_path))
     rec = tracing.Tracer(persist=False).record_usage(
-        {"input_tokens": 1000, "output_tokens": 1000}, model="claude-opus-4-1")
+        {"input_tokens": 1000, "output_tokens": 1000}, model="claude-opus-4-9")
     assert rec["cost_usd"] is None and rec["cost_basis"] == "unknown"
 
 
