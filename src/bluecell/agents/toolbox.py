@@ -322,30 +322,37 @@ class SecurityToolbox:
         size = lambda r: len(json.dumps(r, default=str))
         if size(result) <= cap:
             return result
-        result, omitted, stripped = dict(result), {}, {}
-        while size(result) > cap:
-            lists = [k for k, v in result.items() if isinstance(v, list) and v]
+        body, omitted, stripped = dict(result), {}, {}
+
+        def with_note() -> dict:
+            # The note is part of the result, so the cap is checked with it in place.
+            out = dict(body)
+            if omitted or stripped:
+                if "events" in omitted and "returned" in out:
+                    out["returned"] = len(out["events"])
+                notes = [f"{n} item(s) omitted from {k}" for k, n in omitted.items()]
+                notes += [f"{f} dropped from {k}" for k, fs in stripped.items() for f in fs]
+                out["truncated"] = ("; ".join(notes) + f" to fit the {cap}-char result cap"
+                                    + ("; get_incident shows one incident in full, "
+                                       "search_events narrows the events" if omitted else ""))
+            return out
+
+        while size(with_note()) > cap:
+            lists = [k for k, v in body.items() if isinstance(v, list) and v]
             if not lists:
                 break
-            k = max(lists, key=lambda k: size(result[k]))
+            k = max(lists, key=lambda k: size(body[k]))
             # Bulky per-item fields go before any item, so every item keeps its id.
             field = next((f for f in _BULKY_FIELDS
-                          if any(isinstance(i, dict) and f in i for i in result[k])), None)
+                          if any(isinstance(i, dict) and f in i for i in body[k])), None)
             if field:
-                result[k] = [{x: y for x, y in i.items() if x != field}
-                             if isinstance(i, dict) else i for i in result[k]]
+                body[k] = [{x: y for x, y in i.items() if x != field}
+                           if isinstance(i, dict) else i for i in body[k]]
                 stripped.setdefault(k, []).append(field)
                 continue
-            result[k] = result[k][:-1]
+            body[k] = body[k][:-1]
             omitted[k] = omitted.get(k, 0) + 1
-        if omitted or stripped:
-            if "events" in omitted and "returned" in result:
-                result["returned"] = len(result["events"])
-            notes = [f"{n} item(s) omitted from {k}" for k, n in omitted.items()]
-            notes += [f"{f} dropped from {k}" for k, fs in stripped.items() for f in fs]
-            result["truncated"] = ("; ".join(notes) + f" to fit the {cap}-char result cap"
-                                   + ("; get_incident shows one incident in full, "
-                                      "search_events narrows the events" if omitted else ""))
+        result = with_note()
         if size(result) > cap:
             # Nothing left to drop but non-list text: report it, keep the trusted notes.
             keep = {k: result[k] for k in ("injection_warning", "truncated") if k in result}
@@ -403,6 +410,11 @@ class SecurityToolbox:
         parts = [e.message or ""] + [str(getattr(e, f) or "") for f in _EVENT_FIELDS]
         return " ".join(parts).lower()
 
+    def _cites_incident(self, incident_id, evidence) -> bool:
+        """At least one cited event_id belongs to the incident (submit_finding and submit_verdict)."""
+        in_inc = {e.event_id for e in self._inc[incident_id].events}
+        return any(x in in_inc for x in evidence)
+
     def _ungrounded(self, text: str) -> dict:
         """Indicators in `text` that do not occur in the evidence ({} if none)."""
         return dict(check_text(str(text or ""), self._index)["unverified"])
@@ -427,8 +439,10 @@ class SecurityToolbox:
             } for i in self.ctx.incidents],
             "ioc_counts": {k: len(v) for k, v in (self.ctx.iocs or {}).items()},
             # Earlier analysts' words can echo log text: envelope them too.
+            # Rule fallbacks put raw host/user/IOC strings in evidence: envelope those too.
             "earlier_tiers": [dict(s, **{k: self.env.wrap(s[k], 800)
-                                         for k in ("title", "rationale") if s.get(k)})
+                                         for k in ("title", "rationale") if s.get(k)},
+                                   evidence=[self.env.wrap(x, 200) for x in s.get("evidence") or []])
                               for s in self.board_seed],
             **self._injection_note(),
         }
@@ -620,6 +634,8 @@ class SecurityToolbox:
         unknown = [x for x in evidence if x not in self._by_id]
         if unknown:
             problems.append(f"unknown event_ids (not in the logs): {unknown[:10]}")
+        if incident_id in self._inc and not self._cites_incident(incident_id, evidence):
+            problems.append(f"cite at least one event_id from {incident_id}")
         if not cited:
             problems.append("cite at least one real event_id as evidence")
         elif self.source_scope and not any(e.source == self.source_scope for e in cited):
@@ -688,10 +704,8 @@ class SecurityToolbox:
         unknown = [x for x in evidence if x not in self._by_id]
         if unknown:
             problems.append(f"unknown event_ids (not in the logs): {unknown[:10]}")
-        if inc is not None:
-            in_inc = {e.event_id for e in inc.events}
-            if not any(x in in_inc for x in evidence):
-                problems.append(f"cite at least one event_id from {incident_id}")
+        if inc is not None and not self._cites_incident(incident_id, evidence):
+            problems.append(f"cite at least one event_id from {incident_id}")
         known = {c.get("id") for c in self.board_seed}
         reviewed = [str(x) for x in _as_list(reviewed_candidates)]
         bad = [x for x in reviewed if x not in known]

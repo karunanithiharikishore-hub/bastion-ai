@@ -19,10 +19,17 @@ from __future__ import annotations
 import ipaddress
 import json
 import re
+import unicodedata
 
 _IP_RE = re.compile(r"(?<!\d)(?<!\d\.)(?:\d{1,3}\.){3}\d{1,3}(?!\d)(?!\.\d)")
-# Defang markers analysts use: 1.2.3[.]4, evil(.)ru, evil[dot]ru, hxxp://.
-_REFANG_DOT = re.compile(r"[\[({](?:\.|dot)[\])}]", re.I)
+# Defang markers analysts use: 1.2.3[.]4, evil(.)ru, evil[dot]ru, hxxp://, 203[ . ]0.
+_REFANG_DOT = re.compile(r"[\[({]\s*(?:\.|dot)\s*[\])}]", re.I)
+# " dot " as a word: only between label-like tokens, so prose ("the dot product") stays text.
+_REFANG_WORD_DOT = re.compile(r"(?<=[\w-])[ \t]+dot[ \t]+(?=[\w-])", re.I)
+_DOT_TLDS = {"com", "net", "org", "info", "biz", "ru", "cn", "io", "xyz", "top", "su",
+             "cc", "pw", "tk", "ml", "ga", "cf", "gq", "icu", "ws", "de", "uk", "gov", "edu"}
+_IDEO_DOTS = str.maketrans({"。": "."})   # NFKC does not fold ideographic full stop
+_PCT_DOT = re.compile(r"(?<=\w)(?:%2E|\\\.)(?=\w)", re.I)   # bad%2Eru, bad\.ru
 # IPv6 candidates (validated with ipaddress, so "10:22:33" is rejected).
 _IP6_RE = re.compile(r"(?<![\w:.])[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}(?![\w:]|\.\d)")
 _HASH_RE = re.compile(r"(?<![0-9a-fA-F])(?:[a-fA-F0-9]{128}|[a-fA-F0-9]{64}|[a-fA-F0-9]{40}|[a-fA-F0-9]{32})(?![0-9a-fA-F])")
@@ -52,8 +59,22 @@ def _ip6(tok: str) -> str | None:
     return None
 
 
+def _dot_word(m: re.Match) -> str:
+    """Turn a word-form ' dot ' into '.' only when the neighbours look like a host or IP."""
+    s = m.string
+    left = re.search(r"[\w-]+$", s[max(0, m.start() - 64):m.start()])
+    right = re.match(r"[\w-]+", s[m.end():m.end() + 64])
+    l, r = (left.group(0) if left else ""), (right.group(0) if right else "")
+    if r.lower() in _DOT_TLDS or (re.search(r"\d", l) and (re.search(r"\d", r) or re.search(r"[a-z]", l, re.I))):
+        return "."
+    return m.group(0)
+
+
 def _refang(text: str) -> str:
-    return re.sub(r"hxxp", "http", _REFANG_DOT.sub(".", text), flags=re.I)
+    text = unicodedata.normalize("NFKC", text).translate(_IDEO_DOTS)   # fullwidth dots, digits
+    text = _PCT_DOT.sub(".", text)
+    text = _REFANG_WORD_DOT.sub(_dot_word, _REFANG_DOT.sub(".", text))
+    return re.sub(r"hxxp", "http", text, flags=re.I)
 
 
 def _v4(tok: str) -> str | None:

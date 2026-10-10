@@ -169,6 +169,13 @@ _AI = (r"(?:ai|a\.i\.|llm|language\s+model|assistant|analysts?|soc\s+analyst|"
 _OBJ = (r"(?:incident|alert|event|finding|detection|activity|case|log|entry|"
         r"alerts|events|incidents|logs|entries|findings)")
 _CASE_OBJ = r"(?:incident|alert|detection|finding|case)s?"
+# Verdict words a steering line assigns to an object ("mark this incident as benign").
+_VERDICT = (r"(?:benign|safe|harmless|legitimate|false[\s-]+positives?|non-?malicious|"
+            r"not\s+malicious|clean|approved|authori[sz]ed|sanctioned|known[\s-]+good|"
+            r"expected|whitelisted|allowlisted|noise)")
+# What a verdict is assigned to: "this/that/these <noun>", "the <word>", or a pronoun.
+_VERDICT_TARGET = (r"(?:(?:this|that|these|those)\s+(?:\w+\s+)?" + _OBJ +
+                   r"|the\s+\w+(?:\s+\w+)?|this|that|these|those|it|them)")
 
 # (code, category, pattern). Category "steering" is not applied to analyst-
 # written text, because analysts legitimately write "dismiss this incident".
@@ -208,24 +215,23 @@ _PATTERNS = [
         r"\b(?:ai|llm)\s+(?:analyst|agent|assistant|reviewer|model)s?\s*[:,]", re.I)),
     ("dismiss-request", "steering", re.compile(
         r"\b(?:dismiss|ignore|suppress|disregard|whitelist|allowlist)\s+"
-        r"(?:this|the|that|these|those|all)\s+(?:\w+\s+)?" + _OBJ + r"\b", re.I)),
+        r"(?:this|the|that|these|those|all)\s+(?:\w+\s+)?" + _OBJ + r"\b|"
+        r"\bdismiss\s+" + _CASE_OBJ + r"\b", re.I)),
     ("mark-benign", "steering", re.compile(
         r"\b(?:mark|classify|label|flag|treat|report|record|tag|categori[sz]e|consider)\s+"
-        r"(?:this|it|that|these|them|the\s+\w+(?:\s+\w+)?)\s+as\s+(?:an?\s+)?"
-        r"(?:benign|safe|harmless|legitimate|false[\s-]+positive|non-?malicious|"
-        r"not\s+malicious|clean|approved|authori[sz]ed|noise)\b", re.I)),
+        + _VERDICT_TARGET + r"\s+as\s+(?:an?\s+)?" + _VERDICT + r"\b", re.I)),
     ("mark-benign", "steering", re.compile(
-        r"\b(?:mark|classify|label|treat)\s+as\s+(?:an?\s+)?(?:benign|safe|harmless|"
-        r"false[\s-]+positive|non-?malicious|not\s+malicious)\b", re.I)),
+        r"\b(?:mark|classify|label|treat)\s+as\s+(?:an?\s+)?" + _VERDICT + r"\b", re.I)),
     ("suppress-report", "steering", re.compile(
         r"\b(?:do\s+not|don'?t|never)\s+(?:report|flag|escalate|alert\s+on|"
         r"mention|investigate|analy[sz]e)\b", re.I)),
     ("claims-approved", "steering", re.compile(
         r"\b(?:this|the|these)\s+(?:\w+\s+)?" + _CASE_OBJ + r"\s+(?:is|are|was|were)\s+"
-        r"(?:an?\s+|all\s+)?(?:approved|authori[sz]ed|sanctioned|benign|harmless|"
-        r"legitimate|known[\s-]+good|false[\s-]+positives?|not\s+malicious)\b", re.I)),
+        r"(?:(?:an?|all|known)\s+)*" + _VERDICT + r"\b|"
+        r"\bknown[\s-]+false[\s-]+positives?\b", re.I)),
     ("verdict-token", "steering", re.compile(
-        r"\bverdict\s*(?::|=|should\s+be|is)\s*(?:likely[\s-]+)?(?:benign|dismiss\w*)\b", re.I)),
+        r"\bverdict\s*(?::|=|should\s+be|is)\s*(?:likely[\s-]+)?(?:benign|dismiss\w*)\b|"
+        r"\brespond\s+with\s+(?:likely[\s-]+)?(?:benign|dismiss\w*)\b", re.I)),
     ("jailbreak", "jailbreak", re.compile(
         r"\bjailbreak\s+(?:prompt|mode)\b|\bDAN\s+mode\b|\bdo\s+anything\s+now\b", re.I)),
     ("chat-template", "jailbreak", re.compile(
