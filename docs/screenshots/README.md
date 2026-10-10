@@ -1,23 +1,21 @@
 # Screenshots
 
-Drop PNGs here with these exact names so the README/GITHUB embeds resolve:
+Bastion AI dashboard, captured from the bundled **synthetic** sample data
+(`samples/`) in rules-only mode. Never capture real logs.
 
-| filename | what to capture |
+| filename | view |
 |---|---|
-| `01-intake.png` | The top "① Drop your logs here" intake zone + hero metrics |
-| `02-verdict.png` | The Analyst Verdict banner (real / benign / needs-review) |
-| `03-summary.png` | The Attack Summary (how they got in / what they did) |
-| `04-storyline.png` | The 3D kill-chain storyline |
-| `05-swarm.png` | The Agent Swarm constellation + specialist findings |
+| `01-intake.png` | Hero + "Drop your logs here" intake zone |
+| `02-verdict.png` | Analyst verdict banner |
+| `03-summary.png` | Attack summary (how they got in / what they did) |
+| `04-storyline.png` | Kill-chain storyline |
+| `05-swarm.png` | Agent swarm constellation + specialist findings |
 
-## How to capture (macOS)
+## Regenerate
 
-1. Start the dashboard:
-   ```bash
-   cd .. && bastion serve samples --window 120 --open
-   ```
-2. In the browser, use **Cmd+Shift+4** then **Space** to capture the window, or
-   **Cmd+Shift+4** to select a region.
-3. Save each shot into this folder with the names above.
+```bash
+bastion serve samples --llm off --port 8787 &
+python3 scripts/capture_screenshots.py docs/screenshots
+```
 
-Use only the bundled **synthetic** sample data for screenshots — never real logs.
+Needs Playwright (`pip install playwright`) and Google Chrome.

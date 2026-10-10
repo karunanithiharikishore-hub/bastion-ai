@@ -16,6 +16,20 @@ is simpler and often just as good. Bastion AI earns its place when the logs are
 locally-run** analysis with grounding guarantees. See
 [Honest positioning](#honest-positioning-when-to-use-this) below.
 
+## Screenshots
+
+*Bundled synthetic sample data, rules-only mode (`bastion serve samples --llm off`).*
+
+| Drop logs & triage | Analyst verdict |
+|---|---|
+| ![Log intake](docs/screenshots/01-intake.png) | ![Verdict](docs/screenshots/02-verdict.png) |
+
+| Attack summary | Kill-chain storyline |
+|---|---|
+| ![Attack summary](docs/screenshots/03-summary.png) | ![Storyline](docs/screenshots/04-storyline.png) |
+
+![Agent swarm](docs/screenshots/05-swarm.png)
+
 ## Pipeline
 
 Point it at logs from any source — EDR/endpoint, syslog, DNS,

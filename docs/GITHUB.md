@@ -11,8 +11,8 @@
 
 ## Screenshots (paste into README)
 
-Capture the views below into `docs/screenshots/` (see that folder's README for
-names + how-to), then embed:
+The screenshots are in `docs/screenshots/` and already embedded in README.md.
+Regenerate them with `scripts/capture_screenshots.py` (see that folder's README):
 
 ```markdown
 ## Screenshots
