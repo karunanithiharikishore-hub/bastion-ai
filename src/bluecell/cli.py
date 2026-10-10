@@ -16,10 +16,12 @@ Commands:
 from __future__ import annotations
 
 import argparse
+import atexit
 import signal
 import json
 import os
 import sys
+import threading
 
 from . import __version__, provenance
 from .analyzer import analyze
@@ -578,6 +580,17 @@ def main(argv=None) -> int:
             pass
     try:
         return args.func(args)
+    except (KeyboardInterrupt, SystemExit) as exc:
+        code = 130 if isinstance(exc, KeyboardInterrupt) else exc.code
+        # Only for a signal (Ctrl-C, or _terminate's 128+signum): a command's own SystemExit exits normally.
+        interrupted = code in (130, 128 + signal.SIGTERM, 128 + getattr(signal, "SIGHUP", 1))
+        if interrupted and any(t.name.startswith("ThreadPoolExecutor") for t in threading.enumerate()):
+            # An in-flight model call can't be interrupted and the interpreter would join it at exit.
+            # Callers' finally blocks already ran; run atexit (session close) then skip the join.
+            sys.stdout.flush(); sys.stderr.flush()
+            atexit._run_exitfuncs()
+            os._exit(code if isinstance(code, int) else 1)
+        raise
     finally:
         for sig, handler in prev.items():
             if handler is not None:
