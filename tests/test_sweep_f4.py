@@ -41,3 +41,26 @@ def test_cache_hit_of_unsaved_original_run_says_not_saved(tmp_path):
     assert "original run not saved" in out
     assert "gone-run" not in out
     assert "bluecell runs show" not in out
+
+
+def test_store_records_origin_persisted_through_to_report(tmp_path, monkeypatch):
+    from bluecell import cache as run_cache
+    monkeypatch.setenv("BLUECELL_CACHE_DIR", str(tmp_path / "cache"))
+    for persisted, key in ((False, "k-unsaved"), (True, "k-saved")):
+        assert run_cache.store(key, {}, _result(), origin_run_id="orig-run",
+                               origin_persisted=persisted) is not None
+        entry = run_cache.load(key)
+        assert entry["origin_persisted"] is persisted
+        entry["result"]["meta"]["trace"] = {"run_id": "this-run"}   # set by finish() in a real run
+        out = render.render_markdown(run_cache.mark_hit(entry, key, 5))
+        assert ("original run `orig-run`" in out) is persisted
+        assert ("original run not saved" in out) is not persisted
+
+
+def test_run_summary_facts_carry_original_run_persisted():
+    from bluecell import cache as run_cache
+    entry = {"stored_at": "t", "origin_run_id": "gone-run", "origin_persisted": False,
+             "result": _result()}
+    facts = tracing._result_facts(run_cache.mark_hit(entry, "k", 5))
+    assert facts["original_run_id"] == "gone-run"
+    assert facts["original_run_persisted"] is False

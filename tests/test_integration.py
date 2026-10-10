@@ -76,10 +76,12 @@ def test_cache_hit_is_traced_and_links_the_original_run(tmp_path, monkeypatch):
     assert bb.calls == calls
     assert second["meta"]["cache"] == "hit"
     assert second["meta"]["original_run_id"] == first["meta"]["trace"]["run_id"]
+    assert second["meta"]["original_run_persisted"] is True
     assert second["meta"]["trace"]["run_id"] != first["meta"]["trace"]["run_id"]
     assert second["meta"]["trace"]["llm_calls"] == 0
     listed = {r["run_id"]: r for r in tracing.list_runs()}
     assert listed[second["meta"]["trace"]["run_id"]]["cache"] == "hit"
+    assert listed[second["meta"]["trace"]["run_id"]]["original_run_persisted"] is True
     assert "Served from the run cache" in render_markdown(second)
 
 

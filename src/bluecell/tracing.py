@@ -472,7 +472,8 @@ def _result_facts(result: dict) -> dict:
             "backbone": meta.get("backbone"),
             "events": meta.get("events_ingested"),
             "cache": meta.get("cache"),
-            "original_run_id": meta.get("original_run_id")}
+            "original_run_id": meta.get("original_run_id"),
+            "original_run_persisted": meta.get("original_run_persisted")}
 
 
 # ---------------------------------------------------------------------------
