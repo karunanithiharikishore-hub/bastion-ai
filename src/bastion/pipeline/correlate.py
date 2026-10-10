@@ -27,6 +27,24 @@ def _is_shared_noise_ip(val) -> bool:
     return a.is_loopback or a.is_unspecified or a.is_link_local
 
 
+def _is_ip(val) -> bool:
+    try:
+        ipaddress.ip_address(str(val))
+        return True
+    except ValueError:
+        return False
+
+
+def _one_spelling(key, values) -> set:
+    """Collapse spellings of the same host/user (see _same_entity), keeping the longest (most specific)."""
+    best: dict = {}
+    for v in values:
+        k = _same_entity(key, v)
+        if len(v) > len(best.get(k, "")):
+            best[k] = v
+    return set(best.values())
+
+
 def _is_public_ip(val) -> bool:
     """Routable IPs are attacker infrastructure; many hosts hitting one is the signal, not noise."""
     try:
@@ -84,11 +102,11 @@ class Incident:
 
     @property
     def hosts(self) -> set:
-        return {e.host for e in self.events if e.host}
+        return _one_spelling("host", (e.host for e in self.events if e.host))
 
     @property
     def users(self) -> set:
-        return {e.user for e in self.events if e.user}
+        return _one_spelling("user", (e.user for e in self.events if e.user))
 
     @property
     def max_severity(self) -> int:
@@ -127,6 +145,17 @@ class _DSU:
             self.p[rb] = ra
 
 
+def _same_entity(key, val) -> str:
+    """One spelling per host/user: "FIN-SRV01.corp.local" == "fin-srv01", "CORP\\bob" == "bob@corp.local" == "bob".
+    shortcut: same short name in two domains merges; keep FQDNs if a fleet reuses short names."""
+    v = str(val).strip().lower()
+    if key == "host" and not _is_ip(v):
+        return v.split(".", 1)[0]
+    if key == "user":
+        return v.rsplit("\\", 1)[-1].split("@", 1)[0]
+    return v
+
+
 def correlate(events: list, window_minutes: int = 60,
               min_events: int = 2) -> list:
     """Return a list of Incidents, highest score first.
@@ -147,7 +176,9 @@ def correlate(events: list, window_minutes: int = 60,
     def _token(key, val):
         # An IP is the same entity whether it is the source or destination
         # (attacker IP as SSH source, then as a firewall destination).
-        return ("ip" if key in ("src_ip", "dst_ip") else key, str(val).lower())
+        if key in ("src_ip", "dst_ip"):
+            return ("ip", str(val).lower())
+        return (key, _same_entity(key, val))
 
     # One pass: distinct hosts per ip/user value, to spot hubs (shared resolvers, gateways).
     hosts_of: dict = {}
@@ -155,7 +186,7 @@ def correlate(events: list, window_minutes: int = 60,
         if ev.host:
             for key, val in ev.entities().items():
                 if key in ("src_ip", "dst_ip", "user"):
-                    hosts_of.setdefault(_token(key, val), set()).add(ev.host.lower())
+                    hosts_of.setdefault(_token(key, val), set()).add(_same_entity("host", ev.host))
 
     last_seen: dict = {}  # (entity_key, value) -> index
     for i, ev in enumerate(events):

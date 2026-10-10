@@ -555,3 +555,10 @@ body[data-threat="malicious"] { --tint: color-mix(in srgb, var(--crit) 16%, tran
 body[data-threat="review"] { --tint: color-mix(in srgb, var(--med) 14%, transparent); --threat: var(--med); }
 body[data-threat="benign"] { --tint: color-mix(in srgb, var(--low) 12%, transparent); --threat: var(--low); }
 body[data-threat] #hc-verdict { color: var(--threat); font-weight: 600; }
+
+/* prompt-injection warning inside the verdict card */
+.vinject { margin-top: 14px; padding: 10px 14px; border: 1px solid #e5a23a; border-radius: 10px;
+  background: rgba(229, 162, 58, .10); }
+.vinject-h { font-weight: 700; color: #e5a23a; font-size: 13px; letter-spacing: .02em; }
+.vinject-ev { margin-top: 6px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--ink);
+  overflow-wrap: anywhere; }

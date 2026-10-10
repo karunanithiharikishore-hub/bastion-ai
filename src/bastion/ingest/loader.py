@@ -581,7 +581,8 @@ def ingest_path(path: str, override: Optional[str] = None) -> list:
                 if fname == "expected.json" and _is_eval_label(os.path.join(root, fname)):
                     continue   # an eval case's label file, not a log
                 if os.path.splitext(fname)[1].lower() in (
-                    ".json", ".jsonl", ".ndjson", ".csv", ".tsv", ".log", ".txt", ".syslog", ".gz", ".xml"
+                    ".json", ".jsonl", ".ndjson", ".csv", ".tsv", ".log", ".txt", ".syslog", ".gz", ".xml",
+                    ".cef", ".leef",   # text formats parse_text_line already handles
                 ):
                     fpath = os.path.join(root, fname)
                     try:

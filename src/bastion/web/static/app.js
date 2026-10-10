@@ -87,6 +87,11 @@ function addFiles(fileList) {
     }
     const reader = new FileReader();
     reader.onload = () => {
+      // The exact same file picked again is skipped; only different files sharing a name get " (2)".
+      if ([...pending.values()].some((p) => p.size === file.size && p.content === reader.result)) {
+        toast(esc(file.name) + " is already staged");
+        done++; if (done === arr.length) renderFileList(); return;
+      }
       const name = uniqueName(file.name);
       const bytes = uploadBodyBytes(name, reader.result);
       if (bytes > MAX_UPLOAD_BYTES) overCap(bytes);
@@ -103,7 +108,8 @@ function addFiles(fileList) {
   const dz = $("dropzone"), pick = $("filepick");
   $("browse").addEventListener("click", (e) => { e.stopPropagation(); pick.click(); });
   dz.addEventListener("click", () => pick.click());
-  pick.addEventListener("change", () => addFiles(pick.files));
+  // Clear the picker after reading so re-picking the same file (e.g. after removing it) fires "change" again.
+  pick.addEventListener("change", () => { const files = Array.from(pick.files); pick.value = ""; addFiles(files); });
   ["dragenter", "dragover"].forEach((ev) => dz.addEventListener(ev, (e) => {
     e.preventDefault(); dz.classList.add("drag"); }));
   ["dragleave", "drop"].forEach((ev) => dz.addEventListener(ev, (e) => {
@@ -233,6 +239,18 @@ function renderVerdict(r) {
   const ul = el("ul", "vchecks");
   (v.recommended_checks || []).forEach((c) => ul.appendChild(el("li", null, esc(c))));
   host.appendChild(ul);
+  // Log text written to steer an AI analyst is evidence of an attacker, not an instruction: show it.
+  const pi = r.prompt_injection || {};
+  if (pi.count) {
+    const box = el("div", "vinject");
+    box.setAttribute("role", "alert");
+    box.appendChild(el("div", "vinject-h", "PROMPT-INJECTION ATTEMPT · " + pi.count
+      + " log event(s) contain text aimed at an AI analyst. Treated as untrusted data, never as instructions."));
+    (pi.events || []).slice(0, 3).forEach((e) => box.appendChild(el("div", "vinject-ev",
+      esc((e.ts || "").replace("T", " ").slice(0, 19) + " · " + (e.source || "") + " · " + (e.host || "?")
+        + " — \u201c" + (e.excerpt || "").slice(0, 160) + "\u201d"))));
+    host.appendChild(box);
+  }
 }
 
 /* ================= attack summary ================= */

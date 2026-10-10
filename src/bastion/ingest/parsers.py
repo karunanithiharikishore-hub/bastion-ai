@@ -953,7 +953,12 @@ def parse_text_line(line: str, state: dict) -> "Event | None | bool":
         name = _CEF_UNESC.sub(r"\1", m["name"])
         act = k.get("act") or name
         auth = bool(k.get("suser")) and re.search(r"log(?:in|on)|auth", name, re.I)
-        return Event(ts=k.get("rt"), source="syslog", category="authentication" if auth else "network",
+        f = _FRAME_RE.match(line)   # "Oct 05 02:31:00 fw01 CEF:..." carries ts/host in the syslog frame
+        ts = k.get("rt") or k.get("end") or k.get("start") or (_syslog_ts(f.group("ts")) if f else None)
+        traffic = not auth and (k.get("src") or k.get("dst"))
+        return Event(ts=ts, source="firewall" if traffic else "syslog",
+                     category="authentication" if auth else "network",
+                     host=k.get("dvchost") or (f.group("host") if f else None),
                      action=act, message=line[:500], user=k.get("suser"), src_ip=k.get("src"),
                      dst_ip=k.get("dst"), src_port=_port(k.get("spt")), dst_port=_port(k.get("dpt")))
     if (m := _AUDIT_RE.match(line)):

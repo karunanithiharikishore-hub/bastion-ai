@@ -83,9 +83,11 @@ def extract_iocs(events: list) -> dict:
                 suspicious["hash"].add(h)
         if ev.process and flagged:
             buckets["process"][ev.process] += 1
+            note_host("process", ev.process, ev.host)
             suspicious["process"].add(ev.process)
         if ev.user and flagged:
             buckets["user"][ev.user] += 1
+            note_host("user", ev.user, ev.host)
             suspicious["user"].add(ev.user)
 
     out: dict = {}
@@ -138,7 +140,7 @@ def hunt_checklist(incidents: list, iocs: dict) -> list:
         if inc.score() >= 50:
             checks.append({
                 "priority": inc.severity_label(),
-                "action": f"Validate incident {inc.id} on hosts {sorted(inc.hosts) or ['n/a']}",
+                "action": f"Validate incident {inc.id} on hosts {', '.join(sorted(inc.hosts)) or 'n/a'}",
                 "targets": sorted(inc.hosts),
                 "why": f"Score {inc.score()}/100 across tactics: {sorted(inc.tactics) or ['n/a']}.",
             })

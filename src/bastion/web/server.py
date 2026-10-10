@@ -144,7 +144,8 @@ class _State:
             return self.results.get(result_id)
 
     # ---- staged upload (scales to many / large files) ----------------------
-    _ALLOWED_EXT = (".json", ".jsonl", ".ndjson", ".csv", ".log", ".txt", ".syslog")
+    _ALLOWED_EXT = (".json", ".jsonl", ".ndjson", ".csv", ".tsv", ".log", ".txt", ".syslog",
+                    ".xml", ".cef", ".leef")   # keep in step with ingest_path
     _MAX_STEM = 150
 
     def _safe_name(self, name):

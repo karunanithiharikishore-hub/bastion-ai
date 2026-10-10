@@ -14,6 +14,7 @@ Two layers:
 from __future__ import annotations
 
 from ..pipeline.attack import ATTACK_TECHNIQUES, _FAIL_RE, _is_auth_success, _is_private
+from ..pipeline.correlate import _one_spelling
 from ..agents.injection import BOUNDARY_INSTRUCTION, Envelope, INJECTION_TAG
 
 
@@ -321,8 +322,8 @@ def deterministic_storyline(inc) -> dict:
             "count": len({id(e) for e, _t in evs}),   # events, not (event, technique) pairs
             "example": evs[0][0].compact(),
             "events": samples,
-            "hosts": sorted({e.host for e, _t in evs if e.host}),
-            "users": sorted({e.user for e, _t in evs if e.user}),
+            "hosts": sorted(_one_spelling("host", (e.host for e, _t in evs if e.host))),
+            "users": sorted(_one_spelling("user", (e.user for e, _t in evs if e.user))),
         })
 
     objective = "unknown"

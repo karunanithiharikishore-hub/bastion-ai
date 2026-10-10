@@ -31,3 +31,11 @@ def test_doctype_entity_file_is_refused(tmp_path, capsys):
     p.write_text(bomb)
     assert ingest_file(str(p)) == []
     assert "refused" in capsys.readouterr().err
+
+
+def test_directory_walk_ingests_cef_files(tmp_path):
+    from bastion.ingest import ingest_path
+    (tmp_path / "fw.cef").write_text(
+        "Oct 05 02:31:00 fw01 CEF:0|PaloAlto|PAN-OS|10.2|TRAFFIC|end|3|src=10.20.1.15 dst=203.0.113.77 dpt=443 act=allow\n")
+    evs = ingest_path(str(tmp_path))
+    assert len(evs) == 1 and evs[0].dst_ip == "203.0.113.77"

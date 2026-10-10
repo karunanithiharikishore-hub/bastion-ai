@@ -43,3 +43,14 @@ def test_file_hash_field_still_yields_hash_ioc():
     ev.attack.append("T1059")
     hashes = extract_iocs([ev])["hash"]
     assert [x["value"] for x in hashes] == [h] and hashes[0]["suspicious"] is True
+
+
+def test_process_and_user_iocs_carry_hosts():
+    from datetime import datetime, timezone
+    from bastion.models import Event
+    from bastion.pipeline.ioc import extract_iocs
+    ev = Event(ts=datetime(2026, 10, 5, tzinfo=timezone.utc), source="edr", category="process",
+               action="x", message="mimikatz", host="FIN-SRV01", user="administrator", process="mimikatz.exe")
+    ev.attack = ["T1003"]
+    io = extract_iocs([ev])
+    assert io["process"][0]["hosts"] == ["FIN-SRV01"] and io["user"][0]["hosts"] == ["FIN-SRV01"]
