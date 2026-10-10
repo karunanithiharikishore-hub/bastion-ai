@@ -97,6 +97,7 @@ class _State:
         self.result = None       # last *good* result (failures never clear it)
         self.results = OrderedDict()   # result_id -> result, bounded
         self.error = None
+        self.warm_done = threading.Event(); self.warm_done.set()  # cleared while startup analysis runs
         self.stages = OrderedDict()    # token -> [dir, count]; "" = default slot
         self.stage_lock = threading.Lock()  # guards stages/inflight only; never held during analysis
         self.inflight = set()          # staged dirs under analysis, removed by close() too
@@ -136,6 +137,9 @@ class _State:
         return res
 
     def run_analysis(self) -> dict:
+        if not self.warm_done.is_set():  # startup run in flight: share its result, no second paid run
+            self.warm_done.wait()
+            return self.result
         with self.lock:
             return self._run(self.paths, self.window)
 
@@ -385,7 +389,9 @@ def _make_handler(state: _State):
             path = route.path
             if path == "/api/report":  # read-only: analysis starts only via POST /api/refresh
                 res = state.result
-                if res is None:
+                if res is None and not state.warm_done.is_set():
+                    self._json({"pending": True}, 202)
+                elif res is None:
                     self._json({"error": state.error or "no analysis yet: POST /api/refresh"}, 404)
                 else:
                     self._json(res)
@@ -548,7 +554,16 @@ def serve(paths, host="127.0.0.1", port=8787, window=60, llm_mode="off",
     except OSError as exc:
         print(f"[bastion] cannot listen on {host}:{port}: {exc}", file=sys.stderr)
         return None
-    state.run_analysis()  # warm the cache at startup
+    def _warm():  # serve immediately; a slow AI swarm must not block the socket
+        try:
+            with state.lock:  # not run_analysis(): that would wait on warm_done, i.e. on itself
+                state._run(state.paths, state.window)
+            if state.error:
+                print(f"[bastion] WARNING: initial analysis error: {state.error}")
+        finally:
+            state.warm_done.set()
+    state.warm_done.clear()
+    threading.Thread(target=_warm, daemon=True).start()
     url = f"http://[{host}]:{port}" if ":" in host else f"http://{host}:{port}"
     print(provenance.banner())
     print(f"\n[bastion] dashboard serving at {url}")
@@ -558,8 +573,6 @@ def serve(paths, host="127.0.0.1", port=8787, window=60, llm_mode="off",
               "upload logs. Use only on a trusted network (Host allowed: "
               f"{', '.join(sorted(allow))}; add more with --allow-host).", file=sys.stderr)
     print(f"[bastion] analyzing: {paths}  (window={window}m, llm={state.llm_mode})")
-    if state.error:
-        print(f"[bastion] WARNING: initial analysis error: {state.error}")
     if open_browser:
         try:
             import webbrowser

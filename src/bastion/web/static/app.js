@@ -497,7 +497,7 @@ async function downloadIR() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = fname; document.body.appendChild(a); a.click();
-    a.remove(); URL.revokeObjectURL(url);
+    a.remove(); setTimeout(() => URL.revokeObjectURL(url), 10000);   // revoking at once can cancel it in Safari/Firefox
     toast("IR report downloaded");
   } catch (e) { toast("report failed: " + esc(e.message || e)); }
   finally { btn.disabled = false; }
@@ -506,7 +506,15 @@ async function downloadIR() {
 
 // On first open, show whatever the server was launched with (samples), so the
 // deck isn't empty, but the drop zone is the primary call to action.
-load("/api/report").then(d => d || load("/api/refresh", { method: "POST" })); // GET no longer analyzes
+(async function boot() {  // startup analysis may still be running: poll until GET /api/report stops answering 202
+  let waited = false;
+  while ((await fetch("/api/report").then(r => r.status, () => 0)) === 202) {
+    waited = true; $("status").innerHTML = '<span class="spinner"></span> startup analysis in progress…';
+    await new Promise(r => setTimeout(r, 2000));
+  }
+  if (waited) $("status").textContent = "";
+  load("/api/report").then(d => d || load("/api/refresh", { method: "POST" })); // GET no longer analyzes
+})();
 
 
 /* ================= hero shortcuts ================= */
