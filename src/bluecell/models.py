@@ -159,6 +159,17 @@ def _flat(value: Any) -> str:
                    for c in str(value))
 
 
+def _port(v: Any) -> Optional[int]:
+    """0-65535 as int; anything else ("https", -1, 70000, True, 1.5) -> None."""
+    if isinstance(v, bool) or isinstance(v, float) and not v.is_integer():
+        return None
+    try:
+        n = int(str(v).strip()) if isinstance(v, str) else int(v)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return n if 0 <= n <= 65535 else None
+
+
 @dataclass
 class Event:
     """One normalized security event."""
@@ -181,6 +192,8 @@ class Event:
     # Populated by later stages:
     attack: list = field(default_factory=list)   # list of ATT&CK technique ids
     tags: list = field(default_factory=list)
+    src_port: Optional[int] = None   # last: positional callers and old pickles keep working
+    dst_port: Optional[int] = None
 
     def __post_init__(self) -> None:
         parsed = _parse_ts_or_none(self.ts)
@@ -200,6 +213,7 @@ class Event:
                 else:
                     val = val.strip()
                 setattr(self, name, val or None)
+        self.src_port, self.dst_port = _port(self.src_port), _port(self.dst_port)
         self.message = "" if self.message is None else str(self.message)
         self.action = str(self.action or "event")
         self.source = str(self.source or "unknown")
@@ -250,12 +264,14 @@ class Event:
             ("h", self.host),
             ("u", self.user),
             ("s", self.src_ip),
+            ("sp", self.src_port),
             ("d", self.dst_ip),
+            ("dp", self.dst_port),
             ("dom", self.domain),
             ("proc", self.process),
             ("hash", self.file_hash),
         ):
-            if val:
+            if val is not None and val != "":
                 parts.append(f"{label}={_flat(val)}")
         if self.attack:
             parts.append("att=" + ",".join(_flat(a) for a in self.attack))

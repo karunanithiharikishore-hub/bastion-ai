@@ -195,6 +195,8 @@ def parse_edr(r: dict) -> Optional[Event]:
         file_hash=_get(r, "sha256", "hash", "file_hash", "sha1", "md5"),
         src_ip=src_ip,
         dst_ip=dst_ip,
+        src_port=_get(r, "LocalPort") if net else None,
+        dst_port=_get(r, "RemotePort") if net else None,
         domain=_get(r, "RemoteUrl"),
         raw=r,
     )
@@ -242,6 +244,8 @@ def parse_network(r: dict) -> Optional[Event]:
         process=_get(r, "InitiatingProcessFileName"),
         src_ip=src_ip,
         dst_ip=dst_ip,
+        src_port=_get(r, "src_port", "source_port", "sport", "source port", "LocalPort"),
+        dst_port=_get(r, "dst_port", "dest_port", "destination_port", "dport", "destination port", "port", "RemotePort"),
         domain=_get(r, "RemoteUrl"),
         raw=r,
     )
@@ -384,14 +388,19 @@ _ASA_ID_RE = re.compile(r"%ASA-\d-(\d{6}):")
 # except 106100's "outside/X(p) -> inside/Y(p)".
 _ASA_CONN = {"106001": "deny", "106006": "deny", "106007": "deny", "106014": "deny", "106015": "deny",
              "106021": "deny", "106100": None, "710003": "deny", "305011": "allow", "305012": "connection"}
-_ASA_EP_RE = re.compile(r"\b(?:from|src)\s+(?:[A-Za-z][\w-]*:)?(?P<s>[\w.:]+?)(?:/(?P<sp>\d+))?\s+(?:to|dst)\s+"
-                        r"(?:[A-Za-z][\w-]*:)?(?P<d>[\w.:]+?)(?:/(?P<dp>\w+))?(?=[\s(]|$)")
+_ASA_EP_RE = re.compile(r"\b(?:from|src)\s+(?P<s>\S+?)(?:/(?P<sp>\d+))?\s+(?:to|dst)\s+"
+                        r"(?P<d>\S+?)(?:/(?P<dp>\w+))?(?=[\s(]|$)")
 _ASA_106100_RE = re.compile(r"\S+?/(?P<s>[\w.:]+)\(\d+\)\s+->\s+\S+?/(?P<d>[\w.:]+)\((?P<dp>\d+)\)")
 # AAA / login ids -> authentication events, so attack.py's failure (T1110) rule applies.
 _ASA_AUTH = {"113004": "login_success", "113005": "login_failed", "113015": "login_failed",
              "605004": "login_failed", "605005": "login_success", "611101": "login_success", "611102": "login_failed"}
 _ASA_USER_RE = re.compile(r'(?:\buser\s*=\s*|\bfor user "|\bUname:\s*)(?P<u>[^\s:,"]+)')
 _ASA_CIP_RE = re.compile(r"(?:user IP\s*=\s*|IP address:\s*|\bfrom\s+)(?P<ip>[\w.:]+)")
+
+
+def _asa_ip(tok: str) -> Optional[str]:
+    """ASA endpoint token 'iface:ip' or 'ip' -> ip. Try the whole token first so 'fe80::5' is not cut at 'fe80:'."""
+    return _clean_ip(tok) or _clean_ip(tok.split(":", 1)[-1])
 
 
 def _vendor_firewall(line: str) -> Optional[Event]:
@@ -404,18 +413,19 @@ def _vendor_firewall(line: str) -> Optional[Event]:
     aid = _ASA_ID_RE.search(body)
     aid = aid.group(1) if aid else None
     if "srcip" in kv or "dstip" in kv:
-        r.update(src_ip=kv.get("srcip"), dst_ip=kv.get("dstip"), dst_port=kv.get("dstport"),
+        r.update(src_ip=kv.get("srcip"), dst_ip=kv.get("dstip"), src_port=kv.get("srcport"), dst_port=kv.get("dstport"),
                  action=kv.get("action") or "connection", host=kv.get("devname") or r.get("host"))
         if kv.get("date") and kv.get("time"):
             r["ts"] = f"{kv['date']} {kv['time']}"
     elif a:
-        r.update(src_ip=a.group("s"), dst_ip=a.group("d"), dst_port=a.group("dp"),
+        r.update(src_ip=a.group("s"), dst_ip=a.group("d"), src_port=a.group("sp"), dst_port=a.group("dp"),
                  action={"deny": "deny", "built": "allow"}.get(a.group("act").lower(), "connection"))
     elif aid in _ASA_CONN:
         ep = _ASA_EP_RE.search(body) or _ASA_106100_RE.search(body)
         if not ep:
             return None
-        r.update(src_ip=ep.group("s"), dst_ip=ep.group("d"), dst_port=ep.group("dp"),
+        r.update(src_ip=_asa_ip(ep.group("s")), dst_ip=_asa_ip(ep.group("d")),
+                 src_port=ep.groupdict().get("sp"), dst_port=ep.group("dp"),
                  action=_ASA_CONN[aid] or ("deny" if "denied" in body else "allow"))
     elif aid in _ASA_AUTH:
         um, im = _ASA_USER_RE.search(body), _ASA_CIP_RE.search(body)

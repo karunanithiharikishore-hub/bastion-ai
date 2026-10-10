@@ -178,6 +178,7 @@ TOOL_SPECS = [
                     "substring match over the message and all fields. Times are ISO-8601.",
      "input_schema": _obj({"text": _STR, "source": _STR, "host": _STR, "user": _STR,
                            "ip": dict(_STR, description="matches src_ip or dst_ip"),
+                           "dst_port": _INT,
                            "domain": _STR, "process": _STR, "action": _STR,
                            "technique": dict(_STR, description="ATT&CK id, e.g. T1059"),
                            "min_severity": dict(_INT, description="0-4"),
@@ -446,7 +447,7 @@ class SecurityToolbox:
             **self._injection_note(inc.events),
         }
 
-    def t_search_events(self, text=None, source=None, host=None, user=None, ip=None,
+    def t_search_events(self, text=None, source=None, host=None, user=None, ip=None, dst_port=None,
                         domain=None, process=None, action=None, technique=None,
                         min_severity=None, start=None, end=None, limit=40):
         lo, hi = self._ts(start, "start"), self._ts(end, "end", end_of_day=True)
@@ -469,6 +470,7 @@ class SecurityToolbox:
             if host and host not in (e.host or "").lower(): continue
             if user and user not in (e.user or "").lower(): continue
             if ip and ip not in ((e.src_ip or "").lower(), (e.dst_ip or "").lower()): continue
+            if dst_port is not None and e.dst_port != _as_int(dst_port, None): continue
             if domain and domain not in (e.domain or "").lower(): continue
             if process and process not in (e.process or "").lower(): continue
             if action and action not in (e.action or "").lower(): continue

@@ -26,7 +26,7 @@ def _dedup_with_counts(events: list) -> list:
         # the first occurrence's line (with its time) as representative. It
         # covers every field compact() prints, so a collapsed line never hides
         # a different IP/process/hash behind the representative's value.
-        sig = (f"{ev.source}|{ev.action}|{ev.host}|{ev.user}|{ev.src_ip}|{ev.dst_ip}|"
+        sig = (f"{ev.source}|{ev.action}|{ev.host}|{ev.user}|{ev.src_ip}|{ev.src_port}|{ev.dst_ip}|{ev.dst_port}|"
                f"{ev.domain}|{ev.process}|{ev.file_hash}|{','.join(ev.attack)}")
         counts[sig] = counts.get(sig, 0) + 1
         representative.setdefault(sig, ev)

@@ -48,6 +48,19 @@ CASES = [
      "authentication", "login_success", "203.0.113.5", None, None, "admin"),
     ("%ASA-6-611102: User authentication failed: IP address: 203.0.113.5, Uname: admin",
      "authentication", "login_failed", "203.0.113.5", None, None, "admin"),
+    # IPv6: 106001 and 106014 carry no interface before a letter-led address (fe80::...), which the endpoint regex swallowed
+    ("%ASA-2-106001: Inbound TCP connection denied from fe80::5/4444 to fe80::10/22 flags SYN  on interface outside",
+     "network", "deny", "fe80::5", "fe80::10", "22", None),
+    ("%ASA-3-106014: Deny inbound icmp src outside:fe80::5 dst inside:fe80::10 (type 8, code 0)",
+     "network", "deny", "fe80::5", "fe80::10", None, None),
+    ("%ASA-4-106023: Deny tcp src outside:2001:db8::5/4444 dst inside:2001:db8:1::10/22 by access-group \"OUT\"",
+     "network", "deny", "2001:db8::5", "2001:db8:1::10", "22", None),
+    ("%ASA-6-302013: Built inbound TCP connection 1 for outside:2001:db8::5/4444 (2001:db8::5/4444) to inside:2001:db8:1::10/22 (2001:db8:1::10/22)",
+     "network", "allow", "2001:db8::5", "2001:db8:1::10", "22", None),
+    ("%ASA-6-113005: AAA user authentication Rejected : reason = Invalid password : local database : user = admin : user IP = 2001:db8::5",
+     "authentication", "login_failed", "2001:db8::5", None, None, "admin"),
+    ("%ASA-6-611102: User authentication failed: IP address: fe80::5, Uname: admin",
+     "authentication", "login_failed", "fe80::5", None, None, "admin"),
 ]
 
 
