@@ -185,7 +185,8 @@ _TACTIC_ORDER = [
 ]
 
 
-def apply_tier2_verdict(rule_verdict: dict, tier2: dict, injection_events=None) -> dict:
+def apply_tier2_verdict(rule_verdict: dict, tier2: dict, injection_events=None,
+                        who="Tier-2 analyst", decided_by="tier2-agent") -> dict:
     """Replace the rule-based verdict with the Tier-2 agent's decision.
 
     ``tier2`` is the Tier-2 finding dict (status escalated|dismissed). The rule
@@ -199,7 +200,7 @@ def apply_tier2_verdict(rule_verdict: dict, tier2: dict, injection_events=None) 
     note = None
     if not confirmed and injection_events:
         level = "needs-review"
-        headline = ("Tier-2 analyst dismissed this incident, but its logs contain a "
+        headline = (f"{who} dismissed this incident, but its logs contain a "
                     "prompt-injection attempt. A human must review the dismissal.")
         note = (f"Downgraded from likely-benign: {len(injection_events)} event(s) in this "
                 f"incident ({', '.join(injection_events[:5])}) contain text written to "
@@ -212,12 +213,12 @@ def apply_tier2_verdict(rule_verdict: dict, tier2: dict, injection_events=None) 
         ] + list(_ATTACK_CHECKS[:2])
     elif confirmed:
         level = "likely-malicious"
-        headline = "Tier-2 analyst confirmed a real attack. Investigate now."
+        headline = f"{who} confirmed a real attack. Investigate now."
         checks = (rule_verdict.get("recommended_checks")
                   if rule_verdict.get("level") == "likely-malicious" else list(_ATTACK_CHECKS))
     else:
         level = "likely-benign"
-        headline = "Tier-2 analyst dismissed this as benign after reviewing the evidence."
+        headline = f"{who} dismissed this as benign after reviewing the evidence."
         checks = [
             "Close the incident without escalation.",
             "Review the detection rules that flagged it; they over-scored this activity.",
@@ -229,7 +230,7 @@ def apply_tier2_verdict(rule_verdict: dict, tier2: dict, injection_events=None) 
         "headline": headline,
         "why": tier2.get("rationale", ""),
         "recommended_checks": checks,
-        "decided_by": "tier2-agent",
+        "decided_by": decided_by,
         **({"votes": tier2["votes"]} if tier2.get("votes") else {}),
         "overrides_rules": level != rule_verdict.get("level"),
         "rule_verdict": {k: rule_verdict.get(k) for k in ("level", "confidence", "headline")},

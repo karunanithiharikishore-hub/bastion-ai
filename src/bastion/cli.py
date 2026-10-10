@@ -128,6 +128,7 @@ def cmd_analyze(args) -> int:
         max_agents=args.max_agents,
         max_commander_turns=args.max_commander_turns,
         budget_seconds=args.budget_seconds,
+        mode=args.mode,
     )
     if not result["meta"]["events_ingested"]:
         print("[bastion] warning: 0 events ingested; nothing was analysed. "
@@ -283,7 +284,7 @@ def cmd_serve(args) -> int:
           orchestration=args.orchestration, votes=args.votes,
           tier1_model=args.model_tier1, allow_host=args.allow_host,
           max_agents=args.max_agents, max_commander_turns=args.max_commander_turns,
-          budget_seconds=args.budget_seconds)
+          budget_seconds=args.budget_seconds, mode=args.mode)
     return 0 if httpd is not None else 2
 
 
@@ -488,6 +489,9 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--max-incidents", type=_positive_int, default=10, dest="max_incidents")
     a.add_argument("--no-agents", action="store_true", dest="no_agents",
                    help="Skip the agent swarm (pipeline only)")
+    a.add_argument("--mode", choices=["quick", "deep"], default="deep",
+                   help="quick = rules + one AI analyst pass, no agent swarm (~20-60 s); "
+                        "deep = commander + agent swarm + analyst (default; minutes)")
     a.add_argument("--llm", choices=["auto", "cli", "api", "off"], default="auto",
                    help="LLM backbone mode (default auto; 'off' = deterministic)")
     a.add_argument("--model", type=_model_id, default="claude-sonnet-5", help="Claude model")
@@ -560,6 +564,9 @@ def build_parser() -> argparse.ArgumentParser:
     sv.add_argument("--host", default="127.0.0.1", help="Bind host (default 127.0.0.1)")
     sv.add_argument("--port", type=_port, default=8787, help="Port 1-65535 (default 8787)")
     sv.add_argument("--window", type=_window, default=60, help="Correlation window minutes")
+    sv.add_argument("--mode", choices=["quick", "deep"], default="quick",
+                    help="Default analysis mode for the dashboard (quick; the DEEP INVESTIGATION "
+                         "button always runs deep)")
     sv.add_argument("--llm", choices=["auto", "cli", "api", "off"], default="off",
                     help="LLM backbone for RCA/agents (default off for speed)")
     sv.add_argument("--model", type=_model_id, default="claude-sonnet-5")

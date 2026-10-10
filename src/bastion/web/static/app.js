@@ -62,7 +62,7 @@ function renderFileList() {
   updateAnalyzeBtn();
 }
 function updateAnalyzeBtn() {
-  $("analyze").disabled = pending.size === 0;
+  $("analyze").disabled = $("deep").disabled = pending.size === 0;
   $("status").textContent = pending.size ? `${pending.size} file(s) staged` : "";
 }
 
@@ -118,7 +118,8 @@ function addFiles(fileList) {
     const items = e.dataTransfer;
     if (items && items.files && items.files.length) addFiles(items.files);
   });
-  $("analyze").addEventListener("click", analyzeUploads);
+  $("analyze").addEventListener("click", () => analyzeUploads("quick"));
+  $("deep").addEventListener("click", () => analyzeUploads("deep"));
   $("loadsample").addEventListener("click", () => { pending.clear(); renderFileList();
     $("status").innerHTML = '<span class="spinner"></span> loading sample…'; load("/api/refresh", { method: "POST" }); });
 })();
@@ -131,9 +132,9 @@ async function postJSON(url, obj) {
   return data;
 }
 
-async function analyzeUploads() {
+async function analyzeUploads(mode) {
   if (!pending.size) return;
-  $("analyze").disabled = true;
+  $("analyze").disabled = $("deep").disabled = true;
   const win = parseInt($("window").value, 10) || 120;
   const files = Array.from(pending.values());
   try {
@@ -146,14 +147,16 @@ async function analyzeUploads() {
       $("status").innerHTML = `<span class="spinner"></span> uploading ${i}/${files.length}: ${esc(f.name)}`;
       await postJSON("/api/stage/add", { token, name: f.name, content: f.content });
     }
-    $("status").innerHTML = '<span class="spinner"></span> analyzing ' + files.length + ' file(s)…';
-    const data = await postJSON("/api/stage/run", { token, window: win });
+    $("status").innerHTML = '<span class="spinner"></span> ' + (mode === "deep"
+      ? "deep investigation: AI agent team, takes several minutes…" : "quick analysis…")
+      + " (" + files.length + " file(s))";
+    const data = await postJSON("/api/stage/run", { token, window: win, mode });
     await mergeMetaAndRender(data);
-    $("status").textContent = "analysis complete";
+    $("status").textContent = (mode === "deep" ? "deep investigation" : "quick analysis") + " complete";
     toast("Analyzed " + files.length + " file(s)");
   } catch (e) {
     toast(esc(e.message || e)); $("status").textContent = "error: " + (e.message || e);
-  } finally { $("analyze").disabled = false; }
+  } finally { $("analyze").disabled = $("deep").disabled = pending.size === 0; }
 }
 
 /* ================= count-up ================= */
@@ -184,7 +187,7 @@ function renderHero(r) {
       if (k < 1) requestAnimationFrame(s); })(t0); })();
   host.appendChild(metric(m.events_ingested ?? 0, "Events Ingested", ""));
   host.appendChild(metric((r.incidents || []).length, "Incidents", "g"));
-  $("backbone").textContent = "backbone: " + (m.backbone || "unknown");
+  $("backbone").textContent = "backbone: " + (m.backbone || "unknown") + (m.mode ? " · " + m.mode + " mode" : "");
   $("hc-backbone").textContent = (m.backbone || "unknown").split(" ")[0];
   $("hc-agents").textContent = esc(agents) + " deployed";
   $("ver").textContent = "v" + (m.version || "");

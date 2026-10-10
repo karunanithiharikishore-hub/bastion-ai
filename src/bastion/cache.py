@@ -312,7 +312,9 @@ def uncacheable_reason(result: dict, backbone) -> str | None:
             if isinstance(ai.get(part), dict) and "raw" in ai[part]:
                 return f"AI analyst {part} was not valid JSON"
     for block in result.get("incidents") or []:
-        if (block.get("storyline") or {}).get("narrative_source") != "llm":
+        # quick mode builds rule storylines on purpose; its model work is the AI analyst
+        if (result.get("meta") or {}).get("mode") != "quick" and \
+                (block.get("storyline") or {}).get("narrative_source") != "llm":
             return f"LLM narrative for {block.get('id')} failed"
     return gap
 

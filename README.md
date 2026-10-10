@@ -451,6 +451,15 @@ bastion serve samples --window 120 --open
 bastion info
 ```
 
+## Analysis modes
+
+| Mode | What runs | Time (real backbone) |
+|---|---|---|
+| `quick` (dashboard default) | rules pipeline (ingest, ATT&CK, correlate, IOCs, RCA storyline) + **one** AI analyst pass (lead + reviewer, grounded). The analyst's grounded confirm/dismiss sets the incident verdict ("AI analyst confirmed..."); needs-review or ungrounded answers leave the rules verdict; injection-flagged logs can never be called benign. No agent swarm. | rules in milliseconds, about 20-60 s with a model |
+| `deep` (CLI default) | full flow: Incident Commander + agent swarm + analyst | several minutes |
+
+With no backbone (`--llm off` or unavailable) quick mode is rules only. `bastion analyze --mode quick|deep`; `bastion serve --mode quick|deep` sets the default, the dashboard has an ANALYZE (quick) and a DEEP INVESTIGATION button, and `POST /api/stage/run`, `/api/upload` and `/api/refresh` accept `"mode"`. The mode is part of the run-cache key.
+
 ## Web dashboard
 
 ```bash

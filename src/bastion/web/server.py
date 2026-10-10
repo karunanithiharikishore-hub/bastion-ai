@@ -78,7 +78,8 @@ class _State:
 
     def __init__(self, paths, window, llm_mode, model, intel_db, max_upload_mb=256,
                  orchestration="auto", votes=1, tier1_model=None, allow_hosts=None,
-                 max_agents=None, max_commander_turns=None, budget_seconds=None):
+                 max_agents=None, max_commander_turns=None, budget_seconds=None, mode="deep"):
+        self.mode = self.run_mode = mode
         self.paths = paths
         self.commander = dict(max_agents=max_agents, max_commander_turns=max_commander_turns,
                               budget_seconds=budget_seconds)  # None = analyzer default
@@ -117,14 +118,15 @@ class _State:
                 paths, window_minutes=window,
                 backbone=self._backbone(), intel_store=intel,
                 run_agents=True, use_llm=(self.llm_mode != "off"),
-                orchestration=self.orchestration, votes=self.votes,
+                orchestration=self.orchestration, votes=self.votes, mode=self.run_mode,
                 tier1_model=self.tier1_model, **self.commander,
             )
 
-    def _run(self, paths, window, label=None):
+    def _run(self, paths, window, label=None, mode=None):
         """Analyze under the lock; record a good result, or set error and
         return None while keeping the last good result for /api/report.md."""
         try:
+            self.run_mode = mode or self.mode   # runs are serialized by self.lock
             res = self._analyze_paths(paths, window, label)
         except Exception as exc:  # never crash the server
             self.error = f"{type(exc).__name__}: {exc}"
@@ -136,12 +138,12 @@ class _State:
         self.result, self.error = res, None
         return res
 
-    def run_analysis(self) -> dict:
+    def run_analysis(self, mode=None) -> dict:
         if not self.warm_done.is_set():  # startup run in flight: share its result, no second paid run
             self.warm_done.wait()
             return self.result
         with self.lock:
-            return self._run(self.paths, self.window)
+            return self._run(self.paths, self.window, mode=mode)
 
     def get_result(self, result_id):
         with self.lock:
@@ -199,7 +201,7 @@ class _State:
             slot[2] += size
             return slot[1]
 
-    def stage_run(self, window=None, token=None) -> dict:
+    def stage_run(self, window=None, token=None, mode=None) -> dict:
         """Analyze a staging slot, then remove it."""
         window = window or self.window
         with self.stage_lock:
@@ -212,14 +214,14 @@ class _State:
             with self.lock:
                 if not slot or slot[1] == 0:
                     raise ValueError("no files staged")
-                return self._run([slot[0]], window, _upload_label(slot[0]))
+                return self._run([slot[0]], window, _upload_label(slot[0]), mode)
         finally:
             if slot:
                 with self.stage_lock:
                     self.inflight.discard(slot[0])
                 shutil.rmtree(slot[0], ignore_errors=True)
 
-    def run_on_uploads(self, files, window=None) -> dict:
+    def run_on_uploads(self, files, window=None, mode=None) -> dict:
         """One-shot batch (kept for API compatibility). For large/many files the
         staged endpoints (/api/stage/*) are preferred."""
         window = window or self.window
@@ -234,7 +236,7 @@ class _State:
                     safe_count += 1
                 if not safe_count:
                     raise ValueError("no usable files uploaded")
-                return self._run([tmp], window, _upload_label(tmp))
+                return self._run([tmp], window, _upload_label(tmp), mode)
             finally:
                 shutil.rmtree(tmp, ignore_errors=True)
 
@@ -296,6 +298,14 @@ def _int_or(value, default: int) -> int:
     if n > _MAX_WINDOW:
         raise ValueError(f"window must be at most {_MAX_WINDOW} minutes, got {n}")
     return n
+
+
+def _mode_or_none(obj):
+    """Optional request `mode` (None = server default)."""
+    m = _opt_str(obj, "mode")
+    if m is not None and m not in ("quick", "deep"):
+        raise ValueError("mode must be 'quick' or 'deep'")
+    return m
 
 
 def _opt_str(obj, key):
@@ -417,7 +427,7 @@ def _make_handler(state: _State):
                     "max_upload_mb": state.max_upload_mb,
                     "max_upload_bytes": state.max_upload,   # exact cap the client checks against
                     "orchestration": state.orchestration, "votes": state.votes,
-                    "tier1_model": state.tier1_model,
+                    "tier1_model": state.tier1_model, "mode": state.mode,
                 })
             elif path == "/api/runs":
                 try:
@@ -476,7 +486,10 @@ def _make_handler(state: _State):
         def _post(self):
             path = urlparse(self.path).path
             if path == "/api/refresh":  # re-runs the analysis, so POST (Origin-checked) not GET
-                res = state.run_analysis()
+                body = self._read_json() if int(self.headers.get("Content-Length", 0) or 0) else {}
+                if body is None:
+                    return
+                res = state.run_analysis(_mode_or_none(body))
                 self._json(res if res else {"error": state.error}, 200 if res else 500); return
             # Preferred: staged upload — one file per request, then run.
             if path == "/api/stage/reset":
@@ -494,7 +507,7 @@ def _make_handler(state: _State):
                 if p is None:
                     return
                 window = _int_or(p.get("window"), state.window)
-                res = state.stage_run(window, _opt_str(p, "token"))
+                res = state.stage_run(window, _opt_str(p, "token"), _mode_or_none(p))
                 self._json(res if res else {"error": state.error or "analysis failed"},
                            200 if res else 500); return
             # Back-compat: whole-batch upload in one request.
@@ -510,7 +523,7 @@ def _make_handler(state: _State):
                 for f in files:
                     if isinstance(f, dict):
                         _opt_str(f, "name"); _opt_str(f, "content")
-                res = state.run_on_uploads(files, _int_or(p.get("window"), state.window))
+                res = state.run_on_uploads(files, _int_or(p.get("window"), state.window), _mode_or_none(p))
                 self._json(res if res else {"error": state.error or "analysis failed"},
                            200 if res else 500); return
             self._send(404, b"not found", "text/plain")
@@ -534,7 +547,7 @@ def _interrupt(signum, frame):
 def serve(paths, host="127.0.0.1", port=8787, window=60, llm_mode="off",
           model="claude-sonnet-5", intel_db=None, open_browser=False,
           max_upload_mb=256, orchestration="auto", votes=1, tier1_model=None, allow_host=(),
-          max_agents=None, max_commander_turns=None, budget_seconds=None):
+          max_agents=None, max_commander_turns=None, budget_seconds=None, mode="deep"):
     """Start the dashboard server (blocking). Returns the httpd, or None if the
     address could not be bound."""
     provenance.enforce(strict=True)
@@ -543,7 +556,8 @@ def serve(paths, host="127.0.0.1", port=8787, window=60, llm_mode="off",
     state = _State(paths, window, llm_mode, model, intel_db, max_upload_mb=max_upload_mb,
                    orchestration=orchestration, votes=votes, tier1_model=tier1_model,
                    allow_hosts=allow, max_agents=max_agents,
-                   max_commander_turns=max_commander_turns, budget_seconds=budget_seconds)
+                   max_commander_turns=max_commander_turns, budget_seconds=budget_seconds,
+                   mode=mode)
     if llm_mode != "off" and state._backbone() is None:
         if llm_mode != "auto":  # an explicit backbone must not silently fall back to rules
             print(f"[bastion] WARNING: --llm {llm_mode} requested but that backbone is "

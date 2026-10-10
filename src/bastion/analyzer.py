@@ -58,13 +58,40 @@ def analyze(paths, *, trace=None, **kwargs):
     return result
 
 
+def _safe_ai(events, iocs, backbone, tier2_verdicts):
+    try:
+        return ai_analyze(events, iocs, backbone, want_review=True, tier2_verdicts=tier2_verdicts)
+    except Exception as exc:  # never break the deterministic result
+        return {"available": False, "reason": f"{type(exc).__name__}: {exc}"}
+
+
+def _analyst_finding(ai):
+    """Tier-2-shaped finding from a grounded AI-analyst verdict, or None (needs-review,
+    unavailable or ungrounded: the rule verdict stands)."""
+    if not ai or not ai.get("available"):
+        return None
+    final, lead, review = ai.get("final_verdict"), ai.get("lead") or {}, ai.get("review") or {}
+    if final not in ("likely-malicious", "likely-benign") or not (lead.get("_grounding") or {}).get("ok"):
+        return None
+    if review and not (review.get("_grounding") or {}).get("ok", True):
+        return None
+    try:
+        conf = float(review.get("confidence", lead.get("confidence", 0.0)))
+    except (TypeError, ValueError):
+        conf = 0.0
+    return {"status": "escalated" if final == "likely-malicious" else "dismissed",
+            "confidence": conf, "rationale": str(lead.get("headline") or review.get("notes") or "")}
+
+
 def _analyze(paths, *, source_override=None, window_minutes=60,
              max_incidents=10, backbone=None, intel_store=None,
              max_digest_lines=400, run_agents=True, use_llm=True,
              cache=None, votes=1, tier1_model=None, skip_idle_tier1=True,
              orchestration="auto", max_agents=None, max_commander_turns=None,
-             budget_seconds=None):
-    """cache: None/"off" (no cache), "use" (return a stored result for the same
+             budget_seconds=None, mode="deep"):
+    """mode: "deep" (commander + agent swarm + analyst) or "quick" (rules pipeline +
+    one AI analyst pass whose grounded verdict sets the incident verdict; no swarm).
+    cache: None/"off" (no cache), "use" (return a stored result for the same
     inputs + config, store complete new runs) or "refresh" (always run, then
     overwrite). Only LLM runs are cached; see cache.py.
     votes: Tier-2 self-consistency runs (majority vote per incident); with the
@@ -88,6 +115,9 @@ def _analyze(paths, *, source_override=None, window_minutes=60,
     if budget_seconds is not None and budget_seconds <= commander.MIN_WORKER_SECONDS:
         raise ValueError(f"budget_seconds must be > {commander.MIN_WORKER_SECONDS}, "
                          f"got {budget_seconds!r}")
+    if mode not in ("quick", "deep"):
+        raise ValueError(f"mode must be 'quick' or 'deep', got {mode!r}")
+    quick = mode == "quick"
     import time
     _t0 = time.perf_counter()
     tracing.stage("ingest")
@@ -140,7 +170,7 @@ def _analyze(paths, *, source_override=None, window_minutes=60,
                                           settings=dict(
             swarm_options, source_override=source_override, window_minutes=window_minutes,
             max_incidents=max_incidents, max_digest_lines=max_digest_lines,
-            run_agents=run_agents, tier_max_turns=budget.TIER_MAX_TURNS,
+            run_agents=run_agents, mode=mode, tier_max_turns=budget.TIER_MAX_TURNS,
             max_tool_result_chars=budget.MAX_TOOL_RESULT_CHARS))
         cache_key = run_cache.cache_key(material)
         if cache_mode == "use":
@@ -157,7 +187,7 @@ def _analyze(paths, *, source_override=None, window_minutes=60,
         inc_digest = compress(inc.events, max_lines=200)
         inc_intel = intel_store.context_for([inc]) if intel_store else []
         story = build_storyline(inc, digest=inc_digest, intel=inc_intel,
-                                backbone=backbone)
+                                backbone=None if quick else backbone)
         incident_blocks.append({
             "id": inc.id,
             "score": inc.score(),
@@ -172,7 +202,7 @@ def _analyze(paths, *, source_override=None, window_minutes=60,
     tracing.stage("swarm")
     swarm = None
     _t_swarm0 = time.perf_counter()
-    if run_agents:
+    if run_agents and not quick:
         swarm = run_swarm(events, incidents, iocs, digest,
                           intel_store=intel_store, backbone=backbone,
                           use_llm=use_llm, **swarm_options)
@@ -182,6 +212,17 @@ def _analyze(paths, *, source_override=None, window_minutes=60,
     # is one. Rule-only Tier-2 verdicts are a cruder heuristic than the scorer,
     # so without a model agent the scorer's verdict stands.
     tier2 = {}
+    ai_analysis = None
+    if quick and llm_on:   # one grounded AI pass; its verdict is applied below like a Tier-2 one
+        tracing.stage("ai_analysis")
+        ai_analysis = _safe_ai(events, iocs, backbone, [])
+        ai_f = _analyst_finding(ai_analysis)
+        if ai_f:
+            inj = [e.event_id for e in events if injection.is_flagged(e)]
+            for block in incident_blocks:
+                block["verdict"] = apply_tier2_verdict(
+                    block["verdict"], dict(ai_f, incident_id=block["id"]),
+                    injection_events=inj, who="AI analyst", decided_by="ai-analyst")
     if swarm:
         tier2 = {f["incident_id"]: f for f in swarm["findings"]
                  if f["tier"] == 2 and f.get("origin") == "agent"}
@@ -213,14 +254,9 @@ def _analyze(paths, *, source_override=None, window_minutes=60,
 
     # Model-driven AI analyst — genuine LLM reasoning over the evidence, grounded.
     # Opt-in: only runs when an LLM backbone is available (use_llm and backbone).
-    tracing.stage("ai_analysis")
-    ai_analysis = None
-    if run_agents and use_llm and backbone is not None:
-        try:
-            ai_analysis = ai_analyze(events, iocs, backbone, want_review=True,
-                                     tier2_verdicts=list(tier2.values()))
-        except Exception as exc:  # never break the deterministic result
-            ai_analysis = {"available": False, "reason": f"{type(exc).__name__}: {exc}"}
+    if run_agents and not quick and use_llm and backbone is not None:
+        tracing.stage("ai_analysis")
+        ai_analysis = _safe_ai(events, iocs, backbone, list(tier2.values()))
 
     tracing.stage("finalize")
     total_ms = int((time.perf_counter() - _t0) * 1000)
@@ -258,6 +294,7 @@ def _analyze(paths, *, source_override=None, window_minutes=60,
                                             commander_limits=commander_limits)
                           if run_agents and llm_on else None),
             "cache": cache_note,
+            "mode": mode,
         },
         "incidents": incident_blocks,
         "iocs": iocs,
