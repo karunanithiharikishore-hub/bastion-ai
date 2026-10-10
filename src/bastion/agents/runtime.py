@@ -129,6 +129,8 @@ class SwarmSession:
     def __init__(self, ctx: AgentContext, seed: list):
         self.dir = tempfile.mkdtemp(prefix="bastion-swarm-")
         self.board = Blackboard(os.path.join(self.dir, "board.jsonl"))
+        self.events_path = os.path.join(self.dir, "events.jsonl")   # MCP servers append here
+        tracing.FEED.watch(self.events_path)
         # Set once an agent hits a usage/session limit: later agents skip the
         # model and fall back to rules instead of launching doomed processes.
         self.halted: str | None = None
@@ -168,6 +170,7 @@ class SwarmSession:
     def close(self) -> None:
         self.closed = True
         self.kill_procs()
+        tracing.FEED.unwatch(getattr(self, "events_path", ""))   # last read before the dir goes
         if not os.environ.get("BASTION_KEEP_SESSION"):
             shutil.rmtree(self.dir, ignore_errors=True)
 
@@ -377,6 +380,8 @@ def _run_api(agent, session: SwarmSession, backbone, max_turns: int,
             results = []
             for u in uses:
                 text = box.call(u["name"], u.get("input") or {})
+                tracing.FEED.tool(agent.name, u["name"], not text.startswith('{"error"'),
+                                  u.get("input"))
                 results.append({"type": "tool_result", "tool_use_id": u["id"],
                                 "content": text,
                                 "is_error": text.startswith('{"error"')})

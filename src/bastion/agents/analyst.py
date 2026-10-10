@@ -19,8 +19,10 @@ from __future__ import annotations
 
 import json
 import re
+import types
 from collections import Counter
 
+from .. import tracing
 from .grounding import evidence_index, check_text, leaf_strings
 from .injection import (BOUNDARY_INSTRUCTION, Envelope, is_flagged, event_reasons,
                         safe_label)
@@ -241,6 +243,27 @@ def _shrink(obj, limit=4000):
 
 
 def ai_analyze(events, iocs, backbone, want_review=True, tier2_verdicts=None) -> dict:
+    """Live-feed wrapper around _ai_analyze: one agent span plus tool/verdict events."""
+    if backbone is None:
+        return _ai_analyze(events, iocs, backbone, want_review, tier2_verdicts)
+    # Feed-only agent (no trace span: spans nest under the commander in the run trace).
+    me = types.SimpleNamespace(name="analyst", attributes={
+        "agent": "analyst", "role": "AI analyst", "tier": 0})
+    tracing.FEED.agent(me, "deploy")
+    try:
+        tracing.FEED.emit("analyst", "tool", tool="complete", detail="evidence brief")
+        out = _ai_analyze(events, iocs, backbone, want_review, tier2_verdicts)
+        if out.get("final_verdict"):
+            tracing.FEED.emit("analyst", "verdict", detail=tracing.feed_detail(out["final_verdict"]))
+    except BaseException as exc:
+        me.attributes["error"] = type(exc).__name__
+        raise
+    finally:
+        tracing.FEED.agent(me, "error" if "error" in me.attributes else "done")
+    return out
+
+
+def _ai_analyze(events, iocs, backbone, want_review=True, tier2_verdicts=None) -> dict:
     """Run the model-driven Lead + Reviewer agents. Returns a grounded result.
 
     ``tier2_verdicts`` (Tier-2 agent findings) are shown to both agents as another

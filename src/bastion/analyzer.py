@@ -47,6 +47,7 @@ def analyze(paths, *, trace=None, **kwargs):
         paths, persist=trace,
         backbone=(backbone.resolved if backbone else "none"),
         model=getattr(backbone, "model", None),
+        mode=kwargs.get("mode", "deep"),
         use_llm=kwargs.get("use_llm", True), run_agents=kwargs.get("run_agents", True),
         orchestration=kwargs.get("orchestration", "auto"))
     try:
@@ -217,12 +218,13 @@ def _analyze(paths, *, source_override=None, window_minutes=60,
         tracing.stage("ai_analysis")
         ai_analysis = _safe_ai(events, iocs, backbone, [])
         ai_f = _analyst_finding(ai_analysis)
-        if ai_f:
+        if ai_f and incident_blocks:
+            # shortcut: analyst sees the whole case but returns one verdict; applied to the top incident only — scope per incident if ai_analyze ever returns per-incident verdicts
             inj = [e.event_id for e in events if injection.is_flagged(e)]
-            for block in incident_blocks:
-                block["verdict"] = apply_tier2_verdict(
-                    block["verdict"], dict(ai_f, incident_id=block["id"]),
-                    injection_events=inj, who="AI analyst", decided_by="ai-analyst")
+            top = incident_blocks[0]
+            top["verdict"] = apply_tier2_verdict(
+                top["verdict"], dict(ai_f, incident_id=top["id"]),
+                injection_events=inj, who="AI analyst", decided_by="ai-analyst")
     if swarm:
         tier2 = {f["incident_id"]: f for f in swarm["findings"]
                  if f["tier"] == 2 and f.get("origin") == "agent"}

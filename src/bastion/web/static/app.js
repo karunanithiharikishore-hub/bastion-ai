@@ -121,7 +121,7 @@ function addFiles(fileList) {
   $("analyze").addEventListener("click", () => analyzeUploads("quick"));
   $("deep").addEventListener("click", () => analyzeUploads("deep"));
   $("loadsample").addEventListener("click", () => { pending.clear(); renderFileList();
-    $("status").innerHTML = '<span class="spinner"></span> loading sample…'; load("/api/refresh", { method: "POST" }); });
+    $("status").innerHTML = '<span class="spinner"></span> loading sample…'; withPoll(load("/api/refresh", { method: "POST" })); });
 })();
 
 async function postJSON(url, obj) {
@@ -150,7 +150,7 @@ async function analyzeUploads(mode) {
     $("status").innerHTML = '<span class="spinner"></span> ' + (mode === "deep"
       ? "deep investigation: AI agent team, takes several minutes…" : "quick analysis…")
       + " (" + files.length + " file(s))";
-    const data = await postJSON("/api/stage/run", { token, window: win, mode });
+    const data = await withPoll(postJSON("/api/stage/run", { token, window: win, mode }));
     await mergeMetaAndRender(data);
     $("status").textContent = (mode === "deep" ? "deep investigation" : "quick analysis") + " complete";
     toast("Analyzed " + files.length + " file(s)");
@@ -376,29 +376,189 @@ function showPhaseDetail(i) {
   }, { passive: false });
 })();
 
-/* ================= swarm constellation ================= */
-function renderSwarm(r) {
-  const orbit = $("orbit"), side = $("swarm-side"); orbit.innerHTML = ""; side.innerHTML = "";
-  const sw = r.swarm;
-  $("swarm-sub").textContent = sw ? `${esc(sw.worker_count)} ${sw.orchestrator ? "workers + commander" : "agents"} · ${esc(sw.counts.confirmed_incidents)} confirmed` : "";
-  if (!sw) { orbit.appendChild(el("p", "empty", "Swarm did not run.")); return; }
-  orbit.appendChild(el("div", "core", "SOC<br>CORE"));
-  const rings = { 1: 44, 2: 104, 3: 156 }, bucket = { 1: [], 2: [], 3: [] };
-  (sw.roster || []).forEach((a) => (bucket[a.tier] || bucket[3]).push(a));
-  [1, 2, 3].forEach((tier) => {
-    orbit.appendChild(el("div", "ringpath t" + tier));
-    const spinner = el("div", null); spinner.style.cssText = "position:absolute;inset:0;";
-    spinner.classList.add(tier === 2 ? "spin2" : "spin1");
-    const arr = bucket[tier], R = rings[tier], cx = 170, cy = 170;
-    arr.forEach((a, i) => {
-      const ang = (i / Math.max(1, arr.length)) * Math.PI * 2;
-      const node = el("div", "node t" + tier,
-        `${esc(a.name.replace("soc1-", "").replace("soc2-", "").slice(0, 4).toUpperCase())}<span class="tip">${esc(a.role)} · ${esc(a.name)}</span>`);
-      node.style.left = (cx + R * Math.cos(ang)) + "px"; node.style.top = (cy + R * Math.sin(ang)) + "px";
-      spinner.appendChild(node);
-    });
-    orbit.appendChild(spinner);
+/* ================= swarm: isometric SOC floor ================= */
+/*FLOOR-PURE-START*/
+const FLOOR_W = 960, FLOOR_TOP = 144, FLOOR_STEP = 96, HUD_BOX = { x: 776, y: 8, w: 176, h: 74 };
+const FLOOR_SHORT = [[/edr/i, "EDR"], [/dns/i, "DNS"], [/firewall/i, "Firewall"], [/cloud/i, "Cloud"], [/respon/i, "Responder"],
+  [/forens/i, "Forensics"], [/hunt/i, "Hunter"], [/malware/i, "Malware"], [/intel/i, "Intel"], [/engineer|architect/i, "Engineer"], [/vuln/i, "Vuln"]];
+function floorLabel(name, tier) {
+  if (tier === 0) return "Commander"; if (tier === 2) return "Lead";
+  const n = String(name || "?"), hit = FLOOR_SHORT.find((x) => x[0].test(n));
+  if (hit) return hit[1];
+  const s = n.replace(/^soc[12]-/, ""); return s.length > 14 ? s.slice(0, 13) + "…" : s;
+}
+// Pure layout: lists of {id,label} per tier -> node positions plus the collision boxes the test checks.
+// Tier-1 column left, specialists right, commander + lead in the centre. Coordinates sit on the centres of a
+// 96x48 diamond tile grid (x multiple of 48, y multiple of 24, matching parity).
+function floorLayout(t0, t1, t2, t3) {
+  const nodes = [], rect = (x, y, w, h) => ({ x, y, w, h });
+  const add = (it, tier, x, y, side) => { const lw = it.label.length * 7.8 + 8; nodes.push({ id: it.id, tier, x, y, side,
+    node: rect(x - 42, y - 58, 84, 78), label: rect(x - lw / 2, y + 22, lw, 15),
+    bubble: side === "u" ? rect(x - 56, y - 78, 112, 16) : rect(side === "r" ? x + 50 : x - 50 - 112, y - 50, 112, 16) }); };
+  t1.forEach((it, i) => add(it, 1, 144, FLOOR_TOP + i * FLOOR_STEP, "r"));
+  t3.forEach((it, i) => add(it, 3, FLOOR_W - 144, FLOOR_TOP + i * FLOOR_STEP, "l"));
+  if (t0.length) add(t0[0], 0, 480, 120, "u");
+  t0.slice(1).concat(t2).forEach((it, i) => add(it, t0.includes(it) ? 0 : 2, 480, 264 + i * 144, "u"));
+  const H = Math.max(560, ...nodes.map((n) => n.y + 37)) + 16;
+  return { W: FLOOR_W, H, nodes, hud: rect(HUD_BOX.x, HUD_BOX.y, HUD_BOX.w, HUD_BOX.h) };
+}
+/*FLOOR-PURE-END*/
+
+const NS = "http://www.w3.org/2000/svg";
+const S = (tag, attrs, parent, text) => { const n = document.createElementNS(NS, tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  if (text != null) n.textContent = text; if (parent) parent.appendChild(n); return n; };
+const TIER_COL = { 0: "#a98bff", 1: "#43d3a3", 2: "#6fb1ff", 3: "#ffb15c" };
+const floor = { agents: new Map(), live: false, note: "", quick: false, sel: null, report: null,
+  svg: null, packets: [], bubbles: [], hud: null, counts: null };
+const reduceMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+const floorStatus = (a) => a.status === "finding" ? "filed a finding" : a.status;
+
+function floorReset() { floor.agents.clear(); floor.packets = []; floor.bubbles = []; floor.sel = null;
+  floor.quick = false; floor.note = ""; floor.counts = null; }
+function floorAgent(id, tier, role) {
+  let a = floor.agents.get(id);
+  if (!a) { a = { id, name: id, role: role || "", tier: [0, 1, 2, 3].includes(tier) ? tier : 3, status: "idle",
+      tools: 0, findings: [], used: [], dim: false }; floor.agents.set(id, a); drawFloor(); }
+  return a;
+}
+const floorTier = (t) => [...floor.agents.values()].filter((a) => a.tier === t);
+const floorLabelOf = (a) => floor.quick && a.tier === 0 ? "Quick analysis" : floorLabel(a.name, a.tier);
+function paintAgent(a) {
+  if (!a.g) return;
+  a.g.setAttribute("class", `fd t${a.tier} st-${a.status}${a.dim ? " dim" : ""}${floor.sel === a.id ? " sel" : ""}`);
+  a.g.setAttribute("aria-label", `${a.name} — ${floorStatus(a)}`);
+  a.g.firstChild.textContent = `${a.name}${a.role ? " · " + a.role : ""}`;
+}
+function refreshHud() {
+  if (!floor.hud) return;
+  const all = [...floor.agents.values()], c = floor.counts || {};
+  const active = c.agents_active != null ? c.agents_active : all.filter((a) => a.status === "working").length;
+  const total = c.agents_total != null ? c.agents_total : all.length;
+  const tools = c.tool_calls != null ? c.tool_calls : all.reduce((s, a) => s + a.tools, 0);
+  const uniq = new Set(all.flatMap((a) => a.findings)).size, finds = uniq || (c.findings != null ? c.findings : 0);
+  floor.hud.title.textContent = "Investigation · " + (floor.live ? "live" : all.length ? "final" : "idle");
+  floor.hud.rows.forEach((t, i) => { t.textContent = [`Agents active ${active}/${total}`, `Tool calls ${tools}`, `Findings filed ${finds}`][i]; });
+}
+function drawFloor() {
+  const host = $("orbit"); if (!host) return;
+  const L = floor.agents.size && floorLayout(
+    floorTier(0).map((a) => ({ id: a.id, label: floorLabelOf(a) })), floorTier(1).map((a) => ({ id: a.id, label: floorLabelOf(a) })),
+    floorTier(2).map((a) => ({ id: a.id, label: floorLabelOf(a) })), floorTier(3).map((a) => ({ id: a.id, label: floorLabelOf(a) })))
+    || floorLayout([], [], [], []);
+  floor.layout = L; host.textContent = "";
+  const svg = floor.svg = S("svg", { viewBox: `0 0 ${L.W} ${L.H}`, class: "floor-svg", role: "group",
+    "aria-label": "Agent swarm SOC floor" }, host);
+  // isometric diamond floor grid
+  const grid = S("g", { class: "fgrid" }, svg), TW = 96;   // 2:1 diamond tiles
+  for (let k = -2 * L.H; k <= L.W + 2 * L.H; k += TW) {
+    S("line", { x1: k, y1: 0, x2: k + 2 * L.H, y2: L.H }, grid); S("line", { x1: k, y1: 0, x2: k - 2 * L.H, y2: L.H }, grid); }
+  const pos = (id) => L.nodes.find((n) => n.id === id);
+  const cmd = floorTier(0)[0], lead = floorTier(2)[0], hub = lead || cmd;
+  const links = S("g", { class: "flinks" }, svg);
+  const link = (a, b) => { const p = a && pos(a.id), q = b && pos(b.id);
+    if (p && q) S("line", { x1: p.x, y1: p.y - 4, x2: q.x, y2: q.y - 4 }, links); };
+  floorTier(1).forEach((a) => { link(cmd, a); link(a, lead); });
+  floorTier(3).forEach((a) => link(hub, a));
+  if (!floor.agents.size) S("text", { x: L.W / 2, y: 200, class: "fnote" }, svg, floor.note || "Agents appear here while an analysis runs.");
+  else if (floor.note) S("text", { x: L.W / 2, y: L.H - 6, class: "fnote" }, svg, floor.note);
+  L.nodes.forEach((n) => {
+    const a = floor.agents.get(n.id), g = a.g = S("g", { transform: `translate(${n.x} ${n.y})`, tabindex: 0, role: "button" }, svg);
+    g.style.setProperty("--c", TIER_COL[a.tier]);
+    S("title", {}, g, ""); g.insertBefore(g.lastChild, g.firstChild);
+    S("polygon", { class: "desk", points: "-40,0 0,-20 40,0 0,20" }, g);
+    S("polygon", { class: "mat", points: "-24,0 0,-12 24,0 0,12" }, g);
+    S("line", { class: "stand", x1: -24, y1: -14, x2: -24, y2: -6 }, g);
+    S("rect", { class: "mon", x: -33, y: -29, width: 18, height: 14, rx: 2 }, g);
+    const r = S("g", { class: "robot", transform: "translate(12 -2)" }, g);
+    S("line", { class: "ant", x1: 0, y1: -50, x2: 0, y2: -44 }, r);
+    S("circle", { class: "light", cx: 0, cy: -52, r: 3.5 }, r);
+    S("rect", { class: "head", x: -11, y: -44, width: 22, height: 18, rx: 5 }, r);
+    S("rect", { class: "eye", x: -7, y: -39, width: 4, height: 4 }, r); S("rect", { class: "eye", x: 3, y: -39, width: 4, height: 4 }, r);
+    S("line", { class: "mouth", x1: -4, y1: -30, x2: 4, y2: -30 }, r);
+    S("rect", { class: "body", x: -8, y: -25, width: 16, height: 13, rx: 3 }, r);
+    S("rect", { class: "body", x: -6, y: -12, width: 4, height: 4, rx: 1 }, r); S("rect", { class: "body", x: 2, y: -12, width: 4, height: 4, rx: 1 }, r);
+    S("text", { class: "flabel", y: 34 }, g, floorLabelOf(a));
+    const pick = () => { floor.sel = floor.sel === a.id ? null : a.id; floor.agents.forEach(paintAgent); renderSide(); };
+    g.addEventListener("click", pick);
+    g.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+    paintAgent(a);
   });
+  const pk = floor.pk = S("g", {}, svg), bb = floor.bb = S("g", {}, svg);
+  floor.packets.forEach((p) => pk.appendChild(p.node)); floor.bubbles.forEach((b) => bb.appendChild(b.node));
+  const h = S("g", { class: "hud" }, svg);
+  S("rect", { x: L.hud.x, y: L.hud.y, width: L.hud.w, height: L.hud.h, rx: 8 }, h);
+  floor.hud = { title: S("text", { class: "ht", x: L.hud.x + 10, y: L.hud.y + 18 }, h),
+    rows: [0, 1, 2].map((i) => S("text", { class: "hr" + (i === 2 ? " red" : ""), x: L.hud.x + 10, y: L.hud.y + 36 + i * 15 }, h)) };
+  refreshHud();
+}
+function floorPacket(from, to) {
+  if (reduceMotion() || !floor.layout) return;
+  const p = floor.layout.nodes.find((n) => n.id === from.id), q = floor.layout.nodes.find((n) => n.id === to.id);
+  if (!p || !q || p === q) return;
+  const node = S("circle", { r: 3, fill: TIER_COL[from.tier], cx: p.x, cy: p.y - 4 }, floor.pk);
+  floor.packets.push({ node, p, q, t0: performance.now(), dur: 900 });
+  if (floor.packets.length === 1) requestAnimationFrame(packetLoop);
+}
+function packetLoop(now) {
+  floor.packets = floor.packets.filter((k) => { const t = (now - k.t0) / k.dur;
+    if (t >= 1) { k.node.remove(); return false; }
+    k.node.setAttribute("cx", k.p.x + (k.q.x - k.p.x) * t); k.node.setAttribute("cy", k.p.y - 4 + (k.q.y - k.p.y) * t); return true; });
+  if (floor.packets.length) requestAnimationFrame(packetLoop);
+}
+function floorBubble(a, text) {
+  const n = floor.layout && floor.layout.nodes.find((x) => x.id === a.id); if (!n || !floor.bb) return;
+  while (floor.bubbles.length >= 4) floor.bubbles.shift().node.remove();
+  const t = text.length > 16 ? text.slice(0, 15) + "…" : text, w = t.length * 6.6 + 12, b = n.bubble;
+  const x = n.side === "u" ? n.x - w / 2 : n.side === "r" ? b.x : b.x + b.w - w;
+  const node = S("g", { class: "bub" }, floor.bb);
+  S("rect", { x, y: b.y, width: w, height: b.h, rx: 5 }, node); S("text", { x: x + w / 2, y: b.y + 12 }, node, t);
+  const rec = { node }; floor.bubbles.push(rec);
+  setTimeout(() => node.classList.add("fade"), 1000);
+  setTimeout(() => { node.remove(); floor.bubbles = floor.bubbles.filter((k) => k !== rec); }, 1400);
+}
+function floorEvents(d) {
+  if (d.mode === "quick" && !floor.quick) { floor.quick = true; drawFloor(); }
+  (d.events || []).forEach((ev) => {
+    const a = floorAgent(String(ev.agent || "agent"), ev.tier, ev.role); if (ev.role && !a.role) a.role = String(ev.role);
+    const cmd = floorTier(0)[0], lead = floorTier(2)[0], hub = lead || cmd;
+    if (ev.kind === "deploy") { a.status = "working"; if (a.tier === 1) floorPacket(cmd || a, a); else if (a.tier === 3) floorPacket(hub || a, a); }
+    else if (ev.kind === "tool") { a.status = a.status === "finding" ? a.status : "working"; a.tools++;
+      const t = String(ev.tool || "tool"); if (!a.used.includes(t)) a.used.push(t);
+      floorBubble(a, t.endsWith(")") ? t : t + "()"); }
+    else if (ev.kind === "finding") { a.status = "finding"; a.findings.push(String(ev.detail || "finding #" + ev.seq));
+      if (a.tier === 1 || a.tier === 3) floorPacket(a, hub || a); }
+    else if (ev.kind === "error") a.status = "finding";
+    else if (ev.kind === "done" || ev.kind === "verdict") { if (a.status !== "finding") a.status = "done";
+      if (ev.kind === "done" && a.tier === 1) floorPacket(a, lead || cmd || a); }
+    paintAgent(a);
+  });
+  floor.counts = d.counts || null; refreshHud();
+}
+/* Final state from the report: lights green/red per agent, static HUD. */
+function floorFromReport(r) {
+  stopPoll(); floorReset(); floor.report = r;
+  const sw = r.swarm, roster = (sw && sw.roster) || [];
+  if (!roster.length) {   // quick mode: only the analyst desk
+    floor.quick = true; const a = floorAgent("analyst", 0, "Quick analysis"); a.status = "done";
+    a.findings = (r.incidents || []).map((i) => i.storyline.structured.incident_id);
+  } else {
+    const runs = new Map((sw.agent_runs || []).map((x) => [x.agent, x]));
+    roster.forEach((x) => { const a = floorAgent(x.name, x.tier, x.role), run = runs.get(x.name);
+      a.findings = (sw.findings || []).filter((f) => f.agent === x.name).map((f) => f.title);
+      a.tools = run ? run.tool_calls || 0 : 0; a.used = run ? run.tools_used || [] : [];
+      a.dim = !run; a.status = !run ? "idle" : run.error || a.findings.length || run.findings_filed ? "finding" : "done"; });
+  }
+  drawFloor();
+}
+function renderSide() {
+  const side = $("swarm-side"), r = floor.report; side.textContent = "";
+  const a = floor.sel && floor.agents.get(floor.sel);
+  if (a) { const d = el("div", "cons"); d.appendChild(el("b")).textContent = a.name;
+    [a.role, `status: ${floorStatus(a)} · tool calls: ${a.tools}`, a.used.length ? "tools: " + a.used.join(", ") : "",
+      a.findings.length ? "findings:" : "no findings"].filter(Boolean).forEach((t) => d.appendChild(el("div", "meta-line")).textContent = t);
+    a.findings.forEach((t) => d.appendChild(el("div", "spec")).textContent = t); side.appendChild(d); }
+  const sw = r && r.swarm; if (!sw) return;
   (sw.consensus || []).forEach((c) => side.appendChild(el("div", "cons",
     `${esc(c.incident_id)}: <span class="${c.confirmed_by_tier2 ? "ok" : "no"}">${c.confirmed_by_tier2 ? "CONFIRMED" : "uncorroborated"}</span><br><span class="meta-line">${c.agents_involved} agents · tiers ${JSON.stringify(c.tiers_involved)} · conf ${c.consensus_confidence}</span>`)));
   const t3 = (sw.findings || []).filter((f) => f.tier === 3);
@@ -406,6 +566,38 @@ function renderSwarm(r) {
     t3.forEach((f) => { const d = el("div", "spec", `<b>[${esc(f.severity.toUpperCase())}]</b> <span class="who">${esc(f.role)}</span>: ${esc(f.title)}`);
       if (f.recommended_action) d.appendChild(el("div", "meta-line", esc(f.recommended_action))); side.appendChild(d); }); }
 }
+function renderSwarm(r) {
+  const sw = r.swarm;
+  $("swarm-sub").textContent = sw ? `${esc(sw.worker_count)} ${sw.orchestrator ? "workers + commander" : "agents"} · ${esc(sw.counts.confirmed_incidents)} confirmed` : "";
+  floorFromReport(r); renderSide();
+}
+
+/* live progress polling: GET /api/progress?since=<seq> every 1s while an analysis runs */
+const poll = { on: false, seq: 0, gen: 0, timer: null };
+function startPoll() {
+  if (poll.on) return; poll.on = true; poll.seq = 0; const gen = ++poll.gen;
+  floorReset(); floor.live = true; floor.report = null; drawFloor(); renderSide();
+  (async function tick() {
+    if (!poll.on || gen !== poll.gen) return;
+    try {
+      const res = await fetch("/api/progress?since=" + poll.seq);
+      if (!poll.on || gen !== poll.gen) return;
+      if (res.status === 404) { poll.on = false; floor.live = false; floor.note = "live feed unavailable"; drawFloor(); return; }
+      const d = await res.json();
+      if (!poll.on || gen !== poll.gen) return;
+      (d.events || []).forEach((e) => { if (e.seq > poll.seq) poll.seq = e.seq; });
+      floorEvents(d);
+    } catch (e) { /* transient: retry next tick */ }
+    poll.timer = setTimeout(tick, 1000);
+  })();
+}
+function stopPoll() { poll.on = false; clearTimeout(poll.timer); floor.live = false; refreshHud(); }
+const withPoll = (p) => { startPoll(); return p.finally(stopPoll); };
+setInterval(() => {   // gentle random eye blink
+  if (reduceMotion() || document.hidden) return;
+  const gs = [...floor.agents.values()].filter((a) => a.g); if (!gs.length) return;
+  const g = gs[Math.floor(Math.random() * gs.length)].g; g.classList.add("blink"); setTimeout(() => g.classList.remove("blink"), 160);
+}, 2600);
 
 /* ================= incidents / iocs / hunt / intel ================= */
 function renderIncidents(r) {
@@ -512,9 +704,11 @@ async function downloadIR() {
 (async function boot() {  // startup analysis may still be running: poll until GET /api/report stops answering 202
   let waited = false;
   while ((await fetch("/api/report").then(r => r.status, () => 0)) === 202) {
+    if (!waited) startPoll();
     waited = true; $("status").innerHTML = '<span class="spinner"></span> startup analysis in progress…';
     await new Promise(r => setTimeout(r, 2000));
   }
+  stopPoll();
   if (waited) $("status").textContent = "";
   load("/api/report").then(d => d || load("/api/refresh", { method: "POST" })); // GET no longer analyzes
 })();

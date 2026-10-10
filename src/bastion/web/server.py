@@ -429,6 +429,12 @@ def _make_handler(state: _State):
                     "orchestration": state.orchestration, "votes": state.votes,
                     "tier1_model": state.tier1_model, "mode": state.mode,
                 })
+            elif path == "/api/progress":  # live agent activity (tracing.FEED), read-only
+                try:
+                    since = max(0, int(parse_qs(route.query).get("since", ["0"])[0]))
+                except ValueError:
+                    since = 0
+                self._json(tracing.FEED.snapshot(since))
             elif path == "/api/runs":
                 try:
                     limit = max(1, min(500, int(parse_qs(route.query).get("limit", ["100"])[0])))

@@ -238,6 +238,9 @@ main { padding: 8px 18px 56px; }
 /* ---- 3D storyline stage (kept: it carries the kill-chain order) ---- */
 .stage-wrap { perspective: 1500px; perspective-origin: 50% 40%; padding: 26px 0 30px;
   overflow-x: auto; overflow-y: hidden; cursor: grab; }
+.grid > *, .swarm-wrap > * { min-width: 0; }
+.swarm-side { overflow-wrap: anywhere; }
+.stage-wrap { max-width: 100%; contain: paint; }
 .stage-wrap.grabbing { cursor: grabbing; }
 .stage { transform-style: preserve-3d;
   transform: rotateX(var(--rx, 26deg)) rotateZ(var(--rz, 0deg));
@@ -301,29 +304,35 @@ main { padding: 8px 18px 56px; }
 .beam { align-self: center; width: 26px; height: 2px; flex: 0 0 auto;
   background: var(--accent); opacity: .7; transform: translateZ(6px); }
 
-/* ---- swarm orbit ---- */
-.swarm-wrap { display: grid; grid-template-columns: 340px 1fr; gap: 24px; align-items: center; }
-.orbit { position: relative; width: 340px; height: 340px; margin: auto; }
-.orbit .core { position: absolute; inset: 50% auto auto 50%; width: 64px; height: 64px;
-  margin: -32px 0 0 -32px; border-radius: 50%; display: grid; place-items: center;
-  background: var(--accent); color: var(--accent-ink);
-  font: 700 10.5px/1.2 var(--mono); text-align: center; z-index: 3;
-  box-shadow: 0 0 0 6px var(--accent-soft); }
-.ringpath { position: absolute; inset: 0; border-radius: 50%; border: 1px dashed var(--line-strong); }
-.ringpath.t1 { inset: 6px; } .ringpath.t2 { inset: 66px; } .ringpath.t3 { inset: 118px; }
-.node { position: absolute; width: 40px; height: 40px; margin: -20px 0 0 -20px;
-  border-radius: var(--r-ctl); display: grid; place-items: center; font: 700 9px var(--mono);
-  background: var(--surface); border: 1px solid var(--line-strong); color: var(--ink); }
-.node.t1 { border-color: color-mix(in srgb, var(--low) 55%, var(--line)); color: var(--low); }
-.node.t2 { border-color: var(--accent-line); color: var(--accent); }
-.node.t3 { border-color: var(--line-strong); color: var(--ink-2); }
-.node .tip { display: none; position: absolute; bottom: 46px; left: 50%; transform: translateX(-50%);
-  white-space: nowrap; background: var(--surface-3); border: 1px solid var(--line-strong); color: var(--ink);
-  padding: 4px 9px; border-radius: 6px; font: 500 11px var(--sans); z-index: 5; }
-.node:hover .tip { display: block; }
-.orbit .spin1 { animation: orbit 40s linear infinite; }
-.orbit .spin2 { animation: orbit 60s linear infinite reverse; }
-@keyframes orbit { to { transform: rotate(360deg); } }
+/* ---- swarm: isometric SOC floor ---- */
+.swarm-wrap { display: grid; grid-template-columns: minmax(0, 3.4fr) minmax(220px, 1fr); gap: 24px; align-items: start; }
+.orbit { min-width: 0; overflow-x: auto; border-radius: var(--r-ctl); background: var(--surface-2); border: 1px solid var(--line); }
+.floor-svg { display: block; width: 100%; height: auto; min-width: 480px; font-family: var(--mono); }
+.fgrid line { stroke: var(--line-strong); stroke-opacity: .55; stroke-width: 1; }
+.flinks line { stroke: var(--line-strong); stroke-width: 1.2; stroke-dasharray: 4 4; }
+.fnote { fill: var(--muted); font-size: 12px; text-anchor: middle; }
+.fd { cursor: pointer; outline: none; --c: var(--accent); }
+.fd .desk { fill: var(--surface-3); stroke: var(--c); stroke-width: 1.5; stroke-opacity: .7; }
+.fd .mat { fill: var(--c); fill-opacity: .1; } .fd .stand { stroke: var(--c); stroke-width: 2; }
+.fd .mon { fill: #0b1424; stroke: var(--c); stroke-width: 1.5; }
+.fd.st-working .mon { fill: var(--c); fill-opacity: .55; }
+.fd .head, .fd .body { fill: var(--c); }
+.fd .eye { fill: #0b1424; transform-box: fill-box; transform-origin: center; }
+.fd .mouth, .fd .ant { stroke: #0b1424; stroke-width: 1.8; stroke-linecap: round; }
+.fd .ant { stroke: var(--c); }
+.fd .light { fill: #6b7a94; stroke: var(--surface); stroke-width: 1; }
+.fd.st-working .light { fill: #ffd84d; } .fd.st-done .light { fill: #3ddc84; } .fd.st-finding .light { fill: #ff5c6c; }
+.fd.dim { opacity: .4; }
+.fd.blink .eye { transform: scaleY(.15); }
+.fd.sel .desk, .fd:focus-visible .desk { stroke-opacity: 1; stroke-width: 2.4; }
+.fd.st-working .robot { animation: fbob .6s ease-in-out infinite alternate; }
+@keyframes fbob { from { transform: translate(12px, -2px); } to { transform: translate(12px, -3.5px); } }
+.flabel { fill: var(--ink-2); font-size: 13px; font-weight: 600; text-anchor: middle; }
+.bub rect { fill: var(--surface-3); stroke: var(--line-strong); } .bub text { fill: var(--ink); font-size: 11px; text-anchor: middle; }
+.bub { transition: opacity .4s; } .bub.fade { opacity: 0; }
+.hud rect { fill: var(--surface); stroke: var(--line-strong); }
+.hud .ht { fill: var(--accent-2); font-size: 12px; font-weight: 700; } .hud .hr { fill: var(--ink-2); font-size: 12px; } .hud .red { fill: var(--crit); }
+@media (prefers-reduced-motion: reduce) { .fd .robot { animation: none !important; } .bub { transition: none; } }
 .swarm-side .cons { padding: 10px 12px; border-radius: var(--r-ctl); margin-bottom: 8px;
   background: var(--surface-2); border: 1px solid var(--line); font-size: 12.5px; }
 .cons .ok { color: var(--low); font-weight: 700; } .cons .no { color: var(--muted); }
@@ -381,9 +390,10 @@ code { background: var(--surface-3); padding: 1px 6px; border-radius: 5px; color
   .metric:nth-child(3) { border-left: 0; }
   .metric:nth-child(n+3) { border-top: 1px solid var(--line); }
   .grid { grid-template-columns: 1fr; } .span-2 { grid-column: auto; }
-  .swarm-wrap { grid-template-columns: 1fr; } .pin-body { grid-template-columns: 1fr; }
+  .swarm-wrap { grid-template-columns: minmax(0, 1fr); } .pin-body { grid-template-columns: 1fr; }
   .summary-body { grid-template-columns: 1fr; }
   .stage { transform: rotateX(30deg) rotateZ(-18deg); }
+  .grid > section { overflow-x: auto; }
   .topbar { padding: 0 16px; }
 }
 @media (max-width: 600px) {
@@ -412,7 +422,6 @@ code { background: var(--surface-3); padding: 1px 6px; border-radius: 5px; color
 .layer.active { box-shadow: 0 26px 34px -18px rgba(0,0,0,.55), 0 0 28px -4px var(--accent); }
 .beam { box-shadow: 0 0 10px var(--accent); }
 .logo::before { box-shadow: 0 0 12px -2px var(--accent); }
-.orbit .core { box-shadow: 0 0 0 6px var(--accent-soft), 0 0 36px -4px var(--accent); }
 .btn:not(.ghost):not(:disabled):hover { box-shadow: 0 0 22px -6px var(--accent); }
 
 /* 2a. HUD corner brackets on panels (inset so the 12px radius never clips them) */

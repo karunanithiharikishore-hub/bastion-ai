@@ -46,6 +46,21 @@ def test_quick_malicious_overrides_rules():
                b["verdict"]["decided_by"] == "ai-analyst" for b in res["incidents"])
 
 
+def test_quick_analyst_verdict_applies_to_top_incident_only():
+    paths = [SAMPLES, BENIGN_SAMPLES]          # two incidents in one case
+    run = lambda bb: analyzer.analyze(paths, backbone=bb, mode="quick", trace=False)
+    rules = run(None)
+    top = max(rules["incidents"], key=lambda b: b["score"])
+    other = next(b for b in rules["incidents"] if b["id"] != top["id"])
+    res = run(AnalystBackbone("likely-benign"))
+    by_id = {b["id"]: b for b in res["incidents"]}
+    assert len(by_id) == 2
+    assert by_id[top["id"]]["verdict"]["level"] == "likely-benign"
+    assert by_id[top["id"]]["verdict"]["decided_by"] == "ai-analyst"
+    assert by_id[other["id"]]["verdict"]["level"] == other["verdict"]["level"]
+    assert "decided_by" not in by_id[other["id"]]["verdict"]
+
+
 def test_quick_without_backbone_is_rules_only():
     res = _run(SAMPLES, None)
     assert res["ai_analysis"] is None and res["swarm"] is None

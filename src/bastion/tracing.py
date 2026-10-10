@@ -256,9 +256,19 @@ class Tracer:
                       parent.id if parent else None, attrs)
             self.spans.append(sp)
             self._stacks.setdefault(sp.thread, []).append(sp)
-            return sp
+        if sp.kind == "agent":
+            FEED.agent(sp, "deploy")
+        return sp
 
     def _close(self, sp: Span) -> None:
+        was_open = sp.end is None
+        try:
+            self._close_locked(sp)
+        finally:
+            if was_open and sp.kind == "agent":
+                FEED.agent(sp, "error" if sp.attributes.get("error") else "done")
+
+    def _close_locked(self, sp: Span) -> None:
         with self.lock:
             if sp.end is None:
                 sp.end = _now()
@@ -487,6 +497,155 @@ def _result_facts(result: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Live progress feed (GET /api/progress). In-memory, capped, never raises.
+# Agent spans give deploy/done/error; tool calls come from the API driver
+# directly and, in CLI mode, from <session>/events.jsonl lines the MCP server
+# subprocess appends and this process tails (watch/unwatch).
+# ---------------------------------------------------------------------------
+FEED_CAP = 2000
+_DETAIL_BAD = re.compile(r"[<>&\"'`]")
+
+
+def feed_detail(*parts) -> str | None:
+    """Short escape-safe plain text for the feed. Log-derived text is never echoed:
+    anything the injection scanner flags is withheld."""
+    try:
+        from .agents import injection
+        text = " ".join(str(p) for p in parts if p not in (None, ""))
+        text = " ".join(injection.sanitize(text, 400).split())
+        if not text:
+            return None
+        if injection.scan_text(text) or re.search(r"<\s*/?\s*script", text, re.I):
+            return "[flagged content withheld]"
+        return _DETAIL_BAD.sub("", text)[:120] or None
+    except Exception:
+        return None
+
+
+def args_detail(args) -> str | None:
+    if not isinstance(args, dict):
+        return None
+    return feed_detail(*(f"{k}={v}" for k, v in list(args.items())[:3]))
+
+
+class _Feed:
+    def __init__(self):
+        self.lock = threading.RLock()
+        self.seq = 0
+        self.reset_state()
+
+    def reset_state(self):
+        self.events, self.who, self.watched = [], {}, {}
+        self.running, self.mode, self.started = False, None, None
+        self.counts = {"agents_active": 0, "agents_total": 0, "tool_calls": 0, "findings": 0}
+
+    def begin(self, mode, started):
+        with self.lock:
+            self.reset_state()
+            self.running, self.started = True, started
+            self.mode = mode if mode in ("quick", "deep") else "deep"
+
+    def end(self):
+        self.poll()
+        with self.lock:
+            self.running = False
+
+    def emit(self, agent, kind, tool=None, detail=None, ts=None):
+        try:
+            with self.lock:
+                if self.started is None:
+                    return
+                tier, role = self.who.get(agent, (0, ""))
+                self.seq += 1
+                self.events.append({
+                    "seq": self.seq, "t": round((ts or _now()) - self.started, 3),
+                    "agent": agent, "tier": tier, "role": role, "kind": kind,
+                    "tool": tool, "detail": detail})
+                del self.events[:-FEED_CAP]
+                c = self.counts
+                if kind == "tool":
+                    c["tool_calls"] += 1
+                elif kind in ("finding", "verdict"):
+                    c["findings"] += 1
+        except Exception:
+            pass
+
+    def agent(self, sp, kind):
+        try:
+            a = sp.attributes
+            name = str(a.get("agent") or sp.name)
+            with self.lock:
+                if kind == "deploy":
+                    self.who[name] = (a.get("tier") if a.get("tier") in (0, 1, 2, 3) else 0,
+                                      feed_detail(a.get("role")) or "")
+                    self.counts["agents_total"] += 1
+                    self.counts["agents_active"] += 1
+                else:
+                    self.poll()   # its tool lines land before its done
+                    self.counts["agents_active"] = max(0, self.counts["agents_active"] - 1)
+                self.emit(name, kind,
+                          detail=feed_detail(a.get("error")) if kind == "error" else None)
+        except Exception:
+            pass
+
+    def tool(self, agent, name, ok=True, args=None, ts=None):
+        """One finished tool call; submit_finding / submit_verdict also file a finding."""
+        name = str(name)
+        self.emit(agent, "tool", tool=name, detail=args_detail(args) if ok else "failed", ts=ts)
+        if ok and name in ("submit_finding", "submit_verdict"):
+            args = args if isinstance(args, dict) else {}
+            self.emit(agent, "finding" if name == "submit_finding" else "verdict",
+                      tool=name, detail=feed_detail(args.get("title") or args.get("verdict")
+                                                    or args.get("level")), ts=ts)
+
+    # ---- CLI mode: tail the MCP server's events.jsonl ------------------------
+    def watch(self, path):
+        with self.lock:
+            self.watched[path] = 0
+
+    def unwatch(self, path):
+        self.poll()
+        with self.lock:
+            self.watched.pop(path, None)
+
+    def poll(self):
+        with self.lock:
+            for path, off in list(self.watched.items()):
+                try:
+                    with open(path, "rb") as fh:
+                        fh.seek(off)
+                        data = fh.read()
+                except OSError:
+                    continue
+                end = data.rfind(b"\n") + 1      # leave a half-written last line for next time
+                self.watched[path] = off + end
+                for line in data[:end].splitlines():
+                    try:
+                        r = json.loads(line)
+                        self.tool(str(r["agent"]), r["tool"], bool(r.get("ok")), r.get("args"),
+                                  ts=r.get("ts"))
+                    except (ValueError, KeyError, TypeError):
+                        continue
+
+    def snapshot(self, since=0):
+        self.poll()
+        with self.lock:
+            return {"running": self.running, "mode": self.mode,
+                    "started": _iso(self.started) if self.started else None,
+                    "events": [e for e in self.events if e["seq"] > since],
+                    "counts": dict(self.counts)}
+
+
+FEED = _Feed()
+
+
+def feed_event_line(agent, tool, ok, args) -> str:
+    """The line an MCP server subprocess appends to events.jsonl for one tool call."""
+    return json.dumps({"ts": _now(), "agent": agent, "tool": tool, "ok": ok,
+                       "args": {k: str(v)[:200] for k, v in list((args or {}).items())[:3]}}) + "\n"
+
+
+# ---------------------------------------------------------------------------
 # Active-tracer registry + module-level helpers (no-ops without a run)
 # ---------------------------------------------------------------------------
 _current: contextvars.ContextVar = contextvars.ContextVar("bastion_tracer", default=None)
@@ -526,6 +685,7 @@ def start_run(inputs=None, persist: bool | None = None, **attrs):
         if persist is None:
             persist = os.environ.get("BASTION_NO_TRACE", "") in ("", "0")
         t = Tracer(inputs, attrs, persist=persist)
+        FEED.begin(attrs.get("mode"), t.root.start)
         _current.set(t)
         with _active_lock:
             _active.append(t)
@@ -542,6 +702,7 @@ def end_run(tracer, result=None, error=None):
     except Exception:
         return None
     finally:
+        FEED.end()
         try:
             with _active_lock:
                 if tracer in _active:

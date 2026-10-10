@@ -31,6 +31,7 @@ import os
 import pickle
 import sys
 
+from .. import tracing
 from .dispatch import CommanderToolbox, FileDispatchClient
 from .toolbox import Blackboard, SecurityToolbox, BASE_TOOLS, file_slug
 
@@ -81,6 +82,13 @@ def handle(msg: dict, box: SecurityToolbox, out_path: str):
         text = box.call(params["name"], args)
         _flush(box, out_path)
         is_error = text.startswith('{"error"')
+        try:   # live feed: the parent tails this file (tracing.FEED.poll)
+            with open(os.path.join(os.path.dirname(out_path), "events.jsonl"), "a",
+                      encoding="utf-8") as fh:
+                fh.write(tracing.feed_event_line(box.agent_name, params["name"],
+                                                 not is_error, args))
+        except OSError:
+            pass
         result = {"content": [{"type": "text", "text": text}], "isError": is_error}
     else:
         return _error(mid, -32601, f"method not found: {method}")
