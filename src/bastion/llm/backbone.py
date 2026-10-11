@@ -18,7 +18,7 @@ runs every agent as an in-process tool loop (no ``claude`` process or MCP
 server per agent), and decoding is pinned to temperature 0. Without a key it
 uses the keyless CLI. The ``claude`` CLI exposes no temperature / seed /
 sampling option (checked against ``claude --help``, Claude Code 2.1.x), so CLI
-runs use the CLI's default sampling; see README "Repeatability & cost".
+runs use the CLI's default sampling; see docs/REFERENCE.md "Repeatability & cost".
 """
 from __future__ import annotations
 
