@@ -528,6 +528,7 @@ def _fallback_narrative(story: dict) -> str:
             techs = ", ".join(f"{t['id']} ({t['name']})" for t in p["techniques"])
             lines.append(f"  - {p['tactic']}: {techs} - first seen {p['first_seen']} ({p['count']} events).")
     lines.append(f"Likely objective: {story['likely_objective']}.")
-    lines.append("(Deterministic storyline: LLM backbone unavailable; enable "
-                 "`claude` CLI or ANTHROPIC_API_KEY for a narrative RCA.)")
+    # Shown for every rule-built storyline: quick mode, rules-only runs, or a failed model call.
+    lines.append("(Rule-based storyline. Quick analysis skips the AI-written narrative; "
+                 "run Deep investigation for one.)")
     return "\n".join(lines)
