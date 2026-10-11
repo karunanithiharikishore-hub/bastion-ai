@@ -177,8 +177,9 @@ function renderHero(r) {
   const host = $("hero"); host.innerHTML = "";
   const m = r.meta || {}, sw = r.swarm || { agent_count: 0 };
   const t = fmtTime((m.timing_ms || {}).total);
-  const agents = sw.worker_count ?? m.agents_deployed ?? sw.agent_count ?? 0;
-  host.appendChild(metric(agents, sw.orchestrator ? "Workers (+ Commander)" : "Agents Deployed", "v"));
+  const quick = m.mode === "quick";   // quick mode has no swarm: one AI analyst desk
+  const agents = quick ? 1 : sw.worker_count ?? m.agents_deployed ?? sw.agent_count ?? 0;
+  host.appendChild(metric(agents, quick ? "AI analyst" : sw.orchestrator ? "Workers (+ Commander)" : "Agents Deployed", "v"));
   const tm = el("div", "metric p"); const tv = el("div", "mval", "0"); tm.appendChild(tv);
   tm.appendChild(el("div", "mlbl", "Time to Deduce")); host.appendChild(tm);
   (function () { const dur = 900, t0 = performance.now();
@@ -189,7 +190,7 @@ function renderHero(r) {
   host.appendChild(metric((r.incidents || []).length, "Incidents", "g"));
   $("backbone").textContent = "backbone: " + (m.backbone || "unknown") + (m.mode ? " · " + m.mode + " mode" : "");
   $("hc-backbone").textContent = (m.backbone || "unknown").split(" ")[0];
-  $("hc-agents").textContent = esc(agents) + " deployed";
+  $("hc-agents").textContent = quick ? "1 AI analyst" : esc(agents) + " deployed";
   $("ver").textContent = "v" + (m.version || "");
 }
 
@@ -540,7 +541,8 @@ function floorFromReport(r) {
   stopPoll(); floorReset(); floor.report = r;
   const sw = r.swarm, roster = (sw && sw.roster) || [];
   if (!roster.length) {   // quick mode: only the analyst desk
-    floor.quick = true; const a = floorAgent("analyst", 0, "Quick analysis"); a.status = "done";
+    floor.quick = true; floor.counts = { agents_active: 1, agents_total: 1 };
+    const a = floorAgent("analyst", 0, "Quick analysis"); a.status = "done";
     a.findings = (r.incidents || []).map((i) => i.storyline.structured.incident_id);
   } else {
     const runs = new Map((sw.agent_runs || []).map((x) => [x.agent, x]));
@@ -720,3 +722,13 @@ $("hs-drop").addEventListener("click", () => {
   $("dropzone").classList.add("drag"); setTimeout(() => $("dropzone").classList.remove("drag"), 900);
 });
 $("hs-sample").addEventListener("click", () => $("loadsample").click());
+
+// mobile nav menu: button toggles the dropdown, Escape closes (no inline script, CSP-safe)
+(function menu() {
+  const b = document.getElementById("menu-btn"), bar = b && b.closest && b.closest(".topbar");
+  if (!bar) return;   // no menu on this page (or a non-DOM test harness)
+  const set = (o) => { bar.classList.toggle("open", o); b.setAttribute("aria-expanded", String(o)); };
+  b.addEventListener("click", () => set(b.getAttribute("aria-expanded") !== "true"));
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && bar.classList.contains("open")) { set(false); b.focus(); } });
+  bar.querySelectorAll(".topnav a").forEach((a) => a.addEventListener("click", () => set(false)));
+})();

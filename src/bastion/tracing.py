@@ -506,18 +506,22 @@ FEED_CAP = 2000
 _DETAIL_BAD = re.compile(r"[<>&\"'`]")
 
 
-def feed_detail(*parts) -> str | None:
+def feed_detail(*parts, limit: int = 120) -> str | None:
     """Short escape-safe plain text for the feed. Log-derived text is never echoed:
-    anything the injection scanner flags is withheld."""
+    anything the injection scanner flags is withheld. Stripping runs before the scan,
+    so quotes that split a phrase (ig'nore) cannot slip past it."""
     try:
         from .agents import injection
         text = " ".join(str(p) for p in parts if p not in (None, ""))
         text = " ".join(injection.sanitize(text, 400).split())
         if not text:
             return None
-        if injection.scan_text(text) or re.search(r"<\s*/?\s*script", text, re.I):
+        if re.search(r"<\s*/?\s*script", text, re.I):
             return "[flagged content withheld]"
-        return _DETAIL_BAD.sub("", text)[:120] or None
+        text = _DETAIL_BAD.sub("", text)
+        if injection.scan_text(text):
+            return "[flagged content withheld]"
+        return text[:limit] or None
     except Exception:
         return None
 
@@ -557,10 +561,10 @@ class _Feed:
                     return
                 tier, role = self.who.get(agent, (0, ""))
                 self.seq += 1
-                self.events.append({
+                self.events.append({   # names come from model/log text: same scrub as detail, 64 chars
                     "seq": self.seq, "t": round((ts or _now()) - self.started, 3),
-                    "agent": agent, "tier": tier, "role": role, "kind": kind,
-                    "tool": tool, "detail": detail})
+                    "agent": feed_detail(agent, limit=64), "tier": tier, "role": role, "kind": kind,
+                    "tool": feed_detail(tool, limit=64), "detail": detail})
                 del self.events[:-FEED_CAP]
                 c = self.counts
                 if kind == "tool":

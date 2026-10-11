@@ -488,7 +488,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Correlation window in minutes (default 60)")
     a.add_argument("--max-incidents", type=_positive_int, default=10, dest="max_incidents")
     a.add_argument("--no-agents", action="store_true", dest="no_agents",
-                   help="Skip the agent swarm (pipeline only)")
+                   help="No agents and no model calls: pipeline only (in quick mode this also skips the AI analyst)")
     a.add_argument("--mode", choices=["quick", "deep"], default="deep",
                    help="quick = rules + one AI analyst pass, no agent swarm (~20-60 s); "
                         "deep = commander + agent swarm + analyst (default; minutes)")

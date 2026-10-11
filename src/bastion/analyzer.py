@@ -10,6 +10,7 @@ specialists that verify and reconcile).
 """
 from __future__ import annotations
 
+import math
 from datetime import datetime, timezone
 
 from .ingest import ingest_paths
@@ -77,11 +78,17 @@ def _analyst_finding(ai):
     if review and not (review.get("_grounding") or {}).get("ok", True):
         return None
     try:
-        conf = float(review.get("confidence", lead.get("confidence", 0.0)))
+        conf = float(review.get("confidence", lead.get("confidence")))
     except (TypeError, ValueError):
-        conf = 0.0
+        return None   # no real confidence: the rule verdict stands
+    # The rationale comes from whichever agent produced the final verdict.
+    pick = (review.get("notes") or lead.get("headline")) if review.get("corrected_verdict") \
+        else (lead.get("headline") or review.get("notes"))
+    rationale = str(pick or "").strip()
+    if not math.isfinite(conf) or not rationale:
+        return None
     return {"status": "escalated" if final == "likely-malicious" else "dismissed",
-            "confidence": conf, "rationale": str(lead.get("headline") or review.get("notes") or "")}
+            "confidence": min(max(conf, 0.0), 1.0), "rationale": rationale}
 
 
 def _analyze(paths, *, source_override=None, window_minutes=60,
@@ -214,7 +221,7 @@ def _analyze(paths, *, source_override=None, window_minutes=60,
     # so without a model agent the scorer's verdict stands.
     tier2 = {}
     ai_analysis = None
-    if quick and llm_on:   # one grounded AI pass; its verdict is applied below like a Tier-2 one
+    if quick and llm_on and run_agents:   # one grounded AI pass; its verdict is applied below like a Tier-2 one
         tracing.stage("ai_analysis")
         ai_analysis = _safe_ai(events, iocs, backbone, [])
         ai_f = _analyst_finding(ai_analysis)
@@ -225,6 +232,12 @@ def _analyze(paths, *, source_override=None, window_minutes=60,
             top["verdict"] = apply_tier2_verdict(
                 top["verdict"], dict(ai_f, incident_id=top["id"]),
                 injection_events=inj, who="AI analyst", decided_by="ai-analyst")
+            v = top["verdict"]
+            if ai_f["status"] == "dismissed" and ai_f["confidence"] < 0.8 \
+                    and v["rule_verdict"]["level"] == "likely-malicious":
+                # a weak dismissal may not overrule a malicious rule verdict
+                top["verdict"] = dict(v, level="needs-review", overrides_rules=True,
+                                      headline="AI analyst leaned benign with low confidence; a human must review.")
     if swarm:
         tier2 = {f["incident_id"]: f for f in swarm["findings"]
                  if f["tier"] == 2 and f.get("origin") == "agent"}
@@ -294,7 +307,10 @@ def _analyze(paths, *, source_override=None, window_minutes=60,
                                             skip_idle_tier1=skip_idle_tier1,
                                             orchestration=(swarm or {}).get("orchestration"),
                                             commander_limits=commander_limits)
-                          if run_agents and llm_on else None),
+                          if run_agents and llm_on and not quick else
+                          ({"mode": "quick", "tier1_agents": 0, "tier2_runs": 0, "tier3_agents": 0,
+                            "agent_runs": 0, "processes": 2 if events else 0, "mcp_servers": 0,
+                            "max_turns": 0} if run_agents and llm_on else None)),
             "cache": cache_note,
             "mode": mode,
         },

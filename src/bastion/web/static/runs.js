@@ -191,3 +191,13 @@ function renderTree(run, host) {
 
 $("reload").addEventListener("click", load);
 load();
+
+// mobile nav menu: button toggles the dropdown, Escape closes (no inline script, CSP-safe)
+(function menu() {
+  const b = document.getElementById("menu-btn"), bar = b && b.closest && b.closest(".topbar");
+  if (!bar) return;   // no menu on this page (or a non-DOM test harness)
+  const set = (o) => { bar.classList.toggle("open", o); b.setAttribute("aria-expanded", String(o)); };
+  b.addEventListener("click", () => set(b.getAttribute("aria-expanded") !== "true"));
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && bar.classList.contains("open")) { set(false); b.focus(); } });
+  bar.querySelectorAll(".topnav a").forEach((a) => a.addEventListener("click", () => set(false)));
+})();

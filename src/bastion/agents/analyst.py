@@ -172,7 +172,7 @@ Return JSON with keys:
 def _extract_json(text: str):
     if not text:
         return None
-    dec = json.JSONDecoder()
+    dec = json.JSONDecoder(parse_constant=lambda c: None)   # NaN/Infinity -> null
     i = text.find("{")
     while i != -1:
         try:

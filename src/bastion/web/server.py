@@ -141,13 +141,14 @@ class _State:
     def run_analysis(self, mode=None) -> dict:
         if not self.warm_done.is_set():  # startup run in flight: share its result, no second paid run
             self.warm_done.wait()
-            return self.result
+            res = self.result  # reuse only if it matches the requested mode; failed startup -> run normally
+            if res and mode in (None, res.get("meta", {}).get("mode")):
+                return res
         with self.lock:
             return self._run(self.paths, self.window, mode=mode)
 
     def get_result(self, result_id):
-        with self.lock:
-            return self.results.get(result_id)
+        return self.results.get(result_id)  # dict get is atomic; must not wait on the analysis lock
 
     # ---- staged upload (scales to many / large files) ----------------------
     _ALLOWED_EXT = (".json", ".jsonl", ".ndjson", ".csv", ".tsv", ".log", ".txt", ".syslog",
@@ -339,7 +340,7 @@ def _make_handler(state: _State):
                 self.wfile.write(body)
 
         def _json(self, obj, code=200):
-            self._send(code, json.dumps(obj, default=str).encode("utf-8"),
+            self._send(code, json.dumps(obj, default=str, allow_nan=False).encode("utf-8"),
                        "application/json")
 
         def _request_allowed(self) -> bool:

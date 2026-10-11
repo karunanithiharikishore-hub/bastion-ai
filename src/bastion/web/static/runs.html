@@ -16,7 +16,13 @@
     .kpi .k { color: var(--muted); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
     .kpi .v { font-family: var(--mono); font-size: 22px; color: var(--ink); margin-top: 4px; }
     .kpi .n { color: var(--muted); font-size: 11px; margin-top: 2px; }
-    .tbl-wrap { overflow-x: auto; }
+    .tbl-wrap { overflow-x: auto; /* scroll-shadow fade hints at the clipped edges */
+      background: linear-gradient(90deg, var(--surface) 30%, transparent) left / 28px 100% no-repeat local,
+        linear-gradient(270deg, var(--surface) 30%, transparent) right / 28px 100% no-repeat local,
+        linear-gradient(90deg, var(--line-strong), transparent) left / 10px 100% no-repeat scroll,
+        linear-gradient(270deg, var(--line-strong), transparent) right / 10px 100% no-repeat scroll; }
+    @media (max-width: 1480px) { table.runs { font-size: 11.5px; } table.runs th, table.runs td { padding: 8px 6px; }
+      table.runs th { letter-spacing: .04em; } }
     table.runs { width: 100%; border-collapse: collapse; font-size: 12.5px; }
     table.runs th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11px;
       letter-spacing: .08em; text-transform: uppercase; padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
@@ -54,12 +60,13 @@
         <p class="tag">RUNS · COST · TRACES</p>
       </div>
     </div>
-    <nav class="topnav" aria-label="Sections">
+    <nav class="topnav" id="topnav" aria-label="Sections">
       <a href="index.html">Dashboard</a>
       <a href="#chart">Cost over time</a>
       <a href="#runs">Runs</a>
       <a href="#detail">Trace</a>
     </nav>
+    <button class="menu-btn" id="menu-btn" type="button" aria-expanded="false" aria-controls="topnav">Menu</button>
     <div class="head-right"><button id="reload" class="btn ghost tiny" type="button">Reload</button></div>
   </header>
 
