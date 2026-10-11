@@ -62,7 +62,7 @@ locally-run** analysis with grounding guarantees. See
 
 ## Screenshots
 
-*Bundled synthetic sample data, rules-only mode (`bastion serve samples --llm off`).*
+*Bundled synthetic sample data, rules-only deep mode (`bastion serve samples --llm off --mode deep`). With `--llm cli` the same floor animates live as the AI agents deploy, call tools and file findings.*
 
 | Drop logs & triage | Analyst verdict |
 |---|---|

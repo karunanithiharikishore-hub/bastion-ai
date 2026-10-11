@@ -5,17 +5,18 @@
 """Capture the README screenshots from a running dashboard (synthetic samples only).
 
     bastion serve samples --llm off --port 8787 &
-    python3 scripts/capture_screenshots.py docs/screenshots
+    python3 scripts/capture_screenshots.py docs/screenshots [url]
 
 Needs Playwright (`pip install playwright`) and Google Chrome.
 """
 import sys
 from playwright.sync_api import sync_playwright
 OUT = sys.argv[1]
+URL = sys.argv[2] if len(sys.argv) > 2 else "http://localhost:8787/"
 with sync_playwright() as p:
     b = p.chromium.launch(channel="chrome", headless=True)
     pg = b.new_page(viewport={"width": 1440, "height": 900}, device_scale_factor=2)
-    pg.goto("http://localhost:8787/", wait_until="networkidle")
+    pg.goto(URL, wait_until="networkidle")
     pg.wait_for_selector("#verdict:not(:empty)", timeout=60000)
     for y in range(0, 7000, 400):          # trigger scroll-reveal animations
         pg.evaluate(f"window.scrollTo(0,{y})"); pg.wait_for_timeout(150)
@@ -31,5 +32,5 @@ with sync_playwright() as p:
     shot("02-verdict.png", "#verdict")
     shot("03-summary.png", "#summary-panel")
     shot("04-storyline.png", "section:has(#stage-wrap)")
-    shot("05-swarm.png", "section:has(#orbit)")
+    shot("05-swarm.png", "#orbit")
     b.close()
