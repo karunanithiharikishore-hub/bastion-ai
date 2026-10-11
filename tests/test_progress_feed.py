@@ -39,6 +39,13 @@ def test_rules_only_run_emits_deploy_done_and_pages():
         assert code == 200 and snap["running"] is False and snap["mode"] == "deep"
         ev = snap["events"]
         kinds = [e["kind"] for e in ev]
+        stages = [e["detail"] for e in ev if e["kind"] == "stage"]
+        assert stages[0] == "parsing logs" and stages[1].startswith("parsed ") and stages[1].endswith(" events")
+        assert stages[2:] == ["mapping ATT&CK", "correlating incidents", "building storyline", "deploying agents"]
+        assert snap["stage"] == "deploying agents"
+        assert all(e["agent"] == "pipeline" and e["tier"] == 0 for e in ev if e["kind"] == "stage")
+        assert max(i for i, k in enumerate(kinds) if k == "stage") < kinds.index("deploy")
+        kinds = [k for k in kinds if k != "stage"]
         assert kinds.count("deploy") == kinds.count("done") >= 1
         assert [e["seq"] for e in ev] == sorted(e["seq"] for e in ev)
         c = snap["counts"]
@@ -60,6 +67,14 @@ def test_rules_only_run_emits_deploy_done_and_pages():
         assert conn.getresponse().status == 403
     finally:
         httpd.shutdown(); httpd.server_close(); state.close()
+
+
+def test_stage_is_null_before_any_stage():
+    tracing.FEED.begin("deep", time.time())
+    assert tracing.FEED.snapshot()["stage"] is None
+    tracing.feed_stage("parsing logs")
+    assert tracing.FEED.snapshot()["stage"] == "parsing logs"
+    tracing.FEED.end()
 
 
 def test_detail_is_sanitized():
@@ -124,7 +139,7 @@ def test_quick_mode_analyst_events():
     state.llm_mode = "auto"
     state.run_analysis()
     ev = tracing.FEED.snapshot()
-    assert ev["mode"] == "quick"
+    assert ev["mode"] == "quick" and ev["stage"] == "AI analyst reviewing"
     mine = [(e["kind"], e["tool"]) for e in ev["events"] if e["agent"] == "analyst"]
     assert mine[0][0] == "deploy" and ("tool", "complete") in mine
     assert mine[-1][0] == "done" and any(k == "verdict" for k, _ in mine)

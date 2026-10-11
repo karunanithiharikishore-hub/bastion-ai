@@ -637,10 +637,17 @@ class _Feed:
             return {"running": self.running, "mode": self.mode,
                     "started": _iso(self.started) if self.started else None,
                     "events": [e for e in self.events if e["seq"] > since],
-                    "counts": dict(self.counts)}
+                    "counts": dict(self.counts),
+                    "stage": next((e["detail"] for e in reversed(self.events)
+                                   if e["kind"] == "stage"), None)}
 
 
 FEED = _Feed()
+
+
+def feed_stage(detail):
+    """Announce a deterministic pipeline step (before any agent deploys) on the live feed."""
+    FEED.emit("pipeline", "stage", detail=detail)
 
 
 def feed_event_line(agent, tool, ok, args) -> str:

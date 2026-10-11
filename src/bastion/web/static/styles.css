@@ -311,6 +311,10 @@ main { padding: 8px 18px 56px; }
 .floor-svg { display: block; width: 100%; height: auto; min-width: 480px; font-family: var(--mono); }
 .fgrid line { stroke: var(--line-strong); stroke-opacity: .55; stroke-width: 1; }
 .flinks line { stroke: var(--line-strong); stroke-width: 1.2; stroke-dasharray: 4 4; }
+.fbanner rect { fill: var(--surface); stroke: var(--accent); stroke-opacity: .6; }
+.fbanner .ftitle { fill: var(--ink); font-size: 13px; font-weight: 600; }
+.fbanner .fstage { fill: var(--muted); font-size: 12px; }
+.fspin { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-dasharray: 22 22; transform-box: fill-box; transform-origin: center; animation: spin .8s linear infinite; }
 .fnote { fill: var(--muted); font-size: 12px; text-anchor: middle; }
 .fd { cursor: pointer; outline: none; --c: var(--accent); }
 .fd .desk { fill: var(--surface-3); stroke: var(--c); stroke-width: 1.5; stroke-opacity: .7; }

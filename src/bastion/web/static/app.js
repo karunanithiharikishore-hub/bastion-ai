@@ -150,7 +150,7 @@ async function analyzeUploads(mode) {
     $("status").innerHTML = '<span class="spinner"></span> ' + (mode === "deep"
       ? "deep investigation: AI agent team, takes several minutes…" : "quick analysis…")
       + " (" + files.length + " file(s))";
-    const data = await withPoll(postJSON("/api/stage/run", { token, window: win, mode }));
+    const data = await withPoll(postJSON("/api/stage/run", { token, window: win, mode }), mode);
     await mergeMetaAndRender(data);
     $("status").textContent = (mode === "deep" ? "deep investigation" : "quick analysis") + " complete";
     toast("Analyzed " + files.length + " file(s)");
@@ -416,7 +416,15 @@ const reduceMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matche
 const floorStatus = (a) => a.status === "finding" ? "filed a finding" : a.status;
 
 function floorReset() { floor.agents.clear(); floor.packets = []; floor.bubbles = []; floor.sel = null;
-  floor.quick = false; floor.note = ""; floor.counts = null; }
+  floor.quick = false; floor.note = ""; floor.counts = null; floor.prep = false; floor.stage = ""; floor.pmode = null; }
+/* A run just started: show the requested mode's empty layout (dimmed desks) under a "Preparing evidence" banner until the first agent event. */
+function floorPrep(mode) {
+  floor.agents.clear(); floor.pmode = mode; floor.prep = true; floor.quick = mode === "quick";
+  if (mode === "quick") floorAgent("analyst", 0, "Quick analysis");
+  else if (mode === "deep") { floorAgent("commander", 0, "Commander"); floorAgent("lead", 2, "Lead"); }
+  floor.agents.forEach((a) => { a.dim = true; });
+  drawFloor();
+}
 function floorAgent(id, tier, role) {
   let a = floor.agents.get(id);
   if (!a) { a = { id, name: id, role: role || "", tier: [0, 1, 2, 3].includes(tier) ? tier : 3, status: "idle",
@@ -435,7 +443,7 @@ function refreshHud() {
   if (!floor.hud) return;
   const all = [...floor.agents.values()], c = floor.counts || {};
   const active = c.agents_active != null ? c.agents_active : all.filter((a) => a.status === "working").length;
-  const total = c.agents_total != null ? c.agents_total : all.length;
+  const total = floor.prep ? "–" : c.agents_total != null ? c.agents_total : all.length;
   const tools = c.tool_calls != null ? c.tool_calls : all.reduce((s, a) => s + a.tools, 0);
   const uniq = new Set(all.flatMap((a) => a.findings)).size, finds = uniq || (c.findings != null ? c.findings : 0);
   floor.hud.title.textContent = "Investigation · " + (floor.live ? "live" : all.length ? "final" : "idle");
@@ -463,6 +471,14 @@ function drawFloor() {
   floorTier(3).forEach((a) => link(hub, a));
   if (!floor.agents.size) S("text", { x: L.W / 2, y: 200, class: "fnote" }, svg, floor.note || "Agents appear here while an analysis runs.");
   else if (floor.note) S("text", { x: L.W / 2, y: L.H - 6, class: "fnote" }, svg, floor.note);
+  floor.banner = null;
+  if (floor.prep) {   // over the floor: spinner + latest pipeline stage (text only, no animation under reduced motion)
+    const b = S("g", { class: "fbanner", role: "status", transform: `translate(${L.W / 2} 400)` }, svg);
+    S("rect", { x: -190, y: -34, width: 380, height: 68, rx: 10 }, b);
+    S("circle", { class: "fspin", cx: -160, cy: -8, r: 7 }, b);
+    S("text", { class: "ftitle", x: -142, y: -4 }, b, "Preparing evidence…");
+    floor.banner = S("text", { class: "fstage", x: -142, y: 16 }, b, floor.stage || "starting");
+  }
   L.nodes.forEach((n) => {
     const a = floor.agents.get(n.id), g = a.g = S("g", { transform: `translate(${n.x} ${n.y})`, tabindex: 0, role: "button" }, svg);
     g.style.setProperty("--c", TIER_COL[a.tier]);
@@ -519,8 +535,13 @@ function floorBubble(a, text) {
   setTimeout(() => { node.remove(); floor.bubbles = floor.bubbles.filter((k) => k !== rec); }, 1400);
 }
 function floorEvents(d) {
-  if (d.mode === "quick" && !floor.quick) { floor.quick = true; drawFloor(); }
+  if (floor.prep && !d.running) return;   // still the previous run's snapshot
+  if (floor.prep && d.mode !== floor.pmode) floorPrep(d.mode);
+  else if (d.mode === "quick" && !floor.quick) { floor.quick = true; drawFloor(); }
+  if (d.stage && d.stage !== floor.stage) { floor.stage = d.stage; if (floor.banner) floor.banner.textContent = d.stage; }
   (d.events || []).forEach((ev) => {
+    if (ev.kind === "stage") return;
+    if (floor.prep) { floor.agents.clear(); floor.prep = false; drawFloor(); }
     const a = floorAgent(String(ev.agent || "agent"), ev.tier, ev.role); if (ev.role && !a.role) a.role = String(ev.role);
     const cmd = floorTier(0)[0], lead = floorTier(2)[0], hub = lead || cmd;
     if (ev.kind === "deploy") { a.status = "working"; if (a.tier === 1) floorPacket(cmd || a, a); else if (a.tier === 3) floorPacket(hub || a, a); }
@@ -576,9 +597,9 @@ function renderSwarm(r) {
 
 /* live progress polling: GET /api/progress?since=<seq> every 1s while an analysis runs */
 const poll = { on: false, seq: 0, gen: 0, timer: null };
-function startPoll() {
+function startPoll(mode) {
   if (poll.on) return; poll.on = true; poll.seq = 0; const gen = ++poll.gen;
-  floorReset(); floor.live = true; floor.report = null; drawFloor(); renderSide();
+  floorReset(); floor.live = true; floor.report = null; floorPrep(mode); renderSide();
   (async function tick() {
     if (!poll.on || gen !== poll.gen) return;
     try {
@@ -593,8 +614,9 @@ function startPoll() {
     poll.timer = setTimeout(tick, 1000);
   })();
 }
-function stopPoll() { poll.on = false; clearTimeout(poll.timer); floor.live = false; refreshHud(); }
-const withPoll = (p) => { startPoll(); return p.finally(stopPoll); };
+function stopPoll() { poll.on = false; clearTimeout(poll.timer); floor.live = false; floor.prep = false;
+  if (floor.banner) { floor.banner.parentNode.remove(); floor.banner = null; } refreshHud(); }
+const withPoll = (p, mode) => { startPoll(mode); return p.finally(stopPoll); };
 setInterval(() => {   // gentle random eye blink
   if (reduceMotion() || document.hidden) return;
   const gs = [...floor.agents.values()].filter((a) => a.g); if (!gs.length) return;

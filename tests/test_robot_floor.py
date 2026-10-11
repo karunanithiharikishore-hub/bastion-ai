@@ -39,3 +39,10 @@ console.log(JSON.stringify(out));
             sep = a["x"] + a["w"] <= b["x"] or b["x"] + b["w"] <= a["x"] or a["y"] + a["h"] <= b["y"] or b["y"] + b["h"] <= a["y"]
             # a node's own label/bubble may touch its own node box edge; everything else must be clear
             assert sep or n1.split(":")[0] == n2.split(":")[0], (n1, n2)
+
+
+def test_preparing_banner_wired_statically():
+    # no DOM harness: check the reset/banner/HUD hooks exist and the banner only uses textContent
+    assert "Preparing evidence" in APP_JS and 'ev.kind === "stage"' in APP_JS
+    assert "Agents active ${active}/${total}" in APP_JS and '"–"' in APP_JS
+    assert ".fbanner" in (STATIC / "styles.css").read_text()

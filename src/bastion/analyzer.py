@@ -129,10 +129,13 @@ def _analyze(paths, *, source_override=None, window_minutes=60,
     import time
     _t0 = time.perf_counter()
     tracing.stage("ingest")
+    tracing.feed_stage("parsing logs")
     events = ingest_paths(paths, source_override)
     ingested = len(events)
+    tracing.feed_stage(f"parsed {ingested:,} events")
 
     tracing.stage("normalize+attack")
+    tracing.feed_stage("mapping ATT&CK")
     events = normalize(events)
     map_attack(events)
     # Log text that tries to instruct the AI analyst is itself a signal: tag it
@@ -140,6 +143,7 @@ def _analyze(paths, *, source_override=None, window_minutes=60,
     injection.tag_events(events)
 
     tracing.stage("compress+correlate")
+    tracing.feed_stage("correlating incidents")
     digest = compress(events, max_lines=max_digest_lines)
     incidents = correlate(events, window_minutes=window_minutes)
     incidents_total = len(incidents)
@@ -189,6 +193,7 @@ def _analyze(paths, *, source_override=None, window_minutes=60,
                                           run_meta={"events_ingested": ingested})
 
     tracing.stage("storyline", incidents=len(incidents))
+    tracing.feed_stage("building storyline")
     incident_blocks = []
     for inc in incidents:
         # Per-incident digest keeps the LLM focused and token-lean.
@@ -208,6 +213,8 @@ def _analyze(paths, *, source_override=None, window_minutes=60,
     story_ms = int((_t_story - _t0) * 1000)
 
     tracing.stage("swarm")
+    if run_agents and (llm_on or not quick):
+        tracing.feed_stage("AI analyst reviewing" if quick else "deploying agents")
     swarm = None
     _t_swarm0 = time.perf_counter()
     if run_agents and not quick:
