@@ -30,3 +30,6 @@ bastion = ["web/static/*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[project.urls]
+Homepage = "https://github.com/karunanithiharikishore-hub/bastion-ai"

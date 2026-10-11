@@ -1,6 +1,50 @@
-# Bastion AI — Blue-Team Log Intelligence
+# Bastion AI — Your AI fortress of security analysts
 
 > Built by **Harikishore Karunanithi** · Copyright (c) 2026 · MIT.
+
+**Drop your security logs in. Get a SOC team's verdict out.** Bastion AI turns
+the Claude Code you already have on your Mac into a team of AI security
+analysts: a SOC lead, junior analysts per log source, a senior verifier and
+seven specialists (incident responder, forensics, threat hunter, malware,
+threat intel, security architect, vulnerability analyst). They investigate
+your logs together and hand back a verdict, the attack storyline, IOCs and an
+IR report — every claim checked against the actual log lines.
+
+### Highlights
+
+- **No API key needed on a Mac with Claude Code.** `--llm cli` runs every
+  agent as its own `claude -p` session using your existing Claude Code login.
+- **Local and read-only.** Your logs stay on your machine; Bastion never
+  touches your environment. Raw logs are distilled before any model sees them.
+- **Two modes.** *Quick analysis* (rules + one AI analyst, about a minute) and
+  *Deep investigation* (Incident Commander deploys the full agent swarm).
+- **Live dashboard.** Drag and drop logs into the browser and watch the agent
+  floor work in real time: who is deployed, which tools they call, what they find.
+- **Grounded, not hallucinated.** Findings must cite real event ids; any IP,
+  domain or hash an agent mentions must exist in your logs or it is rejected.
+- **Prompt-injection aware.** Logs are treated as hostile data; planted
+  "ignore previous instructions" lines are flagged, never obeyed.
+- **Many sources, one story.** EDR, Windows Security (CSV/XML), syslog, DNS,
+  firewall (ASA, CEF, LEEF), CloudTrail, Microsoft 365 / Entra sign-ins and
+  audit logs — correlated across sources into scored incidents mapped to
+  MITRE ATT&CK.
+- **Works with no model at all.** `--llm off` gives the full rules pipeline
+  (ATT&CK, correlation, IOCs, storyline) with zero dependencies.
+
+### 60-second start (macOS + Claude Code)
+
+```bash
+git clone https://github.com/karunanithiharikishore-hub/bastion-ai.git
+cd bastion-ai
+pip3 install -e .
+bastion serve samples --llm cli --open
+```
+
+Then drop your own log files onto the page and press **QUICK ANALYSIS** or
+**DEEP INVESTIGATION**. Requires Python 3.10+ and the `claude` CLI logged in
+(run `bastion info` to check which backbone it found).
+
+---
 
 **What it is:** a local, read-only pipeline that lets you point an LLM (Claude)
 at **gigabytes of messy, multi-source security logs** and get back a **grounded,
@@ -427,7 +471,8 @@ the MIT license + copyright, not a runtime kill switch.
 ## Install
 
 ```bash
-cd bastion
+git clone https://github.com/karunanithiharikishore-hub/bastion-ai.git
+cd bastion-ai
 pip install -e .            # installs the `bastion` command
 # or run without installing:
 export PYTHONPATH=src && python -m bastion --help
@@ -458,7 +503,7 @@ bastion info
 | `quick` (dashboard default) | rules pipeline (ingest, ATT&CK, correlate, IOCs, RCA storyline) + **one** AI analyst pass (lead + reviewer, grounded). The analyst's grounded confirm/dismiss sets the incident verdict ("AI analyst confirmed..."); needs-review or ungrounded answers leave the rules verdict; injection-flagged logs can never be called benign. No agent swarm. | rules in milliseconds, about 20-60 s with a model |
 | `deep` (CLI default) | full flow: Incident Commander + agent swarm + analyst | several minutes |
 
-With no backbone (`--llm off` or unavailable) quick mode is rules only. `bastion analyze --mode quick|deep`; `bastion serve --mode quick|deep` sets the default, the dashboard has an ANALYZE (quick) and a DEEP INVESTIGATION button, and `POST /api/stage/run`, `/api/upload` and `/api/refresh` accept `"mode"`. The mode is part of the run-cache key.
+With no backbone (`--llm off` or unavailable) quick mode is rules only. `bastion analyze --mode quick|deep`; `bastion serve --mode quick|deep` sets the default, the dashboard has a QUICK ANALYSIS and a DEEP INVESTIGATION button, and `POST /api/stage/run`, `/api/upload` and `/api/refresh` accept `"mode"`. The mode is part of the run-cache key.
 
 ## Web dashboard
 
