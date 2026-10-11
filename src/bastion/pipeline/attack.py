@@ -161,85 +161,102 @@ def _tag(ev, tid: str, reason: str) -> None:
 
 def map_attack(events: list) -> list:
     """Annotate each event in-place with ATT&CK technique IDs. Returns events."""
+    memo: dict = {}   # exports repeat the same message on many rows: run the rules once per distinct input
     for ev in events:
-        msg = (ev.message or "").lower()
-        act = (ev.action or "").lower()
-        proc = (ev.process or "").lower()
-
-        # Credential access — failed logins. A success that merely mentions an
-        # earlier failure ("accepted ... after 1 failed attempt") is not one.
-        success = _is_auth_success(ev)
-        if ev.category == "authentication" and not success and (_FAIL_RE.search(act) or _FAIL_RE.search(msg)):
-            _tag(ev, "T1110", "auth-failure")
-        if success:
-            ev.tags.append("auth:success")
-
-        # DNS-based C2 / DGA / suspicious TLD.
-        if ev.category == "dns" and ev.domain:
-            dom = ev.domain.lower()
-            if any(dom.endswith(t) for t in _SUS_TLDS):
-                _tag(ev, "T1071.004", "suspicious-tld")
-            if _looks_dga(dom):
-                _tag(ev, "T1568", "dga-like")
-
-        # Execution via LOLBins / scripting.
-        if proc:
-            for lol in _LOLBINS:
-                if lol in proc:
-                    _tag(ev, "T1059", f"lolbin:{lol}")
-                    if "powershell" in lol:
-                        _tag(ev, "T1059.001", "powershell")
-                    break
-        if "powershell" in msg and ("downloadstring" in msg or _PS_EXEC_RE.search(msg)):
-            _tag(ev, "T1059.001", "encoded-powershell")
-
-        # Ingress tool transfer.
-        if _TOOL_DL_RE.search(msg):
-            _tag(ev, "T1105", "tool-download")
-
-        # Ransomware impact signals.
-        if _RANSOM_EXT_RE.search(msg) or _RANSOM_NOTE_RE.search(msg) or ev.file_path and any(
-            (ev.file_path or "").lower().endswith(ext) for ext in _RANSOM_EXT):
-            _tag(ev, "T1486", "ransom-artifact")
-        if "vssadmin" in msg and "delete" in msg or "shadowcopy" in msg and "delete" in msg:
-            _tag(ev, "T1490", "shadow-copy-delete")
-
-        # Persistence.
-        # Creating/changing a scheduled job, not the scheduler running one
-        # ("CRON[123]: (root) CMD (run-parts /etc/cron.hourly)" is routine).
-        if _SCHED_RE.search(msg) or _SCHED_RE.search(act):
-            _tag(ev, "T1053", "scheduled-task")
-        if _SERVICE_RE.search(msg) or _SERVICE_RE.search(act):
-            _tag(ev, "T1543", "new-service")
-        if any(t in msg or t in act for t in ("net user /add", "create account", "createuser")) \
-                or proc in ("useradd", "adduser") or _USERADD_RE.search(msg) or _USERADD_RE.search(act) \
-                or _NET_ADD_RE.search(msg) or _NET_ADD_RE.search(act):
-            _tag(ev, "T1136", "account-created")
-        if proc == "usermod" and msg.startswith("add "):  # "add 'evil' to group 'sudo'"
-            _tag(ev, "T1098", "group-membership")
-
-        # Lateral movement.
-        if _REMOTE_RE.search(msg) or _REMOTE_RE.search(proc):
-            _tag(ev, "T1021", "remote-service")
-        elif ev.category == "network" and ev.dst_port in _REMOTE_PORTS and _ALLOWED_RE.search(act) \
-                and not _TEARDOWN_RE.search(act + " " + msg) and _is_private(ev.dst_ip):
-            _tag(ev, "T1021", f"remote-port:{ev.dst_port}")
-
-        # Defense evasion — disabling/stopping a security product or service
-        # (not "account was disabled" from Microsoft-Windows-Security-Auditing).
-        if _IMPAIR_RE.search(msg):
-            _tag(ev, "T1562", "impair-defenses")
-
-        # Cloud account manipulation.
-        if ev.category == "cloud_api" and any(
-            t in act for t in ("createuser", "createaccesskey", "putuserpolicy", "attachuserpolicy")):
-            _tag(ev, "T1098", "cloud-account-manip")
-
-        # Exfiltration heuristics.
-        if ev.category == "network" and _EXFIL_RE.search(msg) or "large transfer" in msg:
-            _tag(ev, "T1048", "possible-exfil")
-
-        for tid, reason, rx in _RULES:
-            if rx.search(msg) or rx.search(act):
+        key = (ev.category, ev.action, ev.message, ev.process, ev.domain, ev.file_path, ev.dst_port, ev.dst_ip)
+        delta = memo.get(key)
+        if delta is None:
+            n = len(ev.tags)
+            _map_one(ev)
+            memo[key] = tuple(ev.tags[n:])
+            continue
+        for t in delta:
+            if t.startswith("attack:"):
+                _, tid, reason = t.split(":", 2)
                 _tag(ev, tid, reason)
+            else:
+                ev.tags.append(t)
     return events
+
+
+def _map_one(ev) -> None:
+    msg = (ev.message or "").lower()
+    act = (ev.action or "").lower()
+    proc = (ev.process or "").lower()
+
+    # Credential access — failed logins. A success that merely mentions an
+    # earlier failure ("accepted ... after 1 failed attempt") is not one.
+    success = _is_auth_success(ev)
+    if ev.category == "authentication" and not success and (_FAIL_RE.search(act) or _FAIL_RE.search(msg)):
+        _tag(ev, "T1110", "auth-failure")
+    if success:
+        ev.tags.append("auth:success")
+
+    # DNS-based C2 / DGA / suspicious TLD.
+    if ev.category == "dns" and ev.domain:
+        dom = ev.domain.lower()
+        if any(dom.endswith(t) for t in _SUS_TLDS):
+            _tag(ev, "T1071.004", "suspicious-tld")
+        if _looks_dga(dom):
+            _tag(ev, "T1568", "dga-like")
+
+    # Execution via LOLBins / scripting.
+    if proc:
+        for lol in _LOLBINS:
+            if lol in proc:
+                _tag(ev, "T1059", f"lolbin:{lol}")
+                if "powershell" in lol:
+                    _tag(ev, "T1059.001", "powershell")
+                break
+    if "powershell" in msg and ("downloadstring" in msg or _PS_EXEC_RE.search(msg)):
+        _tag(ev, "T1059.001", "encoded-powershell")
+
+    # Ingress tool transfer.
+    if _TOOL_DL_RE.search(msg):
+        _tag(ev, "T1105", "tool-download")
+
+    # Ransomware impact signals.
+    if _RANSOM_EXT_RE.search(msg) or _RANSOM_NOTE_RE.search(msg) or ev.file_path and any(
+        (ev.file_path or "").lower().endswith(ext) for ext in _RANSOM_EXT):
+        _tag(ev, "T1486", "ransom-artifact")
+    if "vssadmin" in msg and "delete" in msg or "shadowcopy" in msg and "delete" in msg:
+        _tag(ev, "T1490", "shadow-copy-delete")
+
+    # Persistence.
+    # Creating/changing a scheduled job, not the scheduler running one
+    # ("CRON[123]: (root) CMD (run-parts /etc/cron.hourly)" is routine).
+    if _SCHED_RE.search(msg) or _SCHED_RE.search(act):
+        _tag(ev, "T1053", "scheduled-task")
+    if _SERVICE_RE.search(msg) or _SERVICE_RE.search(act):
+        _tag(ev, "T1543", "new-service")
+    if any(t in msg or t in act for t in ("net user /add", "create account", "createuser")) \
+            or proc in ("useradd", "adduser") or _USERADD_RE.search(msg) or _USERADD_RE.search(act) \
+            or _NET_ADD_RE.search(msg) or _NET_ADD_RE.search(act):
+        _tag(ev, "T1136", "account-created")
+    if proc == "usermod" and msg.startswith("add "):  # "add 'evil' to group 'sudo'"
+        _tag(ev, "T1098", "group-membership")
+
+    # Lateral movement.
+    if _REMOTE_RE.search(msg) or _REMOTE_RE.search(proc):
+        _tag(ev, "T1021", "remote-service")
+    elif ev.category == "network" and ev.dst_port in _REMOTE_PORTS and _ALLOWED_RE.search(act) \
+            and not _TEARDOWN_RE.search(act + " " + msg) and _is_private(ev.dst_ip):
+        _tag(ev, "T1021", f"remote-port:{ev.dst_port}")
+
+    # Defense evasion — disabling/stopping a security product or service
+    # (not "account was disabled" from Microsoft-Windows-Security-Auditing).
+    if _IMPAIR_RE.search(msg):
+        _tag(ev, "T1562", "impair-defenses")
+
+    # Cloud account manipulation.
+    if ev.category == "cloud_api" and any(
+        t in act for t in ("createuser", "createaccesskey", "putuserpolicy", "attachuserpolicy")):
+        _tag(ev, "T1098", "cloud-account-manip")
+
+    # Exfiltration heuristics.
+    if ev.category == "network" and _EXFIL_RE.search(msg) or "large transfer" in msg:
+        _tag(ev, "T1048", "possible-exfil")
+
+    for tid, reason, rx in _RULES:
+        if rx.search(msg) or rx.search(act):
+            _tag(ev, tid, reason)

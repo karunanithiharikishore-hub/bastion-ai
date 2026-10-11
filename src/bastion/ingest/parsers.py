@@ -21,6 +21,17 @@ from ..models import Event
 
 # ---- helpers ---------------------------------------------------------------
 
+_LOWER_CACHE: list = [None, 0, None]   # [dict, len, lowered]: parsers call _get ~16x per record
+
+
+def _lowered(d: dict) -> dict:
+    # shortcut: staleness check is identity + length, not content; fine as parsers don't mutate records.
+    c = _LOWER_CACHE
+    if c[0] is not d or c[1] != len(d):
+        c[0], c[1], c[2] = d, len(d), {str(k).lower(): v for k, v in d.items() if k is not None}
+    return c[2]
+
+
 def _get(d: dict, *keys, default=None):
     """Return the first present, non-empty value among keys (case-insensitive).
 
@@ -28,7 +39,7 @@ def _get(d: dict, *keys, default=None):
     ``None`` key (csv.DictReader restkey), so keys are stringified before
     lowercasing to avoid AttributeError on non-string keys.
     """
-    lower = {str(k).lower(): v for k, v in d.items() if k is not None}
+    lower = _lowered(d)
     for k in keys:
         v = lower.get(str(k).lower())
         if v is None and "." in str(k):

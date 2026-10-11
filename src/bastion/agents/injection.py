@@ -37,6 +37,7 @@ import html
 import re
 import secrets
 import unicodedata
+from functools import lru_cache
 from urllib.parse import unquote
 
 # ---------------------------------------------------------------------------
@@ -268,6 +269,7 @@ _CONFUSABLES = str.maketrans(
     "aeopcxyijsdqvAEOPCXYIJSBKMHTaeopyvitkxABEZHIKMNOPTYX")
 _JSON_ESC_RE = re.compile(r"\\u([0-9a-fA-F]{4})|\\x([0-9a-fA-F]{2})|\\[nrt]")
 _SEP_RE = re.compile(r"(?<=[A-Za-z])[_.\-/]+(?=[A-Za-z])")
+_WS_RE = re.compile(r"[ \t]+")
 _SPACED_RE = re.compile(r"\b(?:[A-Za-z] ){2,}[A-Za-z]\b")
 
 
@@ -292,7 +294,7 @@ def _normalize(text: str, strip: bool = True) -> str:
         s = _ANSI_RE.sub("", s)
         s = _STRIP_RE.sub("", s) if strip else s
         s = unicodedata.normalize("NFKC", s).translate(_CONFUSABLES)
-        return re.sub(r"[ \t]+", " ", s)
+        return _WS_RE.sub(" ", s)
 
     d = text
     for _ in range(3):  # bounded: double/triple URL-encoding, entities inside escapes
@@ -301,13 +303,20 @@ def _normalize(text: str, strip: bool = True) -> str:
             break
         d = n
     out = clean(text)
+    cd = clean(d) if d != text else out
     if d != text:
-        out += " " + clean(d)
-    folded = _SPACED_RE.sub(lambda m: m.group(0).replace(" ", ""), _SEP_RE.sub(" ", clean(d)))
-    return out + " " + folded if folded != clean(d) else out
+        out += " " + cd
+    folded = _SPACED_RE.sub(lambda m: m.group(0).replace(" ", ""), _SEP_RE.sub(" ", cd))
+    return out + " " + folded if folded != cd else out
+
+
+_GZ_RE = re.compile(r"[g-zG-Z]")
 
 
 def _phrases(norm: str, out: list) -> None:
+    # Every phrase pattern spells a word with a letter in g-z, so GUIDs, hex and timestamps skip them all.
+    if norm.isascii() and not _GZ_RE.search(norm):
+        return
     for code, cat, rx in _PATTERNS:
         m = rx.search(norm)
         if m:
@@ -373,6 +382,13 @@ def scan_text(text, *, categories=None, _depth: int = 0) -> list:
     text = str(text)
     if not text.strip():
         return []
+    # Exports repeat the same field values on every row: scan each distinct value once.
+    cats = None if categories is None else frozenset(categories)
+    return [dict(h) for h in _scan_cached(text, cats, _depth)]
+
+
+@lru_cache(maxsize=1 << 14)
+def _scan_cached(text, categories, _depth):
     hits: list = []
     if _STRIP_RE.search(text) and _hidden_hides_phrase(text):
         hits.append({"code": "hidden-characters", "category": "hidden",
@@ -386,9 +402,12 @@ def scan_text(text, *, categories=None, _depth: int = 0) -> list:
     norm = _normalize(text)
     _phrases(norm, hits)
     if _depth < 2:
-        b64 = _B64_RE.findall(norm) + [re.sub(r"\s+", "", m) for m in _B64_WRAPPED_RE.findall(norm)]
+        # Blobs need 24+ chars (wrapped base64 needs a newline): skip the three scans on short fields.
+        longish = len(norm) >= 24
+        b64 = (_B64_RE.findall(norm) if longish else []) + (
+            [re.sub(r"\s+", "", m) for m in _B64_WRAPPED_RE.findall(norm)] if "\n" in norm else [])
         for name, blobs, decode in (("base64", b64, _decode_b64),
-                                    ("hex", _HEX_RE.findall(norm), _decode_hex)):
+                                    ("hex", _HEX_RE.findall(norm) if longish else [], _decode_hex)):
             for blob in blobs[:50]:
                 decoded = decode(blob)
                 if not decoded:
@@ -408,7 +427,7 @@ def scan_text(text, *, categories=None, _depth: int = 0) -> list:
             continue
         seen.add(h["code"])
         out.append(h)
-    return out
+    return tuple(out)
 
 
 def is_injection(hits) -> bool:
@@ -456,16 +475,23 @@ def _raw_strings(obj) -> tuple:
     return out, True
 
 
+_CLEAN: set = set()   # short strings already scanned with no hits
+_CLEAN_MAX = 1 << 17
+
+
 def scan_event(e) -> list:
     """Injection hits across an event's fields and its raw source record."""
     texts = [getattr(e, f, None) for f in _EVENT_FIELDS]
     raw_texts, complete = _raw_strings(getattr(e, "raw", None) or {})
     texts += raw_texts
     seen, out = set(), []
-    for t in texts:
-        if not t:
+    for t in dict.fromkeys(str(t) for t in texts if t):   # repeated values within a record scan once
+        if t in _CLEAN:
             continue
-        for h in scan_text(t):
+        hits = scan_text(t)
+        if not hits and len(_CLEAN) < _CLEAN_MAX and len(t) <= 256:
+            _CLEAN.add(t)   # column names and enum values repeat on every row
+        for h in hits:
             if h["code"] not in seen:
                 seen.add(h["code"])
                 out.append(h)
